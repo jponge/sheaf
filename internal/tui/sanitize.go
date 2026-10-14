@@ -1,0 +1,36 @@
+package tui
+
+import (
+	"strings"
+	"unicode"
+)
+
+// sanitize replaces control characters (C0, DEL, C1, including newlines and
+// ESC) with U+FFFD so that caller-provided text cannot inject terminal escape
+// sequences or extra lines into a view.
+func sanitize(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return unicode.ReplacementChar
+		}
+		return r
+	}, s)
+}
+
+// dropControl removes control characters, e.g. newlines from pasted filter
+// text.
+func dropControl(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// deleteLastWord removes trailing whitespace and the word before it, like
+// ctrl+w in a shell.
+func deleteLastWord(s string) string {
+	s = strings.TrimRightFunc(s, unicode.IsSpace)
+	return s[:strings.LastIndexFunc(s, unicode.IsSpace)+1]
+}
