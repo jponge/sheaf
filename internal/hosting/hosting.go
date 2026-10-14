@@ -12,7 +12,7 @@ import (
 
 // ErrNotFound is returned (wrapped) when an owner, repository or pull request
 // does not exist. The Fake knows this for certain; the gh adapter infers it
-// heuristically from gh's stderr ("Could not resolve to a ...") for Repo and PR,
+// from gh's stderr (messages verified against real gh output),
 // and always keeps the stderr text in the error message.
 var ErrNotFound = errors.New("not found")
 

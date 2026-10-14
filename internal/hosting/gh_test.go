@@ -266,7 +266,7 @@ func TestGHListReposLimit(t *testing.T) {
 func TestGHFailureSurfacesStderr(t *testing.T) {
 	cases := map[string]string{
 		"not authenticated": "To get started with GitHub CLI, please run:  gh auth login",
-		"org not found":     "GraphQL: Could not resolve to an Organization with the login of 'nope'.",
+		"org not found":     `the owner handle "nope-sheaf-probe-xyz" was not recognized as either a GitHub user or an organization`,
 	}
 	for name, msg := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -358,12 +358,12 @@ func TestGHFailureWithEmptyStderrHasNoDanglingColon(t *testing.T) {
 }
 
 func TestGHNotFoundMapped(t *testing.T) {
-	gql := func(what, detail string) string {
-		return "GraphQL: Could not resolve to a " + what + " " + detail
-	}
-	repoMsg := gql("Repository", "with the name 'o/n'. (repository)")
-	prMsg := gql("PullRequest", "with the number of 42. (repository.pullRequest)")
-	ownerMsg := gql("RepositoryOwner", "with the login of 'nope'. (repositoryOwner)")
+	// Exact stderr recorded from a real gh (testdata/real_*.json were recorded alongside).
+	const (
+		repoMsg  = "GraphQL: Could not resolve to a Repository with the name 'jponge/nope-sheaf-probe'. (repository)"
+		prMsg    = "GraphQL: Could not resolve to a PullRequest with the number of 999999. (repository.pullRequest)"
+		ownerMsg = `the owner handle "nope-sheaf-probe-xyz" was not recognized as either a GitHub user or an organization`
+	)
 	path, _ := stubGH(t, map[string]resp{
 		"repo view": {stderr: repoMsg, code: 1},
 		"pr view":   {stderr: prMsg, code: 1},
@@ -371,9 +371,9 @@ func TestGHNotFoundMapped(t *testing.T) {
 	})
 	gh := NewGH(GHOptions{Path: path, Protocol: "ssh"})
 	ctx := context.Background()
-	_, err1 := gh.Repo(ctx, "o", "n")
-	_, err2 := gh.PR(ctx, "o", "n", 42)
-	_, err3 := gh.ListRepos(ctx, "nope")
+	_, err1 := gh.Repo(ctx, "jponge", "nope-sheaf-probe")
+	_, err2 := gh.PR(ctx, "jponge", "boiler-vroom", 999999)
+	_, err3 := gh.ListRepos(ctx, "nope-sheaf-probe-xyz")
 	for i, c := range []struct {
 		err error
 		msg string
@@ -386,6 +386,57 @@ func TestGHNotFoundMapped(t *testing.T) {
 	path, _ = stubGH(t, map[string]resp{"repo view": {stderr: "HTTP 502", code: 1}})
 	if _, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).Repo(ctx, "o", "n"); errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// Characterization tests against output recorded from a real gh.
+
+func TestGHRealRepoList(t *testing.T) {
+	path, _ := stubGH(t, map[string]resp{"repo list": {fixture: "real_repo_list.json"}})
+	repos, err := NewGH(GHOptions{Path: path, Protocol: "https"}).ListRepos(context.Background(), "smallrye")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Repo{
+		Owner: "smallrye", Name: "smallrye-mutiny-zero",
+		CloneURL:      "https://github.com/smallrye/smallrye-mutiny-zero.git",
+		HTTPSURL:      "https://github.com/smallrye/smallrye-mutiny-zero.git",
+		SSHURL:        "git@github.com:smallrye/smallrye-mutiny-zero.git",
+		DefaultBranch: "main", Description: "Zero-dependency Reactive Streams publishers library",
+	}
+	if len(repos) != 2 || repos[0] != want || repos[1].Name != "smallrye-mutiny-vertx-bindings" {
+		t.Fatalf("repos = %+v", repos)
+	}
+}
+
+func TestGHRealRepoView(t *testing.T) {
+	path, _ := stubGH(t, map[string]resp{"repo view": {fixture: "real_repo_view.json"}})
+	r, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).Repo(context.Background(), "jponge", "boiler-vroom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Repo{
+		Owner: "jponge", Name: "boiler-vroom",
+		CloneURL:      "git@github.com:jponge/boiler-vroom.git",
+		HTTPSURL:      "https://github.com/jponge/boiler-vroom.git",
+		SSHURL:        "git@github.com:jponge/boiler-vroom.git",
+		DefaultBranch: "master", Archived: true, Description: "Fun is fun, powered by Vert.x.",
+	}
+	if r != want {
+		t.Fatalf("got %+v\nwant %+v", r, want)
+	}
+}
+
+func TestGHRealPR(t *testing.T) {
+	path, _ := stubGH(t, map[string]resp{"pr view": {fixture: "real_pr_same.json"}})
+	p, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).PR(context.Background(), "smallrye", "smallrye-mutiny", 2219)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := PR{Number: 2219, HeadBranch: "dependabot/maven/patch-61b64efc95", HeadOwner: "smallrye",
+		HeadRepo: "smallrye-mutiny", URL: "https://github.com/smallrye/smallrye-mutiny/pull/2219"}
+	if p != want {
+		t.Fatalf("got %+v\nwant %+v", p, want)
 	}
 }
 

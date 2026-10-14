@@ -83,11 +83,26 @@ func childEnv() []string {
 	return append(env, "GH_PROMPT_DISABLED=1", "NO_COLOR=1", "GH_PAGER=cat", "CLICOLOR_FORCE=0")
 }
 
-// notFoundMarker is the stable prefix of the GraphQL errors gh prints for a
-// missing repository, pull request or owner (for instance "GraphQL: Could not
-// resolve to a Repository with the name 'o/n'."). The exact strings have not
-// been verified against a logged-in gh; only this prefix is matched.
-const notFoundMarker = "Could not resolve to a"
+// notFoundMarkers are substrings of the stderr gh prints for a missing
+// repository, pull request or owner. Verified against real gh output on
+// 2026-10-14 (the gh version on the recording machine is unknown):
+//
+//	repo view: GraphQL: Could not resolve to a Repository with the name 'o/n'. (repository)
+//	pr view:   GraphQL: Could not resolve to a PullRequest with the number of 999999. (repository.pullRequest)
+//	repo list: the owner handle "x" was not recognized as either a GitHub user or an organization
+var notFoundMarkers = []string{
+	"Could not resolve to a",
+	"was not recognized as either a GitHub user or an organization",
+}
+
+func isNotFound(stderr string) bool {
+	for _, m := range notFoundMarkers {
+		if strings.Contains(stderr, m) {
+			return true
+		}
+	}
+	return false
+}
 
 func (g *GH) run(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, g.opts.Path, args...)
@@ -107,7 +122,7 @@ func (g *GH) run(ctx context.Context, args ...string) ([]byte, error) {
 		}
 		msg := strings.TrimSpace(stderr.String())
 		wrapped := err
-		if strings.Contains(msg, notFoundMarker) {
+		if isNotFound(msg) {
 			wrapped = fmt.Errorf("%w: %w", ErrNotFound, err)
 		}
 		if msg == "" {
