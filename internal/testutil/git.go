@@ -64,6 +64,10 @@ func IsolateGit(t *testing.T) {
 	gpgsign = false
 [core]
 	hooksPath = /dev/null
+[maintenance]
+	auto = false
+[gc]
+	auto = 0
 `
 	if err := os.WriteFile(cfg, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
