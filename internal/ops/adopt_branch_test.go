@@ -97,7 +97,7 @@ func TestAdoptFeatureBranchWithExistingLinkedWorktrees(t *testing.T) {
 	dir := filepath.Join(f.w.Root, "p")
 	plainClone(t, o, dir)
 	testutil.Git(t, dir, "checkout", "-q", "feat/x")
-	ext := filepath.Join(t.TempDir(), "ext")
+	ext := filepath.Join(resolved(t, t.TempDir()), "ext")
 	testutil.Git(t, dir, "worktree", "add", "-q", ext, "main")
 
 	if _, err := adopt(t, f, dir, AdoptOptions{}); err != nil {
@@ -161,7 +161,7 @@ func TestAdoptLaidOutRenamesPrimaryToDefaultBranchDir(t *testing.T) {
 	testutil.Git(t, dev, "checkout", "-q", "dev")
 	writeFile(t, filepath.Join(dev, "wip.txt"), "dirty is fine\n")
 	testutil.Git(t, dev, "worktree", "add", "-q", "../feat", "feat")
-	ext := filepath.Join(t.TempDir(), "ext")
+	ext := filepath.Join(resolved(t, t.TempDir()), "ext")
 	testutil.Git(t, dev, "worktree", "add", "-q", ext, "other")
 	writeFile(t, filepath.Join(dev, ".git", "info", "exclude"), ".wt/\n")
 	testutil.Git(t, dev, "worktree", "add", "-q", "-b", "nested", ".wt/nested", "origin/main")

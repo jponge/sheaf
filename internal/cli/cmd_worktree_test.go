@@ -20,6 +20,9 @@ func wtBundle(t *testing.T) (*env, string) {
 	e.mustRun(t, "create", root)
 	e.cwd = root
 	e.mustRun(t, "add", "o/a", "o/b")
+	// e.cwd keeps the path as given (it may go through a symbolic link);
+	// sheaf reports resolved paths (bundle.Find), like git.
+	root, _ = filepath.EvalSymlinks(root)
 	return e, root
 }
 

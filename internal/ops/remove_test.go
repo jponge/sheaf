@@ -179,7 +179,7 @@ func TestRemoveNeverDeletesOutsideTheRepositoryDirectory(t *testing.T) {
 	t.Run("worktree outside", func(t *testing.T) {
 		f := newFixture(t)
 		primary, _ := f.clonedRepo(t, "a")
-		outside := filepath.Join(t.TempDir(), "wt")
+		outside := filepath.Join(resolved(t, t.TempDir()), "wt")
 		testutil.Git(t, primary, "worktree", "add", "-q", outside, "feat")
 		_, err := f.remove(t, "a", true, yes)
 		var re *RisksError

@@ -39,6 +39,7 @@ func staleNested(t *testing.T, parent, rel string) string {
 
 func TestDeletionRisksBeforeNestedHookSeesFreshRemoteState(t *testing.T) {
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
+	dir = resolved(t, dir) // git, hence the hook, sees resolved paths
 	writeFile(t, dir, ".git/info/exclude", "vendor/\n")
 	n := staleNested(t, dir, "vendor/lib")
 	inner := staleNested(t, n, "deps/inner")

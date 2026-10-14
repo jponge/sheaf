@@ -26,6 +26,9 @@ func pruneBundle(t *testing.T) (*env, string, testutil.Origin) {
 	e.mustRun(t, "add", "o/a")
 	e.mustRun(t, "wt", "add", "a", "feat")
 	testutil.Git(t, o.Path, "branch", "-q", "-D", "feat")
+	// e.cwd keeps the path as given (it may go through a symbolic link);
+	// sheaf reports resolved paths (bundle.Find), like git.
+	root, _ = filepath.EvalSymlinks(root)
 	return e, root, o
 }
 
@@ -181,6 +184,9 @@ func prBundle(t *testing.T) (*env, string) {
 	e.mustRun(t, "create", root)
 	e.cwd = root
 	e.mustRun(t, "add", "o/a")
+	// e.cwd keeps the path as given (it may go through a symbolic link);
+	// sheaf reports resolved paths (bundle.Find), like git.
+	root, _ = filepath.EvalSymlinks(root)
 	return e, root
 }
 

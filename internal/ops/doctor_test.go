@@ -154,7 +154,7 @@ func TestDoctorRepositoryProblems(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(root, "d", "feat")); err != nil {
 		t.Fatal(err)
 	}
-	outside := filepath.Join(t.TempDir(), "elsewhere")
+	outside := filepath.Join(resolved(t, t.TempDir()), "elsewhere")
 	testutil.Git(t, dPrimary, "worktree", "add", "-q", "-b", "far", outside)
 	stale := filepath.Join(dPrimary, ".git", "index.lock")
 	writeFile(t, stale, "")

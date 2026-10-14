@@ -30,7 +30,7 @@ func TestBranchesInUse(t *testing.T) {
 	for _, b := range []string{"feat", "rb", "bis", "free"} {
 		testutil.Git(t, dir, "branch", "--track", b, "origin/"+b)
 	}
-	base := filepath.Dir(dir)
+	base := resolved(t, filepath.Dir(dir))
 	featWT, rbWT, bisWT, goneWT := filepath.Join(base, "feat"), filepath.Join(base, "rb"), filepath.Join(base, "bis"), filepath.Join(base, "gone")
 	testutil.Git(t, dir, "worktree", "add", "-q", featWT, "feat")
 	testutil.Git(t, dir, "worktree", "add", "-q", rbWT, "rb")

@@ -364,7 +364,7 @@ func TestDeleteBranchCheckedOutElsewhereReportedInPlan(t *testing.T) {
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	p := f.mustAddWT(t, "a", "x").Path
-	other := filepath.Join(t.TempDir(), "other")
+	other := filepath.Join(resolved(t, t.TempDir()), "other")
 	testutil.Git(t, primary, "worktree", "add", "-q", "-f", other, "x")
 	var plan WorktreeRemovePlan
 	msg, err := f.rmWTT(t, "a", WorktreeTarget{Name: "x", Kind: TargetDir}, WorktreeRemoveOptions{DeleteBranch: true,

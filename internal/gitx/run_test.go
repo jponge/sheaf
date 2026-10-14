@@ -143,6 +143,7 @@ func TestStrippedEnvCoversGitLocalEnvVars(t *testing.T) {
 // recognized and its path exposed.
 func TestStaleLockPath(t *testing.T) {
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
+	dir = resolved(t, dir) // git reports lock paths with symlinks resolved
 	ctx := context.Background()
 
 	refLock := filepath.Join(dir, ".git", "refs", "remotes", "origin", "main.lock")
