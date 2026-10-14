@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jponge/sheaf/internal/testutil"
@@ -153,6 +154,7 @@ func TestRiskKindString(t *testing.T) {
 		RiskTagOnlyCommits:        "commits only reachable from local tags",
 		RiskIgnoredFiles:          "ignored files",
 		RiskHiddenModifications:   "hidden modifications (skip-worktree or assume-unchanged files)",
+		RiskUnverifiable:          "files that could not be verified",
 		RiskKind(0):               "RiskKind(0)",
 	} {
 		if got := k.String(); got != want {
@@ -231,14 +233,14 @@ func TestRiskScopeAndSafeToRemoveWorktree(t *testing.T) {
 	repoWide := map[RiskKind]bool{
 		RiskStaged: false, RiskUnstaged: false, RiskConflicted: false, RiskUntracked: false,
 		RiskStash: true, RiskUnpushedBranchCommits: true, RiskDetachedCommits: false,
-		RiskTagOnlyCommits: true, RiskIgnoredFiles: false, RiskHiddenModifications: false,
+		RiskTagOnlyCommits: true, RiskIgnoredFiles: false, RiskHiddenModifications: false, RiskUnverifiable: false,
 	}
 	for k, want := range repoWide {
 		if got := k.RepositoryWide(); got != want {
 			t.Errorf("%v.RepositoryWide() = %v, want %v", k, got, want)
 		}
 	}
-	repoOnly := []Risk{{RiskStash, 1}, {RiskUnpushedBranchCommits, 2}, {RiskTagOnlyCommits, 1}, {RiskIgnoredFiles, 3}}
+	repoOnly := []Risk{{Kind: RiskStash, Count: 1}, {Kind: RiskUnpushedBranchCommits, Count: 2}, {Kind: RiskTagOnlyCommits, Count: 1}, {Kind: RiskIgnoredFiles, Count: 3}}
 	if !SafeToRemoveWorktree(repoOnly) {
 		t.Errorf("SafeToRemoveWorktree(%v) = false", repoOnly)
 	}
@@ -248,9 +250,144 @@ func TestRiskScopeAndSafeToRemoveWorktree(t *testing.T) {
 	if !SafeToRemoveWorktree(nil) {
 		t.Error("SafeToRemoveWorktree(nil) = false")
 	}
-	for _, k := range []RiskKind{RiskStaged, RiskUnstaged, RiskConflicted, RiskUntracked, RiskDetachedCommits, RiskHiddenModifications} {
-		if rs := append([]Risk{{k, 1}}, repoOnly...); SafeToRemoveWorktree(rs) {
+	for _, k := range []RiskKind{RiskStaged, RiskUnstaged, RiskConflicted, RiskUntracked, RiskDetachedCommits, RiskHiddenModifications, RiskUnverifiable} {
+		if rs := append([]Risk{{Kind: k, Count: 1}}, repoOnly...); SafeToRemoveWorktree(rs) {
 			t.Errorf("SafeToRemoveWorktree(%v) = true", rs)
 		}
+	}
+}
+
+// flag marks paths skip-worktree (flag "skip") or assume-unchanged ("assume").
+func flag(t *testing.T, dir, mode string, paths ...string) {
+	t.Helper()
+	opt := "--skip-worktree"
+	if mode == "assume" {
+		opt = "--assume-unchanged"
+	}
+	testutil.Git(t, dir, append([]string{"update-index", opt, "--"}, paths...)...)
+}
+
+// A blob committed with CRLF content stays CRLF in the index when text=auto or
+// core.autocrlf=true is configured later: status is clean, but `git
+// hash-object` (which does not consult the index) would convert the work-tree
+// file to LF and report a different id. Not a modification.
+func TestHiddenModificationsCRLFBlobIsNotAModification(t *testing.T) {
+	for name, setup := range map[string]func(t *testing.T, dir string){
+		"text=auto attribute": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, ".git"), "info/attributes", "* text=auto\n")
+		},
+		"core.autocrlf=true": func(t *testing.T, dir string) {
+			testutil.Git(t, dir, "config", "core.autocrlf", "true")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, dir := cloneOrigin(t, testutil.OriginOpts{})
+			testutil.CommitFile(t, dir, "crlf.txt", "a\r\nb\r\n", "crlf blob")
+			testutil.CommitFile(t, dir, "other.txt", "x\r\ny\r\n", "second crlf blob")
+			testutil.Git(t, dir, "push", "-q", "origin", "main")
+			setup(t, dir)
+			flag(t, dir, "skip", "crlf.txt")
+			flag(t, dir, "assume", "other.txt")
+			// Premise: git is happy, yet hash-object disagrees with the index.
+			if st := mustStatus(t, dir); st.Dirty() {
+				t.Fatal("precondition: status is not clean")
+			}
+			idx := testutil.Git(t, dir, "ls-files", "-s", "crlf.txt")
+			if got := testutil.Git(t, dir, "hash-object", "--", "crlf.txt"); strings.Contains(idx, got) {
+				t.Fatalf("precondition: hash-object agrees with the index (%s)", got)
+			}
+			wantRisks(t, mustRisks(t, dir), nil)
+
+			// A genuine modification is still detected.
+			writeFile(t, dir, "crlf.txt", "changed\r\nlines\r\n")
+			wantRisks(t, mustRisks(t, dir), map[RiskKind]int{RiskHiddenModifications: 1})
+			writeFile(t, dir, "other.txt", "changed\n")
+			wantRisks(t, mustRisks(t, dir), map[RiskKind]int{RiskHiddenModifications: 2})
+		})
+	}
+}
+
+// With core.symlinks=false git checks a symlink out as a regular file holding
+// the link target; that is not a modification.
+func TestHiddenModificationsSymlinkCheckedOutAsFile(t *testing.T) {
+	_, dir := cloneOrigin(t, testutil.OriginOpts{Commits: 1})
+	if err := os.Symlink("file-1.txt", filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Git(t, dir, "add", "link")
+	testutil.Git(t, dir, "commit", "-q", "-m", "link")
+	testutil.Git(t, dir, "push", "-q", "origin", "main")
+	testutil.Git(t, dir, "config", "core.symlinks", "false")
+	if err := os.Remove(filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "link", "file-1.txt")
+	flag(t, dir, "skip", "link")
+	if fi, err := os.Lstat(filepath.Join(dir, "link")); err != nil || !fi.Mode().IsRegular() {
+		t.Fatalf("precondition: link is not a regular file (%v, %v)", fi, err)
+	}
+	wantRisks(t, mustRisks(t, dir), nil)
+	writeFile(t, dir, "link", "elsewhere")
+	wantRisks(t, mustRisks(t, dir), map[RiskKind]int{RiskHiddenModifications: 1})
+}
+
+// Hashing goes through `git hash-object --stdin-paths`, which is
+// newline-separated, strips a trailing CR and unquotes a leading double quote:
+// such paths must still be compared correctly.
+func TestHiddenModificationsAwkwardPaths(t *testing.T) {
+	_, dir := cloneOrigin(t, testutil.OriginOpts{})
+	names := []string{"new\nline.txt", "trailing-cr\r", "\"quoted.txt", "plain.txt", "sp ace.txt", "unié.txt"}
+	for _, n := range names {
+		testutil.CommitFile(t, dir, n, "orig "+n+"\n", "add")
+	}
+	testutil.Git(t, dir, "push", "-q", "origin", "main")
+	flag(t, dir, "skip", names...)
+	wantRisks(t, mustRisks(t, dir), nil)
+	for i, n := range names {
+		writeFile(t, dir, n, "changed\n")
+		wantRisks(t, mustRisks(t, dir), map[RiskKind]int{RiskHiddenModifications: i + 1})
+	}
+}
+
+// A required clean filter that cannot run (Git LFS not installed) makes the
+// content of flagged files unverifiable, not DeletionRisks fail.
+func TestHiddenModificationsRequiredFilterMissing(t *testing.T) {
+	for name, clean := range map[string]string{"no command": "", "command not found": "sheaf-no-such-binary clean %f"} {
+		t.Run(name, func(t *testing.T) {
+			_, dir := cloneOrigin(t, testutil.OriginOpts{})
+			testutil.CommitFile(t, dir, "same.lfs", "pointer one\n", "lfs 1")
+			testutil.CommitFile(t, dir, "edited.lfs", "pointer two\n", "lfs 2")
+			testutil.CommitFile(t, dir, "plain.txt", "plain\n", "plain")
+			testutil.Git(t, dir, "push", "-q", "origin", "main")
+			flag(t, dir, "skip", "same.lfs", "edited.lfs", "plain.txt")
+			writeFile(t, filepath.Join(dir, ".git"), "info/attributes", "*.lfs filter=lfs\n")
+			testutil.Git(t, dir, "config", "filter.lfs.required", "true")
+			if clean != "" {
+				testutil.Git(t, dir, "config", "filter.lfs.clean", clean)
+			}
+
+			// Unmodified files are recognised without any filter.
+			wantRisks(t, mustRisks(t, dir), nil)
+
+			writeFile(t, dir, "edited.lfs", "locally edited\n")
+			r, err := DeletionRisks(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("DeletionRisks failed instead of reporting the file: %v", err)
+			}
+			wantRisks(t, r, map[RiskKind]int{RiskUnverifiable: 1})
+			if r[0].Detail == "" || !strings.Contains(r[0].Detail, "lfs") {
+				t.Errorf("Detail = %q, want the reason (mentioning the filter)", r[0].Detail)
+			}
+			if s := r[0].String(); !strings.Contains(s, "could not be verified") || !strings.Contains(s, r[0].Detail) {
+				t.Errorf("String() = %q", s)
+			}
+			if SafeToDelete(r) || SafeToRemoveWorktree(r) || r[0].Informational() || r[0].Kind.RepositoryWide() {
+				t.Errorf("unverifiable files must block and be work-tree-local: %v", r)
+			}
+
+			// A plain modification elsewhere is still counted as such.
+			writeFile(t, dir, "plain.txt", "changed\n")
+			wantRisks(t, mustRisks(t, dir), map[RiskKind]int{RiskUnverifiable: 1, RiskHiddenModifications: 1})
+		})
 	}
 }

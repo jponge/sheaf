@@ -9,8 +9,11 @@ import (
 
 // procGroup is a no-op outside Unix: exec.CommandContext kills only the git
 // process on cancellation.
-type procGroup struct{}
+type procGroup struct{ cmd *exec.Cmd }
 
-func startGroup(*exec.Cmd, time.Duration) *procGroup { return &procGroup{} }
+func startGroup(cmd *exec.Cmd, _ time.Duration) *procGroup { return &procGroup{cmd: cmd} }
+
+// kill kills the git process (only) and reports whether it succeeded.
+func (pg *procGroup) kill() bool { return pg.cmd.Process.Kill() == nil }
 
 func (*procGroup) finish() {}

@@ -2,6 +2,7 @@ package gitx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -82,6 +83,27 @@ type PullResult struct {
 	Err error
 }
 
+// FastForwardOptions tunes FastForwardWithOptions and PullFFOnlyWithOptions.
+// The zero value gives the behaviour of FastForward and PullFFOnly.
+type FastForwardOptions struct {
+	// MergeTimeout bounds the merge (see FastForward). Zero means
+	// DefaultMergeTimeout; a negative value is treated like zero.
+	MergeTimeout time.Duration
+	// Force, when non-nil and closed while the merge runs (or before it
+	// starts), kills the merge's whole process group with SIGKILL immediately
+	// (on platforms without process groups, only the git process). The result
+	// is PullFailed with an Err matching ErrForceKilled and New set to the
+	// observed HEAD. Unlike the timeout, which sends SIGTERM first, SIGKILL
+	// does not let git remove its lock files: .git/index.lock may be left
+	// behind (see StaleLockPath), and the work tree may be half-written.
+	// Closing Force after the merge has finished has no effect.
+	Force <-chan struct{}
+}
+
+// DefaultMergeTimeout is the bound on the merge of FastForward and
+// PullFFOnly.
+const DefaultMergeTimeout = 10 * time.Minute
+
 // PullFFOnly is Fetch followed by FastForward, for a single checkout. The
 // cheap preconditions (detached, dirty, no or gone upstream) are checked
 // first, so a work tree that would be skipped is not fetched either.
@@ -92,15 +114,24 @@ type PullResult struct {
 //
 // Cancellation: ctx interrupts the pre-checks and the fetch (outcome
 // PullFailed, Err matching ctx.Err()), but not the merge once FastForward has
-// started it; see FastForward.
+// started it: the merge runs to completion or for up to DefaultMergeTimeout
+// (10 minutes), whatever ctx does. Callers that must be able to abort sooner
+// need a hard-abort path: use PullFFOnlyWithOptions with a Force channel. See
+// FastForward.
 func PullFFOnly(ctx context.Context, dir string) PullResult {
+	return PullFFOnlyWithOptions(ctx, dir, FastForwardOptions{})
+}
+
+// PullFFOnlyWithOptions is PullFFOnly with the options of FastForwardWithOptions
+// (the fetch is not affected by them; it is cancelled through ctx).
+func PullFFOnlyWithOptions(ctx context.Context, dir string, opts FastForwardOptions) PullResult {
 	if r, ok := preCheck(ctx, dir, false); !ok {
 		return r
 	}
 	if err := Fetch(ctx, dir); err != nil {
 		return PullResult{Outcome: PullFailed, Err: err}
 	}
-	return FastForward(ctx, dir)
+	return FastForwardWithOptions(ctx, dir, opts)
 }
 
 // FastForward fast-forwards the branch checked out in dir to the local
@@ -120,31 +151,51 @@ func PullFFOnly(ctx context.Context, dir string) PullResult {
 //
 // Cancellation: ctx is honoured only before the merge starts (the Status
 // pre-check). Once started, the merge runs to completion on a context
-// detached from ctx's cancellation and bounded by mergeTimeout instead,
-// because interrupting the checkout of a fast-forward leaves HEAD moved and
-// the work tree and index half-updated, which then looks like local
-// modifications. A merge that completes is reported as PullFastForwarded (or
-// PullUpToDate) with a nil Err even if ctx was cancelled meanwhile: the
-// update did happen, and callers can consult ctx.Err() themselves. The
-// re-reads after the merge also ignore ctx's cancellation. Hooks run by the
-// merge (post-merge, post-checkout) are part of it.
+// detached from ctx's cancellation and bounded by DefaultMergeTimeout (10
+// minutes) instead, because interrupting the checkout of a fast-forward
+// leaves the work tree and index half-updated, which then looks like local
+// modifications. (HEAD is not moved by an interrupted merge: git updates the
+// branch ref only after the index and work tree were updated, so an
+// interruption leaves HEAD where it was, with a possibly half-written work
+// tree; HEAD can only have moved if the merge got further, e.g. when a
+// post-merge hook hangs.) A merge that completes is reported as
+// PullFastForwarded (or PullUpToDate) with a nil Err even if ctx was
+// cancelled meanwhile: the update did happen, and callers can consult
+// ctx.Err() themselves. The re-reads after the merge also ignore ctx's
+// cancellation. Hooks run by the merge (post-merge, post-checkout) are part
+// of it.
+//
+// Because the merge outlives ctx, callers must provide a hard-abort path
+// instead of waiting up to ten minutes: FastForwardWithOptions with a Force
+// channel kills the merge immediately (sheaf's CLI does so on a second
+// Ctrl-C).
 //
 // When the merge fails, HEAD is re-read so that New reflects the observed
 // HEAD; New is empty only if HEAD could not be read. If the merge exceeded
-// mergeTimeout, its process group is killed as described in Run, the outcome
+// its timeout, its process group is killed as described in Run, the outcome
 // is PullFailed with an Err matching context.DeadlineExceeded, and New may
 // differ from Old if git had already moved HEAD (e.g. a hook hung). A merge
 // failure due to divergence that appeared after the precheck (a concurrent
 // Fetch) is reported as PullSkippedDiverged.
 func FastForward(ctx context.Context, dir string) PullResult {
+	return FastForwardWithOptions(ctx, dir, FastForwardOptions{})
+}
+
+// FastForwardWithOptions is FastForward with a configurable merge timeout and
+// a hard-abort channel; see FastForwardOptions.
+func FastForwardWithOptions(ctx context.Context, dir string, opts FastForwardOptions) PullResult {
 	r, ok := preCheck(ctx, dir, true)
 	if !ok {
 		return r
 	}
 	old := r.Old
-	mctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), mergeTimeout)
+	timeout := opts.MergeTimeout
+	if timeout <= 0 {
+		timeout = mergeTimeout
+	}
+	mctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
-	_, mergeErr := Run(mctx, dir, "merge", "--quiet", "--ff-only", "--no-autostash", "@{upstream}")
+	_, mergeErr := run(mctx, runOpts{force: opts.Force}, dir, "merge", "--quiet", "--ff-only", "--no-autostash", "@{upstream}")
 	// From here on, ctx's cancellation is ignored (see above).
 	rctx, rcancel := context.WithTimeout(context.WithoutCancel(ctx), rereadTimeout)
 	defer rcancel()
@@ -153,7 +204,7 @@ func FastForward(ctx context.Context, dir string) PullResult {
 		if err != nil {
 			return PullResult{Outcome: PullFailed, Old: old, Err: mergeErr}
 		}
-		if mctx.Err() == nil && after.Head == old && after.Ahead > 0 && after.Behind > 0 {
+		if mctx.Err() == nil && !errors.Is(mergeErr, ErrForceKilled) && after.Head == old && after.Ahead > 0 && after.Behind > 0 {
 			return PullResult{Outcome: PullSkippedDiverged, Old: old, New: old}
 		}
 		return PullResult{Outcome: PullFailed, Old: old, New: after.Head, Err: mergeErr}
@@ -179,10 +230,10 @@ func FastForward(ctx context.Context, dir string) PullResult {
 	return PullResult{Outcome: PullFastForwarded, Old: old, New: newHead}
 }
 
-// mergeTimeout bounds the merge of FastForward, which ignores the caller's
-// cancellation. It is a variable only so that tests can shorten it; it must
-// not be changed while FastForward runs.
-var mergeTimeout = 10 * time.Minute
+// mergeTimeout is the default bound on the merge of FastForward, which ignores
+// the caller's cancellation. It is a variable only so that tests can shorten
+// it; it must not be changed while FastForward runs.
+var mergeTimeout = DefaultMergeTimeout
 
 // rereadTimeout bounds the HEAD re-reads after the merge.
 const rereadTimeout = 5 * time.Second

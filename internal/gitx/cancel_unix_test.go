@@ -378,3 +378,132 @@ func TestPullFFOnlyCompletesWhenCancelledDuringCheckout(t *testing.T) {
 	}
 	wantCleanFastForward(t, dir, r)
 }
+
+// closeWhenRecorded closes ch once pidfile exists and is non-empty (the
+// hanging helper is running), i.e. while the merge is in progress.
+func closeWhenRecorded(pidfile string, ch chan struct{}) {
+	go func() {
+		defer close(ch)
+		for i := 0; i < 2000; i++ {
+			if fi, err := os.Stat(pidfile); err == nil && fi.Size() > 0 {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+}
+
+// wantForceKilled checks the common post-conditions of a merge killed through
+// FastForwardOptions.Force while MergeTimeout (20s) was far away.
+func wantForceKilled(t *testing.T, elapsed time.Duration, r PullResult, pidfile string) {
+	t.Helper()
+	if elapsed > 3*time.Second {
+		t.Errorf("returned %v after Force was closed, want promptly", elapsed)
+	}
+	if r.Outcome != PullFailed {
+		t.Errorf("outcome = %v (err %v), want failed", r.Outcome, r.Err)
+	}
+	if !errors.Is(r.Err, ErrForceKilled) {
+		t.Errorf("err = %v, want ErrForceKilled", r.Err)
+	}
+	wantProcessesGone(t, pidfile)
+}
+
+// Review 2c, item 5: closing Force kills the merge's process group at once.
+func TestFastForwardWithOptionsForceKillsMergeMidCheckout(t *testing.T) {
+	dir, pidfile := slowSmudgeClone(t)
+	if err := Fetch(context.Background(), dir); err != nil {
+		t.Fatal(err)
+	}
+	old := head(t, dir)
+	force := make(chan struct{})
+	closeWhenRecorded(pidfile, force)
+	start := time.Now()
+	r := FastForwardWithOptions(context.Background(), dir, FastForwardOptions{MergeTimeout: 20 * time.Second, Force: force})
+	wantForceKilled(t, time.Since(start), r, pidfile)
+	// An interrupted fast-forward leaves HEAD where it was.
+	if h := head(t, dir); h != old || r.Old != old || r.New != old {
+		t.Errorf("HEAD = %s, result old=%s new=%s, want all %s", h, r.Old, r.New, old)
+	}
+}
+
+func TestFastForwardWithOptionsForceAfterHeadMovedReportsObservedHead(t *testing.T) {
+	dir, pidfile := hangingHookClone(t)
+	if err := Fetch(context.Background(), dir); err != nil {
+		t.Fatal(err)
+	}
+	old := head(t, dir)
+	force := make(chan struct{})
+	closeWhenRecorded(pidfile, force)
+	start := time.Now()
+	r := FastForwardWithOptions(context.Background(), dir, FastForwardOptions{MergeTimeout: 20 * time.Second, Force: force})
+	wantForceKilled(t, time.Since(start), r, pidfile)
+	h := head(t, dir)
+	if h == old {
+		t.Fatal("precondition: HEAD did not move before the hook")
+	}
+	if r.Old != old || r.New != h {
+		t.Errorf("result old=%s new=%s, want old=%s new=%s (observed HEAD)", r.Old, r.New, old, h)
+	}
+}
+
+func TestPullFFOnlyWithOptionsForceKillsMerge(t *testing.T) {
+	dir, pidfile := slowSmudgeClone(t)
+	force := make(chan struct{})
+	closeWhenRecorded(pidfile, force)
+	start := time.Now()
+	r := PullFFOnlyWithOptions(context.Background(), dir, FastForwardOptions{MergeTimeout: 20 * time.Second, Force: force})
+	wantForceKilled(t, time.Since(start), r, pidfile)
+	if h := head(t, dir); r.New != h {
+		t.Errorf("result New = %s, but HEAD is %s", r.New, h)
+	}
+}
+
+// Force closed before the merge starts kills it as soon as it runs; it is not
+// reported as a divergence or a timeout.
+func TestFastForwardWithOptionsForceAlreadyClosed(t *testing.T) {
+	dir, pidfile := slowSmudgeClone(t)
+	if err := Fetch(context.Background(), dir); err != nil {
+		t.Fatal(err)
+	}
+	force := make(chan struct{})
+	close(force)
+	start := time.Now()
+	r := FastForwardWithOptions(context.Background(), dir, FastForwardOptions{MergeTimeout: 20 * time.Second, Force: force})
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("returned after %v", elapsed)
+	}
+	if r.Outcome != PullFailed || !errors.Is(r.Err, ErrForceKilled) {
+		t.Errorf("result = %v, err %v, want failed with ErrForceKilled", r.Outcome, r.Err)
+	}
+	// The smudge helper may or may not have started before the kill.
+	if _, err := os.Stat(pidfile); err == nil {
+		wantProcessesGone(t, pidfile)
+	}
+}
+
+// A Force channel that is never closed, or closed after the merge finished,
+// changes nothing; MergeTimeout overrides the default bound.
+func TestFastForwardWithOptionsForceIgnoredWhenMergeCompletes(t *testing.T) {
+	dir, _ := slowCheckoutClone(t, "0")
+	if err := Fetch(context.Background(), dir); err != nil {
+		t.Fatal(err)
+	}
+	force := make(chan struct{})
+	r := FastForwardWithOptions(context.Background(), dir, FastForwardOptions{Force: force})
+	close(force)
+	wantCleanFastForward(t, dir, r)
+}
+
+func TestFastForwardWithOptionsMergeTimeoutOverridesDefault(t *testing.T) {
+	dir, pidfile := slowSmudgeClone(t)
+	if err := Fetch(context.Background(), dir); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	r := FastForwardWithOptions(context.Background(), dir, FastForwardOptions{MergeTimeout: 700 * time.Millisecond})
+	wantPromptCancel(t, time.Since(start), r.Err, pidfile)
+	if r.Outcome != PullFailed {
+		t.Errorf("outcome = %v, want failed", r.Outcome)
+	}
+}

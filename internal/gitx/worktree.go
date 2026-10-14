@@ -151,8 +151,13 @@ var ErrWorktreePathOccupied = errors.New("gitx: worktree path exists and is not 
 //
 // If git fails after this call created the branch, the branch is deleted
 // again if it still points at its start point and is not checked out (see
-// cleanupCreatedBranch); a branch that appeared concurrently is never
-// deleted. The result is only meaningful when err is nil.
+// cleanupCreatedBranch). That cleanup cannot lose commits: it only removes a
+// branch whose tip is still the start point, through a compare-and-swap, and
+// it never removes one that git reported as already existing. A residual
+// window remains in which a branch of the same name that someone else created
+// concurrently, exactly at the same start point, after this call's failed add
+// and before the cleanup, is removed as well; it then held no commit beyond
+// the start point. The result is only meaningful when err is nil.
 func WorktreeAdd(ctx context.Context, repoDir, path, branch string, opts WorktreeAddOpts) (WorktreeAddResult, error) {
 	if branch == "" {
 		return WorktreeAddResult{}, errors.New("gitx: worktree add: empty branch name")
@@ -180,6 +185,13 @@ func WorktreeAdd(ctx context.Context, repoDir, path, branch string, opts Worktre
 			return WorktreeAddResult{}, err
 		}
 		startOID = strings.TrimSpace(out)
+		if mode == WorktreeNewBranch {
+			// Create the branch exactly at the commit resolved above, so that a
+			// base that moves between the two commands cannot leak into it. (A
+			// tracking branch must name its remote-tracking ref as start point
+			// for git to set up the upstream.)
+			args[len(args)-1] = startOID
+		}
 	}
 	if _, err := Run(ctx, repoDir, append([]string{"worktree", "add", "--quiet"}, args...)...); err != nil {
 		if !local {

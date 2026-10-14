@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jponge/sheaf/internal/testutil"
@@ -376,5 +377,20 @@ func TestCleanupCreatedBranchSparesBranchesItDidNotCreate(t *testing.T) {
 	cleanupCreatedBranch(ctx, primary, "busy", start, genericErr)
 	if got := refOf("busy"); got != start {
 		t.Errorf("checked-out branch: after cleanup it is %q", got)
+	}
+}
+
+// Review 2c, item 6: the start point of a new branch is the commit resolved
+// before the add (pinned by id), so a base that moves in between cannot leak
+// into the branch. The branch reflog records the start point git was given.
+func TestWorktreeAddNewBranchIsCreatedFromResolvedStartPoint(t *testing.T) {
+	_, repo, primary := layout(t, testutil.OriginOpts{})
+	want := testutil.Git(t, primary, "rev-parse", "origin/main")
+	mustAdd(t, primary, filepath.Join(repo, "pinned"), "pinned", WorktreeAddOpts{}, WorktreeNewBranch)
+	mustAdd(t, primary, filepath.Join(repo, "pinned2"), "pinned2", WorktreeAddOpts{Base: "origin/main"}, WorktreeNewBranch)
+	for _, b := range []string{"pinned", "pinned2"} {
+		if got := testutil.Git(t, primary, "reflog", "show", "--format=%gs", "refs/heads/"+b); !strings.Contains(got, "Created from "+want) {
+			t.Errorf("reflog of %s = %q, want a start point pinned to %s", b, got, want)
+		}
 	}
 }

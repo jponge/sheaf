@@ -43,6 +43,14 @@ func startGroup(cmd *exec.Cmd, delay time.Duration) *procGroup {
 	return pg
 }
 
+// kill sends SIGKILL to the whole process group right now and reports whether
+// it was sent. It must only be called between a successful Start and the end
+// of Wait (while the leader has not been reaped, its group id cannot be
+// reused).
+func (pg *procGroup) kill() bool {
+	return syscall.Kill(-pg.cmd.Process.Pid, syscall.SIGKILL) == nil
+}
+
 // finish runs after cmd.Wait returned. If the group was cancelled and some
 // member outlived the leader (e.g. ssh or a filter ignoring SIGTERM), it
 // waits until pg.delay has elapsed since SIGTERM, then sends SIGKILL to the

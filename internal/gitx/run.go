@@ -10,11 +10,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -52,7 +54,10 @@ var waitDelay = 5 * time.Second
 // If git exits 0 but a process it spawned keeps standard output or error
 // open (e.g. a hook that starts `sleep 60 &`), Run stops waiting for the
 // output waitDelay after git exited and reports success with the output read
-// so far, unless ctx is done.
+// so far, unless ctx is done. If ctx is cancelled after git exited 0 but
+// while Run is still in that pipe wait, Run returns an error (wrapping
+// ctx.Err()) although the git operation itself completed: callers that care
+// must verify the effect rather than infer it from the error.
 //
 // dir must not be empty. The child environment is os.Environ() minus the
 // variables that redirect git to another repository (see strippedEnv), with
@@ -77,6 +82,25 @@ var waitDelay = 5 * time.Second
 // On other platforms the default exec.CommandContext behaviour applies (only
 // the git process itself is killed).
 func Run(ctx context.Context, dir string, args ...string) (string, error) {
+	return run(ctx, runOpts{}, dir, args...)
+}
+
+// ErrForceKilled is the error wrapped by the *GitError of an invocation whose
+// process group was killed through a force channel (see
+// FastForwardOptions.Force).
+var ErrForceKilled = errors.New("gitx: git killed on request")
+
+// runOpts are the internal extras of run over Run.
+type runOpts struct {
+	// stdin, when non-nil, is git's standard input (default: empty).
+	stdin io.Reader
+	// force, when non-nil and closed while git runs, SIGKILLs git's whole
+	// process group immediately (no SIGTERM grace period, so git cannot remove
+	// its lock files); the error then wraps ErrForceKilled.
+	force <-chan struct{}
+}
+
+func run(ctx context.Context, o runOpts, dir string, args ...string) (string, error) {
 	if dir == "" {
 		return "", errors.New("gitx: empty working directory")
 	}
@@ -86,9 +110,27 @@ func Run(ctx context.Context, dir string, args ...string) (string, error) {
 	delay := waitDelay
 	cmd.WaitDelay = delay
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = o.stdin, &stdout, &stderr
 	pg := startGroup(cmd, delay)
-	err := cmd.Run()
+	var forced atomic.Bool
+	err := cmd.Start()
+	if err == nil {
+		done := make(chan struct{})
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			select {
+			case <-o.force: // nil channel: never
+				if pg.kill() {
+					forced.Store(true)
+				}
+			case <-done:
+			}
+		}()
+		err = cmd.Wait()
+		close(done)
+		<-stopped
+	}
 	pg.finish()
 	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() && ctx.Err() == nil {
 		// git exited 0, but a process it spawned (typically a hook running
@@ -103,7 +145,9 @@ func Run(ctx context.Context, dir string, args ...string) (string, error) {
 		if errors.As(err, &ee) {
 			ge.ExitCode = ee.ExitCode()
 		}
-		if ctx.Err() != nil {
+		if forced.Load() {
+			ge.Err = ErrForceKilled
+		} else if ctx.Err() != nil {
 			ge.Err = ctx.Err()
 		}
 		return stdout.String(), ge
