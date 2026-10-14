@@ -526,10 +526,11 @@ func (b *Bundle) AddSource(org string) error {
 	return nil
 }
 
-// RemoveSource stops tracking an organization.
+// RemoveSource stops tracking an organization (matched case-insensitively,
+// like AddSource and AddExclude).
 func (b *Bundle) RemoveSource(org string) error {
 	for i, s := range b.Sources {
-		if s.Org == org {
+		if strings.EqualFold(s.Org, org) {
 			b.Sources = slices.Delete(b.Sources, i, i+1)
 			return nil
 		}

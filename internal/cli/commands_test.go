@@ -310,7 +310,9 @@ func TestRemoveOfflineFlag(t *testing.T) {
 	root := t.TempDir()
 	e.mustRun(t, "create", root)
 	e.mustRun(t, "--bundle", root, "add", "o/a")
-	testutil.Git(t, filepath.Join(root, "a", "main"), "remote", "set-url", "origin", "file:///nonexistent/a.git")
+	// Unreachable, state unknown (no transport for the scheme, no network);
+	// a missing local path would count as a gone remote, which --force overrides.
+	testutil.Git(t, filepath.Join(root, "a", "main"), "remote", "set-url", "origin", "sheaf-no-such-transport://example.invalid/a.git")
 	if _, errs, code := e.run(t, "--bundle", root, "remove", "a", "--yes", "--force"); code == 0 || !strings.Contains(errs, "--offline") {
 		t.Fatalf("remove with unreachable origin: exit %d\n%s", code, errs)
 	}

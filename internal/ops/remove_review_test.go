@@ -155,7 +155,10 @@ func TestRemoveIgnoresOSJunk(t *testing.T) {
 func TestRemoveOffline(t *testing.T) {
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
-	testutil.Git(t, primary, "remote", "set-url", "origin", "file:///nonexistent/a.git")
+	// An unreachable remote whose state is unknown (no transport for the
+	// scheme; never touches the network). A missing local path would be
+	// classified as a gone remote instead (TestRemoveDeletedRemoteIsADataRisk).
+	testutil.Git(t, primary, "remote", "set-url", "origin", "sheaf-no-such-transport://example.invalid/a.git")
 	for _, force := range []bool{false, true} {
 		_, err := f.removeOpts(t, "a", RemoveOptions{Force: force, Confirm: yes})
 		if err == nil || !strings.Contains(err.Error(), "--offline") {

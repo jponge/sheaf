@@ -269,6 +269,10 @@ func planClones(w *Workspace, specs []lookup, as, origin, source string) []Task 
 			tasks = append(tasks, skippedTask(e.Name, fmt.Sprintf("%s is already in the bundle as %s", r.Slug(), e.Name)))
 			continue
 		}
+		if e := existingOnAliasHost(b, r.Slug()); e != nil {
+			tasks = append(tasks, skippedTask(e.Name, fmt.Sprintf("%s is already in the bundle as %s (host %s)", r.Slug(), e.Name, e.Host)))
+			continue
+		}
 		if err := bundle.ValidateRepoName(name); err != nil {
 			tasks = append(tasks, failedTask(s.label, err))
 			continue
@@ -305,6 +309,33 @@ func existingByKey(b *bundle.Bundle, host, slug string) *bundle.Repository {
 		}
 	}
 	return nil
+}
+
+// existingOnAliasHost finds a repository with the given slug
+// (case-insensitively) recorded under a host that looks like an SSH
+// configuration alias of github.com (see looksLikeGitHubAlias; adopt
+// records aliases such as "github_work" as-is): the slug most likely names
+// the same GitHub repository. Repositories of other hosts (e.g. a GitLab
+// mirror with the same owner/name) are legitimate and not matched.
+func existingOnAliasHost(b *bundle.Bundle, slug string) *bundle.Repository {
+	for i := range b.Repositories {
+		r := b.Repositories[i]
+		if looksLikeGitHubAlias(r.HostName()) && strings.EqualFold(r.Slug, slug) {
+			return &b.Repositories[i]
+		}
+	}
+	return nil
+}
+
+// looksLikeGitHubAlias reports whether host, other than github.com and
+// "local", looks like an SSH alias of github.com: it has no dot (not a
+// public host name) or contains "github" (case-insensitively; a GitHub
+// Enterprise host such as github.example.com matches too). A heuristic.
+func looksLikeGitHubAlias(host string) bool {
+	if strings.EqualFold(host, bundle.HostGitHub) || host == bundle.HostLocal {
+		return false
+	}
+	return !strings.Contains(host, ".") || strings.Contains(strings.ToLower(host), "github")
 }
 
 // cloneRepo creates <root>/<name> (which must not exist), clones into it and

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -33,6 +34,11 @@ type RemoveOptions struct {
 	// proceed; returning false aborts with ErrNotConfirmed. nil never
 	// confirms. A TUI asks the user here; the CLI answers with --yes.
 	Confirm func(RemovePlan) bool
+	// ExpectedGone, when set to a slug, tells that the hosting service no
+	// longer knows the repository: a fetch that succeeds then contradicts
+	// it (typically a token that cannot see the repository) and is a
+	// refusal that only Force overrides.
+	ExpectedGone string
 }
 
 // RemoveItem is one path of a repository directory being removed, with what
@@ -140,7 +146,9 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 	}
 	// The fetch happens once; the re-check after confirmation reuses its
 	// outcome.
-	fetched, fetchMsg := false, ""
+	// fetchForceable: the fetch problem is one that Force overrides (a gone
+	// remote, or a remote that answers although ExpectedGone says it is gone).
+	fetched, fetchMsg, fetchForceable := false, "", false
 	fetch := func(primary string) (string, error) {
 		if fetched {
 			return fetchMsg, nil
@@ -156,6 +164,12 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 				return "", ctx.Err()
 			}
 			fetchMsg = fetchProblem(err)
+			var ge *gitx.GitError
+			if errors.As(err, &ge) && remoteRepoGone(ge.Stderr) {
+				fetchMsg, fetchForceable = goneRemoteProblem, true
+			}
+		} else if opts.ExpectedGone != "" {
+			fetchMsg, fetchForceable = "the GitHub API cannot see "+opts.ExpectedGone+" but its remote still answers: check gh authentication scope (not removed)", true
 		}
 		return fetchMsg, nil
 	}
@@ -183,7 +197,7 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 	risksOf := func(ctx context.Context, dir, deletedRoot string) ([]gitx.Risk, error) {
 		return gitx.DeletionRisksWithOptions(ctx, dir, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: deletedRoot})
 	}
-	plan, err := planRemoval(ctx, w, name, wd, fetch, risksOf, emit)
+	plan, err := planRemoval(ctx, w, name, wd, fetch, func() bool { return fetchForceable }, risksOf, emit)
 	if err != nil {
 		return "", err
 	}
@@ -199,7 +213,7 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 	// Changes made while Confirm was pending (e.g. a TUI dialog) would be
 	// deleted unchecked: check again, without fetching, and abort if
 	// anything differs.
-	again, err := planRemoval(ctx, w, name, wd, fetch, risksOf, func(Event) {})
+	again, err := planRemoval(ctx, w, name, wd, fetch, func() bool { return fetchForceable }, risksOf, func(Event) {})
 	if err != nil {
 		return "", err
 	}
@@ -297,8 +311,9 @@ func resolveExisting(p string) string {
 
 // planRemoval builds the removal plan. fetch is called with the primary
 // checkout before the risk checks and returns a problem description (empty
-// if none).
-func planRemoval(ctx context.Context, w *Workspace, name, wd string, fetch func(primary string) (string, error),
+// if none); forceable, called after it, tells whether that problem is one
+// that --force overrides (see Remove).
+func planRemoval(ctx context.Context, w *Workspace, name, wd string, fetch func(primary string) (string, error), forceable func() bool,
 	risksOf func(ctx context.Context, dir, deletedRoot string) ([]gitx.Risk, error), emit func(Event)) (RemovePlan, error) {
 	plan := RemovePlan{Repo: name}
 	dir, err := repoDirOf(w.Root, name)
@@ -344,7 +359,10 @@ func planRemoval(ctx context.Context, w *Workspace, name, wd string, fetch func(
 		return plan, err
 	}
 	if fetchMsg != "" {
-		plan.Items = append(plan.Items, RemoveItem{Path: primary, Problem: fetchMsg, Hard: true})
+		// A gone remote, or a remote answering although the hosting
+		// service says the repository is gone, is overridden by --force;
+		// any other failed fetch leaves the remote state unknown.
+		plan.Items = append(plan.Items, RemoveItem{Path: primary, Problem: fetchMsg, Hard: !forceable()})
 	}
 	emit(Event{Phase: PhaseCheck, Message: "checking for data at risk"})
 	wts, err := gitx.WorktreeList(ctx, primary)
@@ -398,6 +416,40 @@ func fetchProblem(err error) string {
 	}
 	return "fetch failed, the remote state is unknown: " + err.Error() +
 		"; retry when the remote is reachable, or pass --offline to check local data only"
+}
+
+// goneRemoteProblem is the refusal reason when the fetch shows that origin
+// no longer exists. It is a data risk (RemoveItem.Hard false): --force
+// overrides it, and --offline is deliberately not suggested since skipping
+// the fetch would only hide it.
+const goneRemoteProblem = "the remote repository appears to be gone: this clone may hold the only copy of its history " +
+	"(or you no longer have access (wrong SSH key/account))"
+
+// quotedNotFound matches git's "repository '<url>' not found" (HTTP 404).
+var quotedNotFound = regexp.MustCompile(`repository '[^']*' not found`)
+
+// remoteRepoGone reports whether the standard error of a failed fetch says
+// that the remote repository does not exist. git runs with LC_ALL=C, so the
+// messages are the untranslated ones. These are heuristics:
+//
+//   - "Repository not found": GitHub over SSH ("ERROR: Repository not
+//     found.") and over HTTPS ("remote: Repository not found."); GitHub
+//     answers the same for a private repository the user cannot see, which
+//     for this user also means the clone may be the only copy;
+//   - "repository '<url>' not found": git over HTTP(S) on a 404;
+//   - "'<path>' does not appear to be a git repository": a local or SSH
+//     path that no longer holds a repository, except "'origin' does not
+//     appear ..." which means that no remote named origin is configured
+//     (left to the generic fetch failure).
+//
+// "Could not read from remote repository" alone is not enough: git prints
+// it for authentication and network failures too.
+func remoteRepoGone(stderr string) bool {
+	if strings.Contains(stderr, "Repository not found") || quotedNotFound.MatchString(stderr) {
+		return true
+	}
+	return strings.Contains(stderr, "does not appear to be a git repository") &&
+		!strings.Contains(stderr, "'origin' does not appear to be a git repository")
 }
 
 func joinProblem(a, b string) string {
