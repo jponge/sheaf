@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -32,147 +31,6 @@ func noLeftovers(t *testing.T, root string) {
 		if strings.HasPrefix(e.Name(), ".sheaf-adopt") {
 			t.Fatalf("temporary directory left behind: %s", e.Name())
 		}
-	}
-}
-
-// B1: switching the primary to the default branch must not overwrite an
-// ignored file that the default branch tracks.
-func TestAdoptSwitchNeverOverwritesIgnoredFiles(t *testing.T) {
-	f := newFixture(t)
-	o := testutil.NewOrigin(t, testutil.OriginOpts{})
-	seed := filepath.Join(t.TempDir(), "seed")
-	testutil.Git(t, filepath.Dir(seed), "clone", "-q", o.Path, seed)
-	testutil.CommitFile(t, seed, "local.cfg", "tracked default\n", "track local.cfg on main")
-	testutil.Git(t, seed, "checkout", "-q", "-b", "feat")
-	testutil.Git(t, seed, "rm", "-q", "local.cfg")
-	testutil.CommitFile(t, seed, ".gitignore", "local.cfg\n", "ignore local.cfg on feat")
-	testutil.Git(t, seed, "push", "-q", "origin", "main", "feat")
-
-	dir := filepath.Join(f.w.Root, "x")
-	plainClone(t, o, dir)
-	testutil.Git(t, dir, "checkout", "-q", "feat")
-	writeFile(t, filepath.Join(dir, "local.cfg"), "PRECIOUS USER DATA\n")
-	_, err := adopt(t, f, dir, AdoptOptions{})
-	if err == nil {
-		t.Fatal("adopt succeeded although the switch would overwrite an ignored file")
-	}
-	if got := readFile(t, filepath.Join(dir, "local.cfg")); got != "PRECIOUS USER DATA\n" {
-		t.Fatalf("local.cfg = %q after rollback", got)
-	}
-	if b := branchOf(t, dir); b != "feat" {
-		t.Fatalf("branch after rollback = %q", b)
-	}
-	noLeftovers(t, f.w.Root)
-}
-
-func TestAdoptSwitchReportsIgnoredFilesStayInPrimary(t *testing.T) {
-	f := newFixture(t)
-	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat"}})
-	dir := filepath.Join(f.w.Root, "x")
-	plainClone(t, o, dir)
-	testutil.Git(t, dir, "checkout", "-q", "feat")
-	writeFile(t, filepath.Join(dir, ".git", "info", "exclude"), "build/\n")
-	if err := os.Mkdir(filepath.Join(dir, "build"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(dir, "build", "out.bin"), "x")
-	evs, err := adopt(t, f, dir, AdoptOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !exists(filepath.Join(dir, "main", "build", "out.bin")) {
-		t.Fatal("ignored file not kept in the primary")
-	}
-	if !slices.ContainsFunc(evs, func(e Event) bool {
-		return strings.Contains(e.Message, "ignored") && strings.Contains(e.Message, filepath.Join(dir, "main"))
-	}) {
-		t.Fatalf("no event about ignored files staying in the primary: %+v", evs)
-	}
-}
-
-// B1b: a laid-out repository is only recognized when the primary's
-// directory is named after its branch.
-func TestAdoptLaidOutChildMustMatchBranch(t *testing.T) {
-	f := newFixture(t)
-	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat"}})
-	child := filepath.Join(f.w.Root, "docs", "somerepo")
-	plainClone(t, o, child)
-	testutil.Git(t, child, "checkout", "-q", "feat")
-	_, err := adopt(t, f, filepath.Join(f.w.Root, "docs"), AdoptOptions{})
-	if err == nil || !strings.Contains(err.Error(), "somerepo") || !strings.Contains(err.Error(), "feat") {
-		t.Fatalf("err = %v, want refusal explaining that somerepo does not match branch feat", err)
-	}
-	if len(f.onDisk(t).Repositories) != 0 || !exists(filepath.Join(child, ".git")) {
-		t.Fatal("something changed")
-	}
-	cands, err := Candidates(context.Background(), f.w.Root, &bundle.Bundle{Version: 1})
-	if err != nil || len(cands) != 0 {
-		t.Fatalf("candidates = %+v, %v; want none", cands, err)
-	}
-}
-
-func TestCandidatesLaidOutOnFeatureBranch(t *testing.T) {
-	f := newFixture(t)
-	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x"}})
-	child := filepath.Join(f.w.Root, "r", "Feat-X")
-	plainClone(t, o, child)
-	testutil.Git(t, child, "checkout", "-q", "feat/x")
-	cands, err := Candidates(context.Background(), f.w.Root, &bundle.Bundle{Version: 1})
-	if err != nil || len(cands) != 1 || cands[0].Kind != CandidateLaidOut || cands[0].Primary != child {
-		t.Fatalf("candidates = %+v, %v", cands, err)
-	}
-}
-
-func TestAdoptLaidOutOnFeatureBranchRestoresInvariant(t *testing.T) {
-	f := newFixture(t)
-	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x"}})
-	repo := filepath.Join(f.w.Root, "r")
-	child := filepath.Join(repo, "feat-x")
-	plainClone(t, o, child)
-	testutil.Git(t, child, "checkout", "-q", "feat/x")
-	if _, err := adopt(t, f, repo, AdoptOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	if b := branchOf(t, filepath.Join(repo, "main")); b != "main" {
-		t.Fatalf("primary branch = %q", b)
-	}
-	if fi, err := os.Lstat(filepath.Join(repo, "main", ".git")); err != nil || !fi.IsDir() {
-		t.Fatalf("r/main is not the primary: %v", err)
-	}
-	if b := branchOf(t, child); b != "feat/x" {
-		t.Fatalf("worktree branch = %q", b)
-	}
-	if fi, err := os.Lstat(filepath.Join(child, ".git")); err != nil || fi.IsDir() {
-		t.Fatalf("r/feat-x is not a linked worktree: %v", err)
-	}
-	if r, _ := f.onDisk(t).Repository("r"); r == nil || r.DefaultBranch != "main" {
-		t.Fatalf("entry = %+v", r)
-	}
-}
-
-func TestAdoptLaidOutRefusesDirtyOrDetached(t *testing.T) {
-	for name, setup := range map[string]func(t *testing.T, child string){
-		"dirty": func(t *testing.T, child string) {
-			testutil.Git(t, child, "checkout", "-q", "feat")
-			writeFile(t, filepath.Join(child, "wip.txt"), "wip\n")
-		},
-		"detached": func(t *testing.T, child string) {
-			testutil.Git(t, child, "checkout", "-q", "--detach", "origin/feat")
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			f := newFixture(t)
-			o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat"}})
-			child := filepath.Join(f.w.Root, "r", "feat")
-			plainClone(t, o, child)
-			setup(t, child)
-			if _, err := adopt(t, f, filepath.Join(f.w.Root, "r"), AdoptOptions{}); err == nil {
-				t.Fatal("adopt succeeded")
-			}
-			if !exists(filepath.Join(child, ".git")) || exists(filepath.Join(f.w.Root, "r", "main")) {
-				t.Fatal("something moved")
-			}
-		})
 	}
 }
 
@@ -220,8 +78,8 @@ func TestAdoptUnknownDefaultBranch(t *testing.T) {
 	if _, err := adopt(t, f, dir, AdoptOptions{DefaultBranch: "main"}); err != nil {
 		t.Fatal(err)
 	}
-	if b := branchOf(t, filepath.Join(dir, "main")); b != "main" {
-		t.Fatalf("primary branch = %q", b)
+	if b := branchOf(t, filepath.Join(dir, "main")); b != "feat" {
+		t.Fatalf("primary branch = %q, want feat (moved as is)", b)
 	}
 	if r, _ := f.onDisk(t).Repository("x"); r == nil || r.DefaultBranch != "main" {
 		t.Fatalf("entry = %+v", r)
@@ -292,9 +150,9 @@ func TestAdoptAllRecoversPanicAndRestores(t *testing.T) {
 	dir := filepath.Join(f.w.Root, "x")
 	plainClone(t, o, dir)
 	testutil.Git(t, dir, "checkout", "-q", "feat")
-	old := adoptAfterSwitch
-	adoptAfterSwitch = func() error { panic("boom") }
-	t.Cleanup(func() { adoptAfterSwitch = old })
+	old := adoptAfterMove
+	adoptAfterMove = func() error { panic("boom") }
+	t.Cleanup(func() { adoptAfterMove = old })
 	s := AdoptAll(context.Background(), f.w, []string{dir}, AdoptOptions{}, 1, Discard)
 	if len(s.Results) != 1 || s.Results[0].Status != StatusFailed || !strings.Contains(fmt.Sprint(s.Results[0].Err), "boom") {
 		t.Fatalf("results = %+v, want failure mentioning the panic", s.Results)
@@ -352,10 +210,10 @@ func TestMoveIntoSubdirFailuresRestore(t *testing.T) {
 	}
 }
 
-// Review 5, N12: laid-out switch with a sibling linked worktree, failure
-// after the switch: everything restored, and a second attempt leaves no
-// prunable worktree.
-func TestAdoptLaidOutSwitchRollbackWithSibling(t *testing.T) {
+// Review 5, N12 (adapted to the rename-only laid-out adoption): a failure
+// after renaming p/dev to p/main restores p/dev and its sibling worktree,
+// and a second attempt leaves no prunable worktree.
+func TestAdoptLaidOutRenameRollbackWithSibling(t *testing.T) {
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"dev", "feat"}})
 	dev := filepath.Join(f.w.Root, "p", "dev")
@@ -364,9 +222,9 @@ func TestAdoptLaidOutSwitchRollbackWithSibling(t *testing.T) {
 	testutil.Git(t, dev, "worktree", "add", "-q", "../feat", "feat")
 	writeFile(t, filepath.Join(f.w.Root, "p", "feat", "wip.txt"), "wip\n")
 	boom := errors.New("injected")
-	old := adoptAfterSwitch
-	adoptAfterSwitch = func() error { return boom }
-	t.Cleanup(func() { adoptAfterSwitch = old })
+	old := adoptAfterMove
+	adoptAfterMove = func() error { return boom }
+	t.Cleanup(func() { adoptAfterMove = old })
 	if _, err := adopt(t, f, filepath.Join(f.w.Root, "p"), AdoptOptions{}); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want injected", err)
 	}
@@ -379,7 +237,7 @@ func TestAdoptLaidOutSwitchRollbackWithSibling(t *testing.T) {
 	if b := branchOf(t, filepath.Join(f.w.Root, "p", "feat")); b != "feat" {
 		t.Fatalf("sibling worktree broken: %s", b)
 	}
-	adoptAfterSwitch = old
+	adoptAfterMove = old
 	if _, err := adopt(t, f, filepath.Join(f.w.Root, "p"), AdoptOptions{}); err != nil {
 		t.Fatal(err)
 	}

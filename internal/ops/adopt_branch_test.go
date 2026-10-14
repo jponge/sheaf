@@ -2,7 +2,6 @@ package ops
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -22,185 +21,248 @@ func branchOf(t *testing.T, dir string) string {
 	return b
 }
 
-func localBranchExists(t *testing.T, dir, branch string) bool {
+// onlyEntries fails unless dir contains exactly the given names.
+func onlyEntries(t *testing.T, dir string, want ...string) {
 	t.Helper()
-	return strings.TrimSpace(testutil.Git(t, dir, "branch", "--list", branch)) != ""
-}
-
-// The primary is always <repo>/<default branch>/; the branch the clone was
-// on becomes a sibling worktree.
-func TestAdoptPlainCloneOnFeatureBranch(t *testing.T) {
-	for _, localDefault := range []bool{true, false} {
-		name := "default branch missing locally"
-		if localDefault {
-			name = "default branch exists locally"
-		}
-		t.Run(name, func(t *testing.T) {
-			f := newFixture(t)
-			o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x"}})
-			dir := filepath.Join(f.w.Root, "p")
-			if localDefault {
-				plainClone(t, o, dir)
-				testutil.Git(t, dir, "checkout", "-q", "feat/x")
-			} else {
-				testutil.Git(t, f.w.Root, "clone", "-q", "--branch", "feat/x", o.URL, dir)
-			}
-			testutil.CommitFile(t, dir, "local.txt", "local\n", "unpushed work on feat/x")
-
-			if _, err := Adopt(context.Background(), f.w, dir, AdoptOptions{}, noEmit); err != nil {
-				t.Fatal(err)
-			}
-			primary, wt := filepath.Join(dir, "main"), filepath.Join(dir, "feat-x")
-			if b := branchOf(t, primary); b != "main" {
-				t.Fatalf("primary branch = %q, want main", b)
-			}
-			if up := testutil.Git(t, primary, "rev-parse", "--abbrev-ref", "main@{upstream}"); up != "origin/main" {
-				t.Fatalf("main upstream = %q, want origin/main", up)
-			}
-			if b := branchOf(t, wt); b != "feat/x" {
-				t.Fatalf("worktree branch = %q, want feat/x", b)
-			}
-			if got := readFile(t, filepath.Join(wt, "local.txt")); got != "local\n" {
-				t.Fatalf("feat/x commit missing in worktree: %q", got)
-			}
-			if fi, err := os.Lstat(filepath.Join(wt, ".git")); err != nil || fi.IsDir() {
-				t.Fatalf("%s is not a linked worktree: %v", wt, err)
-			}
-			if r, _ := f.onDisk(t).Repository("p"); r == nil || r.DefaultBranch != "main" {
-				t.Fatalf("entry = %+v", r)
-			}
-		})
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range ents {
+		got = append(got, e.Name())
+	}
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("%s contains %v, want %v", dir, got, want)
 	}
 }
 
-func TestAdoptFeatureBranchWithExistingLinkedWorktree(t *testing.T) {
+// The primary is <repo>/<default branch>/ whatever branch it has checked
+// out: a plain clone on another branch is moved as it is, nothing switched.
+func TestAdoptPlainCloneOnFeatureBranchMovesAsIs(t *testing.T) {
 	f := newFixture(t)
-	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x", "other"}})
+	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x"}})
+	dir := filepath.Join(f.w.Root, "p")
+	plainClone(t, o, dir)
+	testutil.Git(t, dir, "checkout", "-q", "feat/x")
+	testutil.CommitFile(t, dir, "local.txt", "local\n", "unpushed work on feat/x")
+	writeFile(t, filepath.Join(dir, ".git", "info", "exclude"), "*.log\n")
+	writeFile(t, filepath.Join(dir, "build.log"), "ignored\n")
+	writeFile(t, filepath.Join(dir, "untracked.txt"), "untracked\n")
+	writeFile(t, filepath.Join(dir, "file-1.txt"), "modified\n")
+
+	if _, err := adopt(t, f, dir, AdoptOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	primary := filepath.Join(dir, "main")
+	if b := branchOf(t, primary); b != "feat/x" {
+		t.Fatalf("primary branch = %q, want feat/x (nothing switched)", b)
+	}
+	for name, want := range map[string]string{"local.txt": "local\n", "build.log": "ignored\n", "untracked.txt": "untracked\n", "file-1.txt": "modified\n"} {
+		if got := readFile(t, filepath.Join(primary, name)); got != want {
+			t.Fatalf("%s = %q, want %q", name, got, want)
+		}
+	}
+	onlyEntries(t, dir, "main") // no sibling worktree created
+	if r, _ := f.onDisk(t).Repository("p"); r == nil || r.DefaultBranch != "main" {
+		t.Fatalf("entry = %+v", r)
+	}
+}
+
+func TestAdoptPlainCloneDetachedMovesAsIs(t *testing.T) {
+	f := newFixture(t)
+	o := testutil.NewOrigin(t, testutil.OriginOpts{DefaultBranch: "trunk"})
+	dir := filepath.Join(f.w.Root, "p")
+	plainClone(t, o, dir)
+	head := testutil.Git(t, dir, "rev-parse", "HEAD")
+	testutil.Git(t, dir, "checkout", "-q", "--detach")
+	if _, err := adopt(t, f, dir, AdoptOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	primary := filepath.Join(dir, "trunk")
+	if _, err := gitx.CurrentBranch(context.Background(), primary); err != gitx.ErrDetachedHead {
+		t.Fatalf("primary HEAD: %v, want still detached", err)
+	}
+	if got := testutil.Git(t, primary, "rev-parse", "HEAD"); got != head {
+		t.Fatalf("HEAD moved: %s -> %s", head, got)
+	}
+}
+
+// The default branch checked out in a linked worktree does not matter any
+// more: nothing is switched.
+func TestAdoptFeatureBranchWithExistingLinkedWorktrees(t *testing.T) {
+	f := newFixture(t)
+	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x"}})
 	dir := filepath.Join(f.w.Root, "p")
 	plainClone(t, o, dir)
 	testutil.Git(t, dir, "checkout", "-q", "feat/x")
 	ext := filepath.Join(t.TempDir(), "ext")
-	testutil.Git(t, dir, "worktree", "add", "-q", ext, "other")
+	testutil.Git(t, dir, "worktree", "add", "-q", ext, "main")
 
-	if _, err := Adopt(context.Background(), f.w, dir, AdoptOptions{}, noEmit); err != nil {
+	if _, err := adopt(t, f, dir, AdoptOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if b := branchOf(t, ext); b != "other" {
+	if b := branchOf(t, ext); b != "main" {
 		t.Fatalf("external worktree broken: %q", b)
 	}
 	wts, err := gitx.WorktreeList(context.Background(), ext)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var paths []string
-	for _, w := range wts {
-		paths = append(paths, w.Path)
+	if len(wts) != 2 || wts[0].Path != filepath.Join(dir, "main") || wts[1].Path != ext || wts[1].Prunable {
+		t.Fatalf("worktrees = %+v", wts)
 	}
-	want := []string{filepath.Join(dir, "main"), filepath.Join(dir, "feat-x"), ext}
-	if len(paths) == len(want) {
-		slices.Sort(paths[1:])
-		slices.Sort(want[1:])
-	}
-	if !slices.Equal(paths, want) {
-		t.Fatalf("worktrees = %v, want %v", paths, want)
+	if b := branchOf(t, filepath.Join(dir, "main")); b != "feat/x" {
+		t.Fatalf("primary branch = %q", b)
 	}
 }
 
-func TestAdoptPlainCloneRefusesUnsafeStates(t *testing.T) {
-	cases := map[string]struct {
-		setup func(t *testing.T, dir string)
-		want  string
-	}{
-		"detached HEAD": {func(t *testing.T, dir string) {
-			testutil.Git(t, dir, "checkout", "-q", "--detach")
-		}, "detached"},
-		"untracked file on a feature branch": {func(t *testing.T, dir string) {
-			testutil.Git(t, dir, "checkout", "-q", "feat")
-			writeFile(t, filepath.Join(dir, "new.txt"), "wip\n")
-		}, "commit or stash"},
-		"modified file on a feature branch": {func(t *testing.T, dir string) {
-			testutil.Git(t, dir, "checkout", "-q", "feat")
-			writeFile(t, filepath.Join(dir, "file-1.txt"), "changed\n")
-		}, "commit or stash"},
-		"default branch checked out in a linked worktree": {func(t *testing.T, dir string) {
-			testutil.Git(t, dir, "checkout", "-q", "feat")
-			testutil.Git(t, dir, "worktree", "add", "-q", filepath.Join(t.TempDir(), "m"), "main")
-		}, "already checked out"},
-	}
-	for name, c := range cases {
+// Laid out: the primary is <repo>/<normalized default branch>/ with any
+// branch checked out (or detached); it is only registered.
+func TestAdoptLaidOutPrimaryOnAnyBranchOnlyRegisters(t *testing.T) {
+	for name, setup := range map[string]func(t *testing.T, primary string){
+		"feature branch": func(t *testing.T, p string) { testutil.Git(t, p, "checkout", "-q", "feat/x") },
+		"detached":       func(t *testing.T, p string) { testutil.Git(t, p, "checkout", "-q", "--detach") },
+	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
-			o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat"}})
-			dir := filepath.Join(f.w.Root, "p")
-			plainClone(t, o, dir)
-			c.setup(t, dir)
-			before := testutil.Git(t, dir, "status", "--porcelain=v2", "--branch", "--untracked-files=all")
-			_, err := Adopt(context.Background(), f.w, dir, AdoptOptions{}, noEmit)
-			if err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Fatalf("err = %v, want refusal mentioning %q", err, c.want)
+			o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x"}})
+			primary := filepath.Join(f.w.Root, "foo", "main")
+			plainClone(t, o, primary)
+			setup(t, primary)
+			before := testutil.Git(t, primary, "status", "--porcelain=v2", "--branch")
+			cands, err := Candidates(context.Background(), f.w.Root, f.w.Bundle())
+			if err != nil || len(cands) != 1 || cands[0].Kind != CandidateLaidOut || cands[0].Primary != primary {
+				t.Fatalf("candidates = %+v, %v", cands, err)
 			}
-			if fi, err := os.Lstat(filepath.Join(dir, ".git")); err != nil || !fi.IsDir() {
-				t.Fatalf("clone moved: %v", err)
+			if _, err := adopt(t, f, filepath.Join(f.w.Root, "foo"), AdoptOptions{}); err != nil {
+				t.Fatal(err)
 			}
-			if after := testutil.Git(t, dir, "status", "--porcelain=v2", "--branch", "--untracked-files=all"); after != before {
-				t.Fatalf("state changed:\n%s\n->\n%s", before, after)
+			if after := testutil.Git(t, primary, "status", "--porcelain=v2", "--branch"); after != before {
+				t.Fatalf("checkout changed:\n%s\n->\n%s", before, after)
 			}
-			if len(f.onDisk(t).Repositories) != 0 {
-				t.Fatal("refused adoption was recorded")
+			onlyEntries(t, filepath.Join(f.w.Root, "foo"), "main")
+			if r, _ := f.onDisk(t).Repository("foo"); r == nil || r.DefaultBranch != "main" {
+				t.Fatalf("entry = %+v", r)
 			}
 		})
 	}
 }
 
-func TestAdoptRestoresOnFailureAfterSwitch(t *testing.T) {
+// Laid out with another child name: renamed to the default branch's
+// directory, checkout untouched, worktrees repaired.
+func TestAdoptLaidOutRenamesPrimaryToDefaultBranchDir(t *testing.T) {
 	f := newFixture(t)
-	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x", "other"}})
-	dir := filepath.Join(f.w.Root, "p")
-	// No local main: adopt creates it, the rollback must delete it again.
-	testutil.Git(t, f.w.Root, "clone", "-q", "--branch", "feat/x", o.URL, dir)
+	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"dev", "feat", "other"}})
+	repo := filepath.Join(f.w.Root, "foo")
+	dev := filepath.Join(repo, "dev")
+	plainClone(t, o, dev)
+	testutil.Git(t, dev, "checkout", "-q", "dev")
+	writeFile(t, filepath.Join(dev, "wip.txt"), "dirty is fine\n")
+	testutil.Git(t, dev, "worktree", "add", "-q", "../feat", "feat")
 	ext := filepath.Join(t.TempDir(), "ext")
-	testutil.Git(t, dir, "worktree", "add", "-q", "-b", "other", ext, "origin/other")
-	// Ignored files are not "dirty" and must survive the round trip.
-	writeFile(t, filepath.Join(dir, ".git", "info", "exclude"), "build.log\n")
-	ignored := filepath.Join(dir, "build.log")
-	writeFile(t, ignored, "keep\n")
+	testutil.Git(t, dev, "worktree", "add", "-q", ext, "other")
+	writeFile(t, filepath.Join(dev, ".git", "info", "exclude"), ".wt/\n")
+	testutil.Git(t, dev, "worktree", "add", "-q", "-b", "nested", ".wt/nested", "origin/main")
 
-	boom := errors.New("injected")
-	old := adoptAfterSwitch
-	adoptAfterSwitch = func() error { return boom }
-	t.Cleanup(func() { adoptAfterSwitch = old })
-
-	if _, err := Adopt(context.Background(), f.w, dir, AdoptOptions{}, noEmit); !errors.Is(err, boom) {
-		t.Fatalf("err = %v, want injected", err)
+	if _, err := adopt(t, f, repo, AdoptOptions{}); err != nil {
+		t.Fatal(err)
 	}
-	if fi, err := os.Lstat(filepath.Join(dir, ".git")); err != nil || !fi.IsDir() {
-		t.Fatalf("clone not back at %s: %v", dir, err)
+	primary := filepath.Join(repo, "main")
+	if b := branchOf(t, primary); b != "dev" {
+		t.Fatalf("primary branch = %q, want dev (untouched)", b)
 	}
-	if b := branchOf(t, dir); b != "feat/x" {
-		t.Fatalf("branch after rollback = %q, want feat/x", b)
+	if got := readFile(t, filepath.Join(primary, "wip.txt")); got != "dirty is fine\n" {
+		t.Fatalf("wip.txt = %q", got)
 	}
-	if localBranchExists(t, dir, "main") {
-		t.Fatal("main created by adopt survived the rollback")
+	onlyEntries(t, repo, "feat", "main")
+	wts, err := gitx.WorktreeList(context.Background(), primary)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := readFile(t, ignored); got != "keep\n" {
-		t.Fatalf("ignored file = %q", got)
+	want := map[string]string{primary: "dev", filepath.Join(repo, "feat"): "feat", ext: "other", filepath.Join(primary, ".wt", "nested"): "nested"}
+	if len(wts) != len(want) {
+		t.Fatalf("worktrees = %+v", wts)
 	}
-	for _, p := range []string{"main", "feat-x"} {
-		if exists(filepath.Join(dir, p)) {
-			t.Fatalf("%s left behind", p)
+	for _, w := range wts {
+		if want[w.Path] != w.Branch || w.Prunable {
+			t.Fatalf("worktree %+v unexpected or broken (want %v)", w, want)
 		}
 	}
-	if b := branchOf(t, ext); b != "other" {
-		t.Fatalf("external worktree broken after rollback: %q", b)
+	for p, b := range want {
+		if got := branchOf(t, p); got != b {
+			t.Fatalf("%s on %q, want %q", p, got, b)
+		}
 	}
-	wts, err := gitx.WorktreeList(context.Background(), dir)
-	if err != nil || len(wts) != 2 || wts[0].Path != dir || wts[1].Path != ext {
-		t.Fatalf("worktrees after rollback = %+v, %v", wts, err)
+}
+
+func TestAdoptLaidOutRefusesWhenDefaultBranchDirExists(t *testing.T) {
+	f := newFixture(t)
+	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"dev"}})
+	repo := filepath.Join(f.w.Root, "foo")
+	dev := filepath.Join(repo, "dev")
+	plainClone(t, o, dev)
+	testutil.Git(t, dev, "checkout", "-q", "dev")
+	if err := os.Mkdir(filepath.Join(repo, "main"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if st := testutil.Git(t, dir, "status", "--porcelain"); st != "" {
-		t.Fatalf("status after rollback not clean:\n%s", st)
+	_, err := adopt(t, f, repo, AdoptOptions{})
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(repo, "main")) {
+		t.Fatalf("err = %v, want refusal naming foo/main", err)
 	}
-	if len(f.onDisk(t).Repositories) != 0 {
-		t.Fatal("failed adoption was recorded")
+	if !exists(filepath.Join(dev, ".git")) || len(f.onDisk(t).Repositories) != 0 {
+		t.Fatal("something changed")
 	}
+}
+
+// A single clone in a directory is a laid-out repository only when the
+// names fit: the child is named after its current or default branch, or the
+// origin repository is named like the directory.
+func TestAdoptLaidOutPlausibility(t *testing.T) {
+	t.Run("docs/somerepo refused", func(t *testing.T) {
+		f := newFixture(t)
+		o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat"}})
+		child := filepath.Join(f.w.Root, "docs", "somerepo")
+		plainClone(t, o, child)
+		testutil.Git(t, child, "checkout", "-q", "feat")
+		_, err := adopt(t, f, filepath.Join(f.w.Root, "docs"), AdoptOptions{})
+		if err == nil || !strings.Contains(err.Error(), "somerepo") {
+			t.Fatalf("err = %v, want refusal mentioning somerepo", err)
+		}
+		if len(f.onDisk(t).Repositories) != 0 || !exists(filepath.Join(child, ".git")) {
+			t.Fatal("something changed")
+		}
+		if cands, err := Candidates(context.Background(), f.w.Root, f.w.Bundle()); err != nil || len(cands) != 0 {
+			t.Fatalf("candidates = %+v, %v; want none", cands, err)
+		}
+	})
+	t.Run("origin named like the directory", func(t *testing.T) {
+		f := newFixture(t)
+		o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat"}})
+		child := filepath.Join(f.w.Root, "docs", "somerepo")
+		plainClone(t, o, child)
+		testutil.Git(t, child, "remote", "set-url", "origin", "https://github.com/o/Docs.git")
+		cands, err := Candidates(context.Background(), f.w.Root, f.w.Bundle())
+		if err != nil || len(cands) != 1 {
+			t.Fatalf("candidates = %+v, %v", cands, err)
+		}
+		if _, err := adopt(t, f, filepath.Join(f.w.Root, "docs"), AdoptOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		onlyEntries(t, filepath.Join(f.w.Root, "docs"), "main")
+	})
+	t.Run("child named after the current branch", func(t *testing.T) {
+		f := newFixture(t)
+		o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x"}})
+		child := filepath.Join(f.w.Root, "r", "Feat-X")
+		plainClone(t, o, child)
+		testutil.Git(t, child, "checkout", "-q", "feat/x")
+		if _, err := adopt(t, f, filepath.Join(f.w.Root, "r"), AdoptOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if b := branchOf(t, filepath.Join(f.w.Root, "r", "main")); b != "feat/x" {
+			t.Fatalf("branch = %q", b)
+		}
+	})
 }

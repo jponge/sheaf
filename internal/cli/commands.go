@@ -79,7 +79,8 @@ func newInitCmd(d Deps) *cobra.Command {
 		Short: "Turn an existing directory into a bundle and list the checkouts found in it",
 		Long: "Create sheaf.yaml in an existing directory (default: the current directory) and list\n" +
 			"the checkouts found in its subdirectories: plain clones (<dir>/.git) and repositories\n" +
-			"already laid out as <dir>/<branch>/. With --adopt-all they are adopted right away.",
+			"with a single checkout <dir>/<child>/ (named after a branch, or <dir> named after the\n" +
+			"origin repository). With --adopt-all they are adopted right away.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			dir, err := dirArg(d, args)
@@ -158,12 +159,12 @@ func newAdoptCmd(d Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "adopt <dir>...",
 		Short: "Register existing checkouts located directly in the bundle",
-		Long: "Register existing checkouts. A plain clone <dir>/ is moved to <dir>/<branch>/ (its\n" +
-			"linked worktrees are repaired); a repository already laid out as <dir>/<branch>/ is\n" +
-			"only registered. A checkout on another branch than the default one must be clean: the\n" +
-			"primary moves to <dir>/<default>/ and the branch gets a sibling worktree. Owner, name\n" +
-			"and host are derived from the origin remote URL; SSH config aliases are recorded as-is\n" +
-			"unless --host is given.",
+		Long: "Register existing checkouts. The primary checkout of a repository lives in\n" +
+			"<dir>/<default branch>/ and may have any branch checked out. A plain clone <dir>/ is\n" +
+			"moved to <dir>/<default branch>/; a single checkout <dir>/<child>/ is renamed to it if\n" +
+			"needed (or only registered). Nothing is checked out or switched, linked worktrees are\n" +
+			"repaired. Owner, name and host are derived from the origin remote URL; SSH config\n" +
+			"aliases are recorded as-is unless --host is given.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			w, err := openWorkspace(c, d)

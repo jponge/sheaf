@@ -296,8 +296,11 @@ func TestAdoptDefaultBranchFlag(t *testing.T) {
 		t.Fatalf("adopt without --default-branch: exit %d\n%s", code, out)
 	}
 	e.mustRun(t, "--bundle", root, "adopt", dir, "--default-branch", "main")
-	if !exists(filepath.Join(dir, "main", ".git")) || !exists(filepath.Join(dir, "feat", ".git")) {
-		t.Fatal("not laid out as x/main + x/feat")
+	if !exists(filepath.Join(dir, "main", ".git")) || exists(filepath.Join(dir, "feat")) {
+		t.Fatal("not moved as is to x/main")
+	}
+	if b := testutil.Git(t, filepath.Join(dir, "main"), "branch", "--show-current"); b != "feat" {
+		t.Fatalf("x/main on %q, want feat (nothing switched)", b)
 	}
 }
 

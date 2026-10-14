@@ -223,8 +223,9 @@ func Init(ctx context.Context, dir string) (string, []Candidate, error) {
 //     of its work tree;
 //   - laid-out repositories: exactly one non-hidden subdirectory
 //     <name>/<child> holds a primary checkout (a .git directory, not the .git
-//     file of a linked worktree), and <child> is the normalized name of its
-//     checked-out branch (case-insensitively; not detached).
+//     file of a linked worktree), with any branch checked out, and the names
+//     fit (see laidOutPlausible; the default branch is read from the local
+//     refs/remotes/origin/HEAD only, so detection never uses the network).
 //
 // Symbolic links, hidden entries and names that are not valid repository
 // directory names are ignored, as are ambiguous layouts (several primary
@@ -246,7 +247,7 @@ func Candidates(ctx context.Context, root string, b *bundle.Bundle) ([]Candidate
 			continue
 		}
 		if p, err := findPrimary(ctx, dir); err == nil {
-			if b, err := gitx.CurrentBranch(ctx, p); err == nil && checkLaidOut(p, b) == nil {
+			if laidOutPlausible(ctx, dir, p, localDefaultBranch(ctx, p)) == nil {
 				out = append(out, Candidate{Name: name, Path: dir, Kind: CandidateLaidOut, Primary: p})
 			}
 		}
@@ -315,4 +316,15 @@ func findPrimary(ctx context.Context, repoDir string) (string, error) {
 		return found[0], nil
 	}
 	return "", fmt.Errorf("%s: several primary checkouts: %s", repoDir, strings.Join(found, ", "))
+}
+
+// localDefaultBranch returns origin's default branch as recorded locally in
+// refs/remotes/origin/HEAD, or "" (no network access).
+func localDefaultBranch(ctx context.Context, dir string) string {
+	out, err := gitx.Run(ctx, dir, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return ""
+	}
+	b, _ := strings.CutPrefix(strings.TrimSpace(out), "refs/remotes/origin/")
+	return b
 }
