@@ -15,6 +15,8 @@ import (
 
 func addBundleCommands(root *cobra.Command, d Deps) {
 	root.AddCommand(newCreateCmd(d), newInitCmd(d), newAddCmd(d), newAdoptCmd(d), newRemoveCmd(d))
+	addCheckoutCommands(root, d)
+	addWorktreeCommands(root, d)
 }
 
 // absFrom resolves p against the injectable working directory.
