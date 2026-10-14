@@ -124,3 +124,26 @@ The orchestrator appends one line per completed step: commit, review rounds, not
 - v2 migration review: B1 v2 startup capability-query replies leak into the shell after fast exits (fix: avoid queries or DA1 drain before quit, pty regression); S3 test helper hid sanitize mutant; pre-existing ops spill-file test flake root-caused (test race).
 - Decisions 2026-10-14 (user): accept the exit drain (DA1, ~35 ms, keys typed in the window swallowed); paste-freeze (ultraviolet, ESC P/X/^/_ inside bracketed paste) left as a documented upstream limitation, no mitigation.
 - bubbletea v2 migration: Opus impl, Opus review (round 1 blocking: v2 capability-query replies leaking into the shell; fixed with a DA1 drain on quit). Focused round-2 review was stopped by the user; orchestrator verified instead (full suite, pty tests x10, drain code read: bounded 300 ms total, finished models ignore input, force-exit independent of the program).
+
+## Takeaways (2026-10-14)
+
+What worked
+- Test-first plus a separate adversarial reviewer per step paid off: reviews found ~20 blocking defects that green test suites had missed, almost all data-loss paths in destructive commands (remove, sync --remove-gone, prune, wt rm -d, adopt). Reviewers that built the binary and ran experiments (pty drivers, fake ssh/upload-pack, mutation checks) found far more than code reading.
+- Mutation checks ("break the code, does a test fail?") repeatedly exposed vacuous or weak tests; ask implementers and reviewers for them explicitly.
+- Isolation builds before committing (`git archive HEAD` + only the step's files) allowed parallel steps without committing half-integrated trees.
+- Registration hooks in separate files (cmd_*.go) let parallel agents work without editing the same file.
+
+Recurring defect classes (check these first next time)
+- Inherited environment: GIT_* variables from hooks, user git config (status.showUntrackedFiles, pull.ff, autocrlf), locale. Isolate tests and sanitize child envs.
+- "Remote state" assumptions: stale remote-tracking refs, remotes that vanished, listings that are incomplete because of auth scope. Never treat absence in a listing as proof of deletion; confirm, and treat "remote gone" as a data risk.
+- Git discovery walking up into an enclosing repository when a checkout lost its .git.
+- Processes outliving cancellation: kill process groups (Setsid + SIGTERM, then SIGKILL), WaitDelay false failures, SIGPIPE, temp files on emergency exit.
+- Git state the porcelain hides: branches being rebased/bisected (detached HEAD), reftable HEAD placeholders, skip-worktree/assume-unchanged files, nested and bare repositories, FETCH_HEAD shared between processes.
+- Terminal I/O: library init-time terminal queries (bubbletea v1), query replies leaking after exit (v2), escaping in completion scripts.
+
+What to do differently
+- Settle the core domain model with the user before building on it: the "primary checkout is a directory on any branch" correction came after adopt had been built around "primary is on the default branch" and cost a rework.
+- Run the sandbox with an init process from the start (PID exhaustion stopped work once).
+- Give every agent an explicit rule against touching real external tools in tests (one test run reached the real `gh auth status`).
+- Paste-friendly commands for the user: short lines, no multi-line blocks (terminal wrapping broke fish input twice).
+- Prefer targeted re-reviews over full ones after a blocking fix; the last focused re-review ran long and was stopped.
