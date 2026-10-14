@@ -147,3 +147,5 @@ What to do differently
 - Give every agent an explicit rule against touching real external tools in tests (one test run reached the real `gh auth status`).
 - Paste-friendly commands for the user: short lines, no multi-line blocks (terminal wrapping broke fish input twice).
 - Prefer targeted re-reviews over full ones after a blocking fix; the last focused re-review ran long and was stopped.
+- Test speed (user: do what's best): ops 20.5 s Linux / 72.9 s macOS, 210 serial tests (~0.1 s each, git process spawns), 0 t.Parallel because IsolateGit uses t.Setenv. Plan after the macOS path fix: package-level isolation in TestMain + t.Parallel where no process-global state, cached fixture repos copied per test, before/after measurements. Target: <5 s per package on Linux, full suite <30 s.
+- macOS: 15 failures were test expectations using unresolved temp paths (no product bug); force-kill delay attributed to a fork racing the group SIGKILL (macOS reasoning unverified), fixed with straggler re-kill; added make test-symlinked-tmp. Takeaway: a step-0 portability finding (N5) was dropped and no non-Linux check existed.
