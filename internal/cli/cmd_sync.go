@@ -68,6 +68,10 @@ func newSyncCmd(d Deps) *cobra.Command {
 			"--remove-gone --yes removes the gone ones with the checks of `sheaf remove` (refused when\n" +
 			"data would be lost, unless --force; a remote that no longer exists counts as data at risk).\n" +
 			"Actions run in that order.\n\n" +
+			"In TUI mode, without action flags (and without --json), a menu offers the new and gone\n" +
+			"repositories (nothing preselected), then which unselected new ones to exclude, asks to\n" +
+			"confirm removals, and applies the choices as above (never with --force or\n" +
+			"--allow-mass-removal).\n\n" +
 			"--json prints {version, bundle, orgs: [{org, listed, truncated, mass_removal, error?,\n" +
 			"warnings?, notes?, unconfirmed?}], proposals: [{key, kind, org, name (directory name for gone,\n" +
 			"moved and archived), slug (as recorded for gone and moved), url, default_branch?, fork?,\n" +
@@ -126,6 +130,9 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 			return err
 		}
 		return rep.Err()
+	}
+	if !(fl.addNew || fl.removeGone || len(fl.exclude) > 0) && d.tuiMode(c) {
+		return tuiSync(c, d, w, rep)
 	}
 	excluded, err := syResolveExcludes(rep, fl.exclude, fl.includeArchived)
 	if err != nil {

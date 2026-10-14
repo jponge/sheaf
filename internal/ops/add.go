@@ -265,12 +265,12 @@ func planClones(w *Workspace, specs []lookup, as, origin, source string) []Task 
 		if as != "" {
 			name = as
 		}
-		if e := existingByKey(b, "", r.Slug()); e != nil {
-			tasks = append(tasks, skippedTask(e.Name, fmt.Sprintf("%s is already in the bundle as %s", r.Slug(), e.Name)))
-			continue
-		}
-		if e := existingOnAliasHost(b, r.Slug()); e != nil {
-			tasks = append(tasks, skippedTask(e.Name, fmt.Sprintf("%s is already in the bundle as %s (host %s)", r.Slug(), e.Name, e.Host)))
+		if e := inBundle(b, r.Slug()); e != nil {
+			msg := fmt.Sprintf("%s is already in the bundle as %s", r.Slug(), e.Name)
+			if !e.IsGitHub() {
+				msg += fmt.Sprintf(" (host %s)", e.Host)
+			}
+			tasks = append(tasks, skippedTask(e.Name, msg))
 			continue
 		}
 		if err := bundle.ValidateRepoName(name); err != nil {
@@ -368,4 +368,24 @@ func cloneRepo(ctx context.Context, w *Workspace, entry bundle.Repository, branc
 		return "", err
 	}
 	return "cloned into " + dest, nil
+}
+
+// InBundle reports whether Add would skip the GitHub repository slug
+// (owner/name) as already in b, and returns the name of its entry: same
+// slug, case-insensitively, recorded on github.com or on a host that looks
+// like an SSH alias of it. A UI uses it to mark repositories as present.
+func InBundle(b *bundle.Bundle, slug string) (string, bool) {
+	if e := inBundle(b, slug); e != nil {
+		return e.Name, true
+	}
+	return "", false
+}
+
+// inBundle returns the entry of b that makes slug present (see InBundle),
+// nil if none.
+func inBundle(b *bundle.Bundle, slug string) *bundle.Repository {
+	if e := existingByKey(b, "", slug); e != nil {
+		return e
+	}
+	return existingOnAliasHost(b, slug)
 }

@@ -36,12 +36,23 @@ import (
 // The returned model may be nil when the program panicked or failed to
 // start; callers should use a comma-ok type assertion.
 func Run(m tea.Model, in io.Reader, out io.Writer, opts ...tea.ProgramOption) (tea.Model, error) {
+	p, err := NewProgram(m, in, out, opts...)
+	if err != nil {
+		return m, err
+	}
+	return p.Run()
+}
+
+// NewProgram returns the program Run would run, with the same handling of
+// in (including ErrInputNotTerminal), for callers that need the program
+// itself, e.g. to Send it messages from other goroutines while it runs.
+func NewProgram(m tea.Model, in io.Reader, out io.Writer, opts ...tea.ProgramOption) (*tea.Program, error) {
 	var eof *quitOnEOF
 	switch r := in.(type) {
 	case nil:
 	case *os.File:
 		if !isTerminalFile(r) {
-			return m, ErrInputNotTerminal
+			return nil, ErrInputNotTerminal
 		}
 	default:
 		if f, ok := r.(term.File); !ok || !term.IsTerminal(f.Fd()) {
@@ -53,7 +64,7 @@ func Run(m tea.Model, in io.Reader, out io.Writer, opts ...tea.ProgramOption) (t
 	if eof != nil {
 		eof.p = p // set before p.Run starts the read loop
 	}
-	return p.Run()
+	return p, nil
 }
 
 // isTerminalFile reports whether f is a terminal without calling f.Fd, which

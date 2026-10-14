@@ -79,7 +79,7 @@ type MultiSelect struct {
 	filter    string
 	filtering bool
 
-	confirmed, cancelled bool
+	confirmed, cancelled, interrupted bool
 
 	keys   multiSelectKeys
 	help   help.Model
@@ -119,6 +119,11 @@ func (m MultiSelect) Confirmed() bool { return m.confirmed }
 // for another reason (e.g. input closed) is neither confirmed nor cancelled.
 func (m MultiSelect) Cancelled() bool { return m.cancelled }
 
+// Interrupted reports whether the menu was cancelled with ctrl+c, which
+// callers treat as an interruption of the command rather than a plain
+// cancellation.
+func (m MultiSelect) Interrupted() bool { return m.interrupted }
+
 // SelectedKeys returns the keys of the currently selected items, filtered or
 // not, in their original order. It does not check Confirmed.
 func (m MultiSelect) SelectedKeys() []string {
@@ -144,7 +149,7 @@ func (m MultiSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		if key.Matches(msg, m.keys.ForceQuit) {
-			m.cancelled = true
+			m.cancelled, m.interrupted = true, true
 			return m, tea.Quit
 		}
 		if m.filtering {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -10,8 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// For this step every command runs in plain CLI mode; UseTUI is the switch
-// the TUI wiring will use (menus for add --org, confirmation for remove).
+// Commands with menus, confirmations or long-running work run their TUI
+// variant (cmd_tui.go) when Deps.tuiMode says so; the others are always
+// plain: status, path, wt list/add/pr, version, completion, shell-init,
+// doctor, run (which streams the commands' output), create.
 
 func addBundleCommands(root *cobra.Command, d Deps) {
 	root.AddCommand(newCreateCmd(d), newInitCmd(d), newAddCmd(d), newAdoptCmd(d), newRemoveCmd(d))
@@ -100,6 +103,9 @@ func newInitCmd(d Deps) *cobra.Command {
 				fmt.Fprintln(out, "no existing checkouts found")
 				return nil
 			}
+			if d.tuiMode(c) {
+				return tuiInitAdopt(c, root, cands, adoptAll, OptionsFrom(c).Jobs)
+			}
 			var names, paths []string
 			for _, cand := range cands {
 				fmt.Fprintf(out, "found %s: %s (%s)\n", cand.Kind, cand.Name, cand.Primary)
@@ -140,6 +146,9 @@ func newAddCmd(d Deps) *cobra.Command {
 			w, err := openWorkspace(c, d)
 			if err != nil {
 				return err
+			}
+			if d.tuiMode(c) {
+				return tuiAdd(c, w, d.hosting(), req, OptionsFrom(c).Jobs)
 			}
 			s, err := ops.Add(checkoutContext(c), w, d.hosting(), req, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
 			if err != nil {
@@ -182,6 +191,11 @@ func newAdoptCmd(d Deps) *cobra.Command {
 				}
 				dirs = append(dirs, p)
 			}
+			if d.tuiMode(c) {
+				return tuiSummary(c, "Adopting checkouts", func(ctx context.Context, rep ops.Reporter) ops.Summary {
+					return ops.AdoptAll(ctx, w, dirs, opts, OptionsFrom(c).Jobs, rep)
+				})
+			}
 			s := ops.AdoptAll(checkoutContext(c), w, dirs, opts, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
 			return printSummary(c.OutOrStdout(), s)
 		},
@@ -199,7 +213,8 @@ func newRemoveCmd(d Deps) *cobra.Command {
 		Long: "Remove a repository: fetch it, refuse when any checkout or worktree has data that\n" +
 			"would be lost (changes, untracked files, stashes, unpushed commits) unless --force,\n" +
 			"then delete its worktrees, its directory and its sheaf.yaml entry. In CLI mode the\n" +
-			"removal must be confirmed with --yes; sheaf never prompts.",
+			"removal must be confirmed with --yes; sheaf never prompts. In TUI mode a dialog\n" +
+			"shows what will be deleted and asks for confirmation, unless --yes is given.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			w, err := openWorkspace(c, d)
@@ -207,6 +222,13 @@ func newRemoveCmd(d Deps) *cobra.Command {
 				return err
 			}
 			name := args[0]
+			wd, err := d.getwd()
+			if err != nil {
+				return err
+			}
+			if d.tuiMode(c) {
+				return tuiRemove(c, w, name, ops.RemoveOptions{Force: force, Offline: offline, WorkingDir: wd}, yes)
+			}
 			r := plainRenderer{c.ErrOrStderr()}
 			emit := func(e ops.Event) {
 				if e.Repo == "" {
@@ -221,21 +243,10 @@ func newRemoveCmd(d Deps) *cobra.Command {
 				r.Report(e)
 			}
 			confirm := func(p ops.RemovePlan) bool {
-				for _, it := range p.Items {
-					for _, r := range it.Risks {
-						if r.Informational() {
-							emit(ops.Event{Message: fmt.Sprintf("%s: %v (informational, not blocking)", it.Path, r)})
-						}
-					}
-				}
-				if p.Dir != "" {
-					emit(ops.Event{Message: "will delete " + p.Dir})
+				for _, l := range removePlanLines(p) {
+					emit(ops.Event{Message: l})
 				}
 				return yes
-			}
-			wd, err := d.getwd()
-			if err != nil {
-				return err
 			}
 			msg, err := ops.Remove(checkoutContext(c), w, name, ops.RemoveOptions{Force: force, Offline: offline, Confirm: confirm, WorkingDir: wd}, emit)
 			if errors.Is(err, ops.ErrNotConfirmed) {
@@ -252,4 +263,21 @@ func newRemoveCmd(d Deps) *cobra.Command {
 	cmd.Flags().BoolVar(&offline, "offline", false, "do not fetch first (the remote state may be stale)")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "confirm the removal (required in CLI mode)")
 	return cmd
+}
+
+// removePlanLines describes a removal plan: the informational risks and the
+// directory that will be deleted.
+func removePlanLines(p ops.RemovePlan) []string {
+	var lines []string
+	for _, it := range p.Items {
+		for _, r := range it.Risks {
+			if r.Informational() {
+				lines = append(lines, fmt.Sprintf("%s: %v (informational, not blocking)", it.Path, r))
+			}
+		}
+	}
+	if p.Dir != "" {
+		lines = append(lines, "will delete "+p.Dir)
+	}
+	return lines
 }

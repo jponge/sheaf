@@ -263,7 +263,8 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 			"removal unless --force (like git worktree remove --force). -d deletes the local\n" +
 			"branch too, only if merged into its upstream or origin/<default branch>; -D deletes\n" +
 			"it even if unmerged (like git branch -d/-D). The primary checkout cannot be removed\n" +
-			"(use `sheaf remove`). In CLI mode the removal must be confirmed with --yes.\n\n" +
+			"(use `sheaf remove`). In CLI mode the removal must be confirmed with --yes; in TUI\n" +
+			"mode a dialog shows the plan and asks for confirmation, unless --yes is given.\n\n" +
 			singleArgHelp,
 		Args: cobra.MaximumNArgs(2),
 	}
@@ -281,28 +282,16 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if d.tuiMode(c) {
+			if opts.WorkingDir, err = d.getwd(); err != nil {
+				return err
+			}
+			return tuiWorktreeRemove(c, w, repo, target, opts, yes)
+		}
 		emit := eventSink(c, repo, ops.PhaseWorktree)
 		opts.Confirm = func(p ops.WorktreeRemovePlan) bool {
-			wt := p.Worktree.Dir
-			for _, r := range p.NonBlocking() {
-				emit(ops.Event{Worktree: wt, Message: fmt.Sprintf("%v (informational, not blocking)", r)})
-			}
-			if opts.Force {
-				for _, r := range p.Blocking() {
-					emit(ops.Event{Worktree: wt, Message: fmt.Sprintf("%v will be lost (--force)", r)})
-				}
-			}
-			emit(ops.Event{Worktree: wt, Message: fmt.Sprintf("will remove worktree %s [%s] at %s", p.Worktree.Dir, branchLabel(p.Worktree), p.Worktree.Path)})
-			switch {
-			case p.MergedInto != "":
-				emit(ops.Event{Worktree: wt, Message: fmt.Sprintf("will delete branch %s (merged into %s)", p.Worktree.Branch, p.MergedInto)})
-			case p.ContainedIn != "":
-				emit(ops.Event{Worktree: wt, Message: fmt.Sprintf("will delete branch %s (contained in %s)", p.Worktree.Branch, p.ContainedIn)})
-			case p.Unmerged != "":
-				emit(ops.Event{Worktree: wt, Message: fmt.Sprintf("will delete unmerged branch %s: %s will be lost (-D)", p.Worktree.Branch, commitCount(p.UnmergedCommits))})
-			}
-			if p.BranchKept != "" {
-				emit(ops.Event{Worktree: wt, Message: "warning: " + p.BranchKept})
+			for _, l := range worktreeRemovePlanLines(p, opts.Force) {
+				emit(ops.Event{Worktree: p.Worktree.Dir, Message: l})
 			}
 			return yes
 		}
@@ -326,6 +315,33 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 	f.BoolVar(&opts.Offline, "offline", false, "do not fetch first (the remote state may be stale)")
 	f.BoolVarP(&yes, "yes", "y", false, "confirm the removal (required in CLI mode)")
 	return cmd
+}
+
+// worktreeRemovePlanLines describes a worktree removal plan: risks, what is
+// removed and what happens to the branch.
+func worktreeRemovePlanLines(p ops.WorktreeRemovePlan, force bool) []string {
+	var lines []string
+	for _, r := range p.NonBlocking() {
+		lines = append(lines, fmt.Sprintf("%v (informational, not blocking)", r))
+	}
+	if force {
+		for _, r := range p.Blocking() {
+			lines = append(lines, fmt.Sprintf("%v will be lost (--force)", r))
+		}
+	}
+	lines = append(lines, fmt.Sprintf("will remove worktree %s [%s] at %s", p.Worktree.Dir, branchLabel(p.Worktree), p.Worktree.Path))
+	switch {
+	case p.MergedInto != "":
+		lines = append(lines, fmt.Sprintf("will delete branch %s (merged into %s)", p.Worktree.Branch, p.MergedInto))
+	case p.ContainedIn != "":
+		lines = append(lines, fmt.Sprintf("will delete branch %s (contained in %s)", p.Worktree.Branch, p.ContainedIn))
+	case p.Unmerged != "":
+		lines = append(lines, fmt.Sprintf("will delete unmerged branch %s: %s will be lost (-D)", p.Worktree.Branch, commitCount(p.UnmergedCommits)))
+	}
+	if p.BranchKept != "" {
+		lines = append(lines, "warning: "+p.BranchKept)
+	}
+	return lines
 }
 
 func branchLabel(in ops.WorktreeInfo) string {

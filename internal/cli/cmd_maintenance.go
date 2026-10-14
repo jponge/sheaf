@@ -111,7 +111,9 @@ func newPruneCmd(d Deps) *cobra.Command {
 			"keep it; there is no --force). --delete-branches also deletes the branches of the\n" +
 			"removed worktrees when merged or contained in another ref (like -d, never -D).\n" +
 			"--include-branches also deletes, under the same condition, gone or merged local\n" +
-			"branches that have no worktree. sheaf never prompts in CLI mode.",
+			"branches that have no worktree. sheaf never prompts in CLI mode. In TUI mode (without\n" +
+			"--dry-run or --json) the candidates are listed in a dialog asking for confirmation,\n" +
+			"unless --yes is given.",
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			if yes && dryRun {
@@ -125,6 +127,9 @@ func newPruneCmd(d Deps) *cobra.Command {
 				return err
 			}
 			opts.Jobs = OptionsFrom(c).Jobs
+			if !dryRun && !asJSON && d.tuiMode(c) {
+				return tuiPrune(c, w, opts, yes)
+			}
 			ctx := checkoutContext(c)
 			rep := plainRenderer{c.ErrOrStderr()}
 			plan, err := ops.PlanPrune(ctx, w, opts, rep)
@@ -144,22 +149,7 @@ func newPruneCmd(d Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var problems []string
-			for _, p := range plan.Problems {
-				problems = append(problems, p.Error())
-			}
-			for _, r := range results {
-				if r.Outcome == ops.PruneFailed {
-					problems = append(problems, candidateLabel(r.PruneCandidate)+": "+r.Message)
-				}
-			}
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if len(problems) > 0 {
-				return fmt.Errorf("%d problem(s):\n  %s", len(problems), strings.Join(problems, "\n  "))
-			}
-			return nil
+			return pruneErr(ctx, plan, results)
 		},
 	}
 	f := cmd.Flags()
@@ -173,6 +163,27 @@ func newPruneCmd(d Deps) *cobra.Command {
 	return cmd
 }
 
+// pruneErr is the error of prune: the interruption, or the problems of the
+// plan and the failed removals.
+func pruneErr(ctx context.Context, plan ops.PrunePlan, results []ops.PruneResult) error {
+	var problems []string
+	for _, p := range plan.Problems {
+		problems = append(problems, p.Error())
+	}
+	for _, r := range results {
+		if r.Outcome == ops.PruneFailed {
+			problems = append(problems, candidateLabel(r.PruneCandidate)+": "+r.Message)
+		}
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("%d problem(s):\n  %s", len(problems), strings.Join(problems, "\n  "))
+	}
+	return nil
+}
+
 func printPrune(out io.Writer, plan ops.PrunePlan, results []ops.PruneResult, dryRun bool) {
 	for _, s := range plan.Skipped {
 		fmt.Fprintf(out, "skipped %s/%s: %s\n", s.Repo, s.Branch, s.Reason)
@@ -183,12 +194,9 @@ func printPrune(out io.Writer, plan ops.PrunePlan, results []ops.PruneResult, dr
 	}
 	if dryRun {
 		for _, c := range plan.Candidates {
-			what := "would remove worktree " + c.Repo + "/" + c.Dir + " [" + c.Branch + "] at " + c.Path
-			if !c.Worktree {
-				what = "would delete branch " + c.Repo + "/" + c.Branch + " if merged"
+			for _, l := range pruneCandidateLines(c) {
+				fmt.Fprintln(out, l)
 			}
-			fmt.Fprintf(out, "%s: %s\n", what, c.Reason)
-			printNotes(out, c.Notes)
 		}
 		fmt.Fprintf(out, "dry run: pass --yes to prune %d candidate(s)\n", len(plan.Candidates))
 		return
@@ -205,6 +213,19 @@ func printPrune(out io.Writer, plan ops.PrunePlan, results []ops.PruneResult, dr
 		printNotes(out, r.Notes)
 	}
 	fmt.Fprintf(out, "%d removed, %d kept, %d failed\n", n[ops.PruneRemoved], n[ops.PruneKept], n[ops.PruneFailed])
+}
+
+// pruneCandidateLines describes what pruning c would do, with its notes.
+func pruneCandidateLines(c ops.PruneCandidate) []string {
+	what := "would remove worktree " + c.Repo + "/" + c.Dir + " [" + c.Branch + "] at " + c.Path
+	if !c.Worktree {
+		what = "would delete branch " + c.Repo + "/" + c.Branch + " if merged"
+	}
+	lines := []string{what + ": " + c.Reason}
+	for _, n := range c.Notes {
+		lines = append(lines, "  note: "+n)
+	}
+	return lines
 }
 
 func printNotes(out io.Writer, notes []string) {

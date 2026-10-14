@@ -19,8 +19,8 @@ type Confirm struct {
 
 	width, height int // 0 = unknown
 
-	done, confirmed bool
-	styles          Styles
+	done, confirmed, interrupted bool
+	styles                       Styles
 }
 
 // NewConfirm returns a Confirm asking question, followed by details lines.
@@ -44,6 +44,10 @@ func (m Confirm) Init() tea.Cmd { return nil }
 // Confirmed reports whether the user answered yes.
 func (m Confirm) Confirmed() bool { return m.confirmed }
 
+// Interrupted reports whether the dialog was declined with ctrl+c, which
+// callers treat as an interruption of the command rather than a plain no.
+func (m Confirm) Interrupted() bool { return m.interrupted }
+
 // Done reports whether the user answered (yes or no).
 func (m Confirm) Done() bool { return m.done }
 
@@ -60,7 +64,10 @@ func (m Confirm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "y", "Y":
 			m.done, m.confirmed = true, true
 			return m, tea.Quit
-		case "n", "N", "enter", "esc", "q", "ctrl+c":
+		case "ctrl+c":
+			m.done, m.interrupted = true, true
+			return m, tea.Quit
+		case "n", "N", "enter", "esc", "q":
 			m.done = true
 			return m, tea.Quit
 		}
@@ -73,18 +80,27 @@ func (m Confirm) View() string {
 	st := m.styles
 	lines := []string{st.Question.Render(sanitize(m.question)) + " " + st.Status.Render("[y/N]")}
 
-	details := m.details
+	// Details are wrapped to the width (first line indented by 2, the
+	// following ones by 4); the elision below counts wrapped lines.
+	var details []string
+	for _, d := range m.details {
+		for i, l := range wrap(sanitize(d), m.width-4) {
+			if i == 0 {
+				details = append(details, "  "+l)
+			} else {
+				details = append(details, "    "+l)
+			}
+		}
+	}
 	switch {
 	case m.height == 1:
 		details = nil
 	case m.height > 0 && 1+len(details) > m.height:
 		room := m.height - 2 // question + "… and K more"
 		hidden := len(details) - room
-		details = append(details[:room:room], fmt.Sprintf("… and %d more", hidden))
+		details = append(details[:room:room], fmt.Sprintf("  … and %d more", hidden))
 	}
-	for _, d := range details {
-		lines = append(lines, "  "+sanitize(d))
-	}
+	lines = append(lines, details...)
 
 	if m.width > 0 {
 		trunc := lipgloss.NewStyle().MaxWidth(m.width)

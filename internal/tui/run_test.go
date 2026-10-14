@@ -230,3 +230,45 @@ func TestRunKeepsNonTerminalFileNonBlocking(t *testing.T) {
 		t.Fatal("read deadline ignored after Run: the pipe was switched to blocking mode")
 	}
 }
+
+// NewProgram applies Run's input handling and returns the program, so that
+// callers can Send messages to it while it runs.
+func TestNewProgramSendsAndHonoursInputRules(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	if _, err := NewProgram(NewConfirm("q", nil), r, io.Discard); !errors.Is(err, ErrInputNotTerminal) {
+		t.Fatalf("pipe input: err = %v, want ErrInputNotTerminal", err)
+	}
+
+	p, err := NewProgram(NewProgress("t"), nil, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go p.Send(RowUpdate{Key: "a", Label: "alpha", State: RowDone})
+	go func() { time.Sleep(50 * time.Millisecond); p.Send(FinishMsg{}) }()
+	final, err := p.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr := final.(Progress); !pr.Finished() {
+		t.Fatal("not finished")
+	}
+
+	// In-memory input still quits at EOF.
+	p, err = NewProgram(NewConfirm("q", nil), strings.NewReader(""), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { _, _ = p.Run(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(runDeadline):
+		p.Kill()
+		t.Fatal("program did not quit at EOF")
+	}
+}

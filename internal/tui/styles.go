@@ -26,6 +26,7 @@ type Styles struct {
 	FilterPrompt lipgloss.Style
 	Status       lipgloss.Style // "N/M selected" line
 	Question     lipgloss.Style
+	Failed       lipgloss.Style // failure marker of a Progress row
 	Help         help.Styles
 }
 
@@ -54,6 +55,7 @@ func DefaultStyles() Styles {
 		FilterPrompt: lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
 		Status:       faint,
 		Question:     lipgloss.NewStyle().Bold(true),
+		Failed:       lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
 		Help:         h,
 	}
 }

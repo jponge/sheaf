@@ -29,9 +29,9 @@ var (
 func gitInteractive(tui bool, jobs int, stdinTTY bool) bool { return !tui && jobs == 1 && stdinTTY }
 
 // checkoutContext returns the command's context, marked for interactive git
-// mode when gitInteractive says so. The checkout commands always render in
-// plain mode for now; the TUI progress view (step 8) must pass its own
-// decision instead of false.
+// mode when gitInteractive says so. It is only used in plain CLI mode: the
+// TUI variants (cmd_tui.go) use the unmarked context, git never gets the
+// terminal while a bubbletea program owns it.
 func checkoutContext(c *cobra.Command) context.Context {
 	ctx := c.Context()
 	if gitInteractive(false, OptionsFrom(c).Jobs, stdinIsTerminal(c.InOrStdin())) {
@@ -354,6 +354,18 @@ func newFetchCmd(d Deps) *cobra.Command {
 				return err
 			}
 			opts.Jobs = OptionsFrom(c).Jobs
+			if d.tuiMode(c) {
+				var ferr error
+				err := tuiSummary(c, "Fetching", func(ctx context.Context, rep ops.Reporter) ops.Summary {
+					var s ops.Summary
+					s, ferr = ops.FetchRepos(ctx, w, opts, rep)
+					return s
+				})
+				if ferr != nil {
+					return ferr
+				}
+				return err
+			}
 			s, err := ops.FetchRepos(checkoutContext(c), w, opts, coCheckoutRenderer{plainRenderer{c.ErrOrStderr()}})
 			if err != nil {
 				return err
@@ -388,6 +400,19 @@ func newUpdateCmd(d Deps) *cobra.Command {
 				return err
 			}
 			opts.Jobs = OptionsFrom(c).Jobs
+			if d.tuiMode(c) {
+				s := newTUISession(c)
+				opts.Force = s.ctl.force
+				var r ops.UpdateReport
+				var uerr error
+				s.progress("Updating", progressOpts{Aside: ops.PhaseFetch}, func(ctx context.Context, rep ops.Reporter, _ askFunc) {
+					r, uerr = ops.Update(ctx, w, opts, rep)
+				})
+				if uerr != nil {
+					return uerr
+				}
+				return coPrintUpdateSummary(c.OutOrStdout(), r, strict)
+			}
 			opts.Force = forceFrom(c.Context())
 			r, err := ops.Update(checkoutContext(c), w, opts, coCheckoutRenderer{plainRenderer{c.ErrOrStderr()}})
 			if err != nil {

@@ -114,3 +114,43 @@ func TestSecondSignalKillsGitAndExits(t *testing.T) {
 		}
 	}
 }
+
+// A signal and a TUI ctrl+c count together: signal first, key second is
+// the emergency stop.
+func TestSignalThenKeyIsEmergencyStop(t *testing.T) {
+	net := make(chan os.Signal, 1)
+	signal.Notify(net, syscall.SIGTERM)
+	defer signal.Stop(net)
+	killed, exited := stubEmergency(t)
+	root := NewRootCmd(Streams{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}})
+	root.AddCommand(&cobra.Command{Use: "probe", RunE: func(c *cobra.Command, _ []string) error {
+		_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+		select {
+		case <-c.Context().Done():
+		case <-time.After(5 * time.Second):
+			return errors.New("signal did not cancel")
+		}
+		ctl := interruptFrom(c.Context())
+		if ctl == nil {
+			return errors.New("no interrupt controller")
+		}
+		ctl.interrupt()
+		select {
+		case code := <-exited:
+			if code != 130 {
+				return fmt.Errorf("exit(%d)", code)
+			}
+		case <-time.After(5 * time.Second):
+			return errors.New("key after signal did not exit")
+		}
+		if len(killed) != 1 {
+			return errors.New("not killed")
+		}
+		return nil
+	}})
+	var errb bytes.Buffer
+	root.SetErr(&errb)
+	if code := execute(root, []string{"probe"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+}
