@@ -142,6 +142,9 @@ func run(ctx context.Context, o runOpts, dir string, args ...string) (string, er
 			case <-o.force: // nil channel: never
 				if pg.kill() {
 					forced.Store(true)
+					// Members that missed the signal would keep Wait
+					// waiting for the output pipes (see killStragglers).
+					pg.killStragglers(done)
 				}
 			case <-done:
 			}

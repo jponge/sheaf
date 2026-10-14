@@ -17,3 +17,5 @@ func startGroup(cmd *exec.Cmd, _ time.Duration, _ bool) *procGroup { return &pro
 func (pg *procGroup) kill() bool { return pg.cmd.Process.Kill() == nil }
 
 func (*procGroup) finish() {}
+
+func (*procGroup) killStragglers(<-chan struct{}) {}

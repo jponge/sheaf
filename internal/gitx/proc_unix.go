@@ -23,6 +23,7 @@ type procGroup struct {
 	pgid     int       // set when Cancel sent SIGTERM
 	signaled time.Time // when SIGTERM was sent
 	desc     []procID  // single: descendants signalled by Cancel
+	killed   bool      // kill sent SIGKILL to the group
 }
 
 // startGroup makes cmd start in a new session (when ownSession) and replaces
@@ -81,8 +82,44 @@ func (pg *procGroup) kill() bool {
 		}
 		return ok
 	}
-	return syscall.Kill(-pg.cmd.Process.Pid, syscall.SIGKILL) == nil
+	if killGroup(pg.cmd.Process.Pid, syscall.SIGKILL) != nil {
+		return false
+	}
+	pg.mu.Lock()
+	pg.killed = true
+	pg.mu.Unlock()
+	return true
 }
+
+// killStragglers runs after kill: it sends SIGKILL to the group again every
+// 10 ms until the group is empty (the signal fails with ESRCH), stop is
+// closed, or pg.delay has elapsed. A process forked while the first SIGKILL
+// was being delivered may have missed it: Linux makes fork atomic with
+// respect to process-group signals, other kernels may not (this is the
+// suspected cause of force-killed merges returning only after waitDelay on
+// macOS, the straggler holding git's stderr open). The id cannot be reused
+// while the group has members; the only (theoretical) window is between the
+// group emptying and the next probe, as in finish.
+func (pg *procGroup) killStragglers(stop <-chan struct{}) {
+	if pg.single {
+		return
+	}
+	pgid := pg.cmd.Process.Pid
+	deadline := time.Now().Add(pg.delay)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for killGroup(pgid, syscall.SIGKILL) == nil && time.Now().Before(deadline) {
+		select {
+		case <-stop:
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+// killGroup sends sig to the process group pgid. It is a variable only so
+// that tests can simulate a member missing a signal.
+var killGroup = func(pgid int, sig syscall.Signal) error { return syscall.Kill(-pgid, sig) }
 
 // finish runs after cmd.Wait returned. If the group was cancelled and some
 // member outlived the leader (e.g. ssh or a filter ignoring SIGTERM), it
@@ -94,8 +131,12 @@ func (pg *procGroup) kill() bool {
 // emptying and the next probe.
 func (pg *procGroup) finish() {
 	pg.mu.Lock()
-	pgid, signaled, desc := pg.pgid, pg.signaled, pg.desc
+	pgid, signaled, desc, killed := pg.pgid, pg.signaled, pg.desc, pg.killed
 	pg.mu.Unlock()
+	if killed {
+		pg.killStragglers(nil)
+		return
+	}
 	if pg.single {
 		pg.finishDescendants(signaled, desc)
 		return
