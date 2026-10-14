@@ -268,3 +268,12 @@ func preCheck(ctx context.Context, dir string, withAheadBehind bool) (PullResult
 // afterMergeHook, when set by a test, runs right after a successful merge in
 // FastForward, before HEAD is re-read.
 var afterMergeHook func()
+
+// FetchAll runs `git fetch --prune --all` in dir: it fetches every remote
+// of the repository (work tree or bare) and deletes remote-tracking refs
+// whose remote branch no longer exists. Like Fetch, callers serialize it per
+// repository. It is cancellable through ctx.
+func FetchAll(ctx context.Context, dir string) error {
+	_, err := Run(ctx, dir, "fetch", "--quiet", "--prune", "--all")
+	return err
+}

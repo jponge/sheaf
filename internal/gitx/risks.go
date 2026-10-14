@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"hash"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -52,6 +54,17 @@ const (
 	// as Git LFS is not installed); Risk.Detail says why. Work-tree-local,
 	// blocking: the files may hold modifications.
 	RiskUnverifiable
+	// RiskNestedRepository: other repositories inside the work tree
+	// (submodules, embedded gitlinks, independent clones, linked worktrees of
+	// other repositories) that have data at risk themselves, have no remote,
+	// or could not be inspected. Linked worktrees of the same repository do
+	// not count. Work-tree-local, blocking; Risk.Detail lists their paths
+	// with the reasons.
+	RiskNestedRepository
+	// RiskNestedRepositoryClean: nested repositories with nothing to lose
+	// (clean, with a remote, everything pushed); informational, work-tree-
+	// local. Risk.Detail lists their paths.
+	RiskNestedRepositoryClean
 )
 
 func (k RiskKind) String() string {
@@ -78,6 +91,10 @@ func (k RiskKind) String() string {
 		return "hidden modifications (skip-worktree or assume-unchanged files)"
 	case RiskUnverifiable:
 		return "files that could not be verified"
+	case RiskNestedRepository:
+		return "nested repositories"
+	case RiskNestedRepositoryClean:
+		return "clean, fully pushed nested repositories"
 	}
 	return fmt.Sprintf("RiskKind(%d)", int(k))
 }
@@ -107,7 +124,7 @@ func (r Risk) String() string {
 // cost is that commits only reachable from a tag created locally and never
 // pushed do not block.
 func (r Risk) Informational() bool {
-	return r.Kind == RiskIgnoredFiles || r.Kind == RiskTagOnlyCommits
+	return r.Kind == RiskIgnoredFiles || r.Kind == RiskTagOnlyCommits || r.Kind == RiskNestedRepositoryClean
 }
 
 // RepositoryWide reports whether the kind concerns the whole repository
@@ -168,9 +185,14 @@ func SafeToRemoveWorktree(risks []Risk) bool {
 // such files are reported as RiskUnverifiable, with the reason in
 // Risk.Detail, instead of failing the call.
 //
-// Known gaps (not detected): unpushed commits, stashes or changes inside
-// submodules' own repositories (only the submodule's state as seen from the
-// superproject is reported); commits only reachable from reflogs, notes or
+// Nested repositories (submodules, embedded gitlinks, independent clones or
+// other repositories' worktrees anywhere in the work tree, see
+// nestedRepositories) are inspected recursively, up to maxNestingDepth
+// levels: one with data at risk, without any remote, or that cannot be
+// inspected is a blocking RiskNestedRepository; a clean, fully pushed one an
+// informational RiskNestedRepositoryClean.
+//
+// Known gaps (not detected): commits only reachable from reflogs, notes or
 // other refs (refs/pull/*, refs/replace/*, ...); detached HEADs of other
 // worktrees (call DeletionRisks in each); content of .git itself (hooks,
 // config, info/exclude); unpushed Git LFS objects; mode-only changes (e.g.
@@ -178,6 +200,53 @@ func SafeToRemoveWorktree(risks []Risk) bool {
 // fetched from the remote count as local tags, which is why
 // RiskTagOnlyCommits is informational.
 func DeletionRisks(ctx context.Context, dir string) ([]Risk, error) {
+	return DeletionRisksWithOptions(ctx, dir, DeletionRisksOptions{})
+}
+
+// DeletionRisksOptions configures DeletionRisksWithOptions.
+type DeletionRisksOptions struct {
+	// BeforeNested, when set, is called with the directory of each nested
+	// repository that has at least one remote (its top level, or the
+	// repository itself when bare), before that repository is assessed, at
+	// every nesting level. Callers use it to fetch (e.g. FetchAll) so that
+	// commits whose remote branch was deleted are seen as unpushed:
+	// DeletionRisks itself never accesses the network. An error makes the
+	// nested repository blocking ("fetch failed, remote state unknown"),
+	// except a cancellation of ctx, which aborts DeletionRisksWithOptions.
+	BeforeNested func(ctx context.Context, dir string) error
+	// DeletedRoot is the directory whose deletion is being assessed
+	// (default: the top level of dir). A nested repository whose remotes all
+	// point inside it counts as having no remote: deleting the tree deletes
+	// those remotes too.
+	DeletedRoot string
+}
+
+// nestOpts carries the options and the recursion state.
+type nestOpts struct {
+	before  func(ctx context.Context, dir string) error
+	root    string // resolved DeletedRoot
+	visited map[string]bool
+}
+
+// DeletionRisksWithOptions is DeletionRisks with options.
+func DeletionRisksWithOptions(ctx context.Context, dir string, opts DeletionRisksOptions) ([]Risk, error) {
+	top, err := TopLevel(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	no := &nestOpts{before: opts.BeforeNested, root: resolvePath(top), visited: map[string]bool{resolvePath(top): true}}
+	if opts.DeletedRoot != "" {
+		no.root = resolvePath(opts.DeletedRoot)
+	}
+	return deletionRisks(ctx, dir, maxNestingDepth, no)
+}
+
+// maxNestingDepth bounds the recursion into nested repositories.
+const maxNestingDepth = 4
+
+// deletionRisks is DeletionRisks with the remaining nesting depth and the
+// resolved top levels already inspected (cycle safety).
+func deletionRisks(ctx context.Context, dir string, depth int, no *nestOpts) ([]Risk, error) {
 	st, err := status(ctx, dir, "--ignored=traditional")
 	if err != nil {
 		return nil, err
@@ -200,6 +269,10 @@ func DeletionRisks(ctx context.Context, dir string) ([]Risk, error) {
 	if err != nil {
 		return nil, err
 	}
+	blocking, clean, err := assessNested(ctx, dir, depth, no)
+	if err != nil {
+		return nil, err
+	}
 	var risks []Risk
 	for _, r := range []Risk{
 		{Kind: RiskStaged, Count: st.Staged},
@@ -213,6 +286,8 @@ func DeletionRisks(ctx context.Context, dir string) ([]Risk, error) {
 		{Kind: RiskIgnoredFiles, Count: st.ignored},
 		{Kind: RiskHiddenModifications, Count: hidden},
 		{Kind: RiskUnverifiable, Count: unverifiable, Detail: reason},
+		{Kind: RiskNestedRepository, Count: len(blocking), Detail: summarizeList(blocking, "; ")},
+		{Kind: RiskNestedRepositoryClean, Count: len(clean), Detail: summarizeList(clean, ", ")},
 	} {
 		if r.Count > 0 {
 			risks = append(risks, r)
@@ -468,4 +543,317 @@ func blobID(like, content string) string {
 	}
 	fmt.Fprintf(h, "blob %d\x00%s", len(content), content)
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// nestedRepo is a repository found inside a work tree.
+type nestedRepo struct {
+	rel  string // relative to the outer top level
+	bare bool
+}
+
+// nestedRepositories returns, sorted and relative to the top level of the
+// work tree containing dir, the directories holding another repository: a
+// .git directory or file, or a bare repository (HEAD, objects/ and refs/,
+// confirmed by git). It looks everywhere a repository can hide:
+//
+//   - untracked and ignored entries (`git ls-files --others --directory`),
+//     walked without following symbolic links (git reports a nested
+//     repository there as an untracked directory, or not at all when it is
+//     ignored);
+//   - gitlinks (mode 160000: submodules and repositories embedded with `git
+//     add`) whose directory holds a .git entry;
+//   - directories holding tracked files (one Lstat each, plus a few for
+//     directories that look like a bare repository), since a repository may
+//     have been initialized inside tracked content.
+//
+// Linked worktrees of the same repository are skipped (callers handle them),
+// as are repositories nested inside another reported one (they are found by
+// inspecting that one).
+func nestedRepositories(ctx context.Context, dir string) ([]nestedRepo, error) {
+	top, err := TopLevel(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	wts, err := WorktreeList(ctx, top)
+	if err != nil {
+		return nil, err
+	}
+	own := map[string]bool{}
+	for _, w := range wts {
+		own[resolvePath(w.Path)] = true
+	}
+	found := map[string]bool{} // rel -> bare
+	consider := func(p string) bool {
+		bare := false
+		if _, err := os.Lstat(filepath.Join(p, ".git")); err != nil {
+			if !looksBare(p) || !isBareRepo(ctx, p) {
+				return false
+			}
+			bare = true
+		}
+		if !own[resolvePath(p)] {
+			rel, _ := filepath.Rel(top, p)
+			found[rel] = bare
+		}
+		return true
+	}
+
+	out, err := Run(ctx, top, "ls-files", "--others", "--directory", "-z")
+	if err != nil {
+		return nil, err
+	}
+	for e := range strings.SplitSeq(out, "\x00") {
+		if e == "" {
+			continue
+		}
+		root := filepath.Join(top, filepath.FromSlash(strings.TrimSuffix(e, "/")))
+		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					return nil // vanished meanwhile
+				}
+				return err
+			}
+			if d.IsDir() && consider(p) {
+				return filepath.SkipDir
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("gitx: looking for nested repositories in %s: %w", root, err)
+		}
+	}
+
+	staged, err := Run(ctx, top, "ls-files", "-s", "-z")
+	if err != nil {
+		return nil, err
+	}
+	dirs := map[string]bool{}
+	for rec := range strings.SplitSeq(staged, "\x00") {
+		meta, path, ok := strings.Cut(rec, "\t")
+		if !ok {
+			continue
+		}
+		path = filepath.FromSlash(path)
+		if strings.HasPrefix(meta, "160000 ") {
+			consider(filepath.Join(top, path))
+			continue
+		}
+		for d := filepath.Dir(path); d != "." && !dirs[d]; d = filepath.Dir(d) {
+			dirs[d] = true
+		}
+	}
+	for d := range dirs {
+		consider(filepath.Join(top, d))
+	}
+
+	var rels []string
+	for r := range found {
+		rels = append(rels, r)
+	}
+	slices.Sort(rels)
+	// Drop repositories inside another reported one.
+	var res []nestedRepo
+	for _, r := range rels {
+		if n := len(res); n > 0 && strings.HasPrefix(r, res[n-1].rel+string(filepath.Separator)) {
+			continue
+		}
+		res = append(res, nestedRepo{rel: r, bare: found[r]})
+	}
+	return res, nil
+}
+
+// looksBare reports whether p has the layout of a bare repository.
+func looksBare(p string) bool {
+	if fi, err := os.Lstat(filepath.Join(p, "HEAD")); err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
+	for _, d := range []string{"objects", "refs"} {
+		if fi, err := os.Lstat(filepath.Join(p, d)); err != nil || !fi.IsDir() {
+			return false
+		}
+	}
+	return true
+}
+
+// isBareRepo confirms with git that p is a bare repository: run from p, git
+// discovers p itself as the repository only if it is a valid git directory
+// (otherwise it finds the enclosing repository, which is not bare).
+func isBareRepo(ctx context.Context, p string) bool {
+	out, err := Run(ctx, p, "rev-parse", "--is-bare-repository")
+	if err != nil || strings.TrimSpace(out) != "true" {
+		return false
+	}
+	gd, err := Run(ctx, p, "rev-parse", "--absolute-git-dir")
+	return err == nil && resolvePath(strings.TrimSpace(gd)) == resolvePath(p)
+}
+
+// assessNested inspects each nested repository of the work tree containing
+// dir (see nestedRepositories) and returns the blocking ones ("path
+// (reasons)") and the clean ones (paths).
+func assessNested(ctx context.Context, dir string, depth int, no *nestOpts) (blocking, clean []string, err error) {
+	repos, err := nestedRepositories(ctx, dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	top, err := TopLevel(ctx, dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, nr := range repos {
+		p := filepath.Join(top, nr.rel)
+		rp := resolvePath(p)
+		if no.visited[rp] {
+			continue
+		}
+		no.visited[rp] = true
+		reasons, err := nestedReasons(ctx, p, rp, nr.bare, depth, no)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(reasons) > 0 {
+			blocking = append(blocking, nr.rel+" ("+strings.Join(reasons, ", ")+")")
+		} else {
+			clean = append(clean, nr.rel)
+		}
+	}
+	return blocking, clean, nil
+}
+
+// nestedReasons lists why deleting the nested repository at p would lose
+// data; empty means nothing would be lost. Only ctx errors are returned as
+// errors: anything that prevents the inspection is itself a reason.
+func nestedReasons(ctx context.Context, p, resolved string, bare bool, depth int, no *nestOpts) ([]string, error) {
+	if depth <= 0 {
+		return []string{"nested too deeply to inspect"}, nil
+	}
+	if !bare {
+		top, err := TopLevel(ctx, p)
+		if err != nil || resolvePath(top) != resolved {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return []string{"not a valid repository, cannot inspect"}, nil
+		}
+	}
+	var reasons []string
+	total, outside, err := remoteLocations(ctx, p, no.root)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return []string{"cannot inspect remotes: " + failureReason(err)}, nil
+	}
+	switch {
+	case bare && outside == 0:
+		reasons = append(reasons, "bare repository, no remote outside the deleted tree")
+	case total == 0:
+		reasons = append(reasons, "no remote")
+	case outside == 0:
+		reasons = append(reasons, "its remotes are all inside the deleted tree")
+	}
+	if total > 0 && no.before != nil {
+		if err := no.before(ctx, p); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			reasons = append(reasons, "fetch failed, remote state unknown: "+failureReason(err))
+		}
+	}
+	if bare {
+		if outside > 0 {
+			n, err := revCount(ctx, p, "--branches", "--not", "--remotes")
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				return append(reasons, "cannot inspect: "+failureReason(err)), nil
+			}
+			if n > 0 {
+				reasons = append(reasons, fmt.Sprintf("bare repository with %d commits on no remote-tracking ref", n))
+			}
+		}
+		return reasons, nil
+	}
+	risks, err := deletionRisks(ctx, p, depth-1, no)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return append(reasons, "cannot inspect: "+failureReason(err)), nil
+	}
+	for _, r := range risks {
+		if !r.Informational() {
+			reasons = append(reasons, r.String())
+		}
+	}
+	return reasons, nil
+}
+
+// remoteLocations counts the remotes (URLs) of the repository at p and
+// those that do not point inside root (resolved). Local URLs (absolute or
+// relative paths, file://) are resolved against p; anything else (scp-like,
+// ssh, https, ...) is outside.
+func remoteLocations(ctx context.Context, p, root string) (total, outside int, err error) {
+	out, err := Run(ctx, p, "config", "--get-regexp", `^remote\..*\.url$`)
+	if err != nil {
+		var ge *GitError
+		if errors.As(err, &ge) && ge.ExitCode == 1 {
+			return 0, 0, nil // no remote
+		}
+		return 0, 0, err
+	}
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
+		_, u, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		total++
+		local, isLocal := localRemotePath(p, u)
+		if !isLocal {
+			outside++
+			continue
+		}
+		lp := resolvePath(local)
+		if rel, err := filepath.Rel(root, lp); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			outside++
+		}
+	}
+	return total, outside, nil
+}
+
+// localRemotePath returns the filesystem path of a local remote URL.
+func localRemotePath(base, u string) (string, bool) {
+	switch {
+	case strings.HasPrefix(u, "file://"):
+		pu, err := url.Parse(u)
+		if err != nil {
+			return "", false
+		}
+		return pu.Path, true
+	case strings.Contains(u, "://"):
+		return "", false
+	case filepath.IsAbs(u):
+		return u, true
+	}
+	if i := strings.IndexByte(u, ':'); i >= 0 && !strings.Contains(u[:i], "/") {
+		return "", false // scp-like host:path
+	}
+	return filepath.Join(base, u), true
+}
+
+func resolvePath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
+}
+
+// summarizeList joins up to five entries for Risk.Detail.
+func summarizeList(entries []string, sep string) string {
+	const max = 5
+	if len(entries) <= max {
+		return strings.Join(entries, sep)
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(entries[:max], sep), len(entries)-max)
 }

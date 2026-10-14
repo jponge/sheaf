@@ -51,6 +51,7 @@ repositories:
     url: git@github.com:jponge/boiler-vroom.git
     default_branch: main
     origin: explicit         # explicit | org:<name> | adopted
+    host: gitlab.com         # optional; omitted = github.com, "local" for file:// origins; gh features skip non-GitHub repos
 ```
 
 ## Testing rules (non-negotiable, applies to every step)
@@ -99,3 +100,7 @@ The orchestrator appends one line per completed step: commit, review rounds, not
 - Decision 2026-10-14 (user): adopt of a clone on a non-default branch → if clean, move to <repo>/<default>/, switch to default, re-create the feature branch as a sibling worktree; if dirty or detached, refuse. Invariant: primary is always <repo>/<normalized default branch>/.
 - Decision 2026-10-14 (user): laid-out repo whose primary is not on the default branch (e.g. foo/dev/ primary, default main) → treated like a plain clone: if clean, rename to foo/<default>/, switch, re-create the branch as sibling worktree; if dirty, refuse. To implement together with step 4 review fixes.
 - gitx light-review fixes: CRLF/symlink hidden-mod false positives, --stdin-paths hashing (129→98 ms @20k files, measured), RiskUnverifiable for failing required filters, FastForwardWithOptions{MergeTimeout, Force} + ErrForceKilled (for step 5 two-stage Ctrl-C), pinned start point in WorktreeAdd. Not re-reviewed (small, test-first).
+- Step 4 review: 3 blocking (adopt checkout overwrote ignored files; remove deleted nested repos in ignored dirs; laid-out detection broke invariant) + 7 should-fix. Decisions 2026-10-14 (user): remove gets OS-junk ignore list + --offline, --force only for data risks; sheaf.yaml repositories get optional host (default github.com), gh features skip non-GitHub repos.
+- Step 4 review round 2: originals fixed; remaining R1 (gitlinks/old submodules/nested repos in tracked dirs invisible to remove) + lock wait ignoring cancel + host alias parsing. Orchestrator decision: nested repos discovered everywhere, checked recursively; blocking if unpushed/stashed/dirty/no remote, informational if clean and fully pushed. adopt --host override for SSH aliases.
+- Step 4 review round 3: round-2 fixed; B1 nested repos assessed on stale refs → decision: remove fetches each nested repo with a remote (not under --offline), failed fetch blocks. User decision 2026-10-14: bare repos inside a checkout count as nested repos and block (no remote); remotes inside the deleted tree count as no remote.
+- Step 4 — ops + CLI (create/init/add/adopt/remove). Opus impl, Opus review x3 (+ orchestrator verification of round 3). Committed.

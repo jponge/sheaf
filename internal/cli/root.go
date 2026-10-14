@@ -26,8 +26,13 @@ type Options struct {
 	Jobs   int
 }
 
-// NewRootCmd builds the root command wired to the given streams.
-func NewRootCmd(s Streams) *cobra.Command {
+// NewRootCmd builds the root command wired to the given streams and the
+// production dependencies.
+func NewRootCmd(s Streams) *cobra.Command { return NewRootCmdWithDeps(s, Deps{}) }
+
+// NewRootCmdWithDeps builds the root command with explicit dependencies
+// (tests inject a fake hosting service and working directory).
+func NewRootCmdWithDeps(s Streams, d Deps) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "sheaf",
 		Short:         "Manage git repository checkouts and worktrees in a bundle",
@@ -55,6 +60,7 @@ func NewRootCmd(s Streams) *cobra.Command {
 	pf.IntP("jobs", "j", runtime.NumCPU(), "number of repositories processed in parallel")
 
 	root.AddCommand(newVersionCmd())
+	addBundleCommands(root, d)
 	return root
 }
 
@@ -78,13 +84,9 @@ func OptionsFrom(c *cobra.Command) Options {
 	return o
 }
 
-// Execute runs the CLI with the given arguments and returns the process exit code.
+// Execute runs the CLI with the given arguments and returns the process exit
+// code. SIGINT, SIGTERM and SIGHUP cancel the context of the running command
+// (see execute).
 func Execute(args []string, s Streams) int {
-	cmd := NewRootCmd(s)
-	cmd.SetArgs(args)
-	if err := cmd.Execute(); err != nil {
-		fmt.Fprintln(cmd.ErrOrStderr(), "sheaf:", err)
-		return 1
-	}
-	return 0
+	return execute(NewRootCmd(s), args)
 }

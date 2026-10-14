@@ -57,6 +57,56 @@ type Repository struct {
 	URL           string `yaml:"url"`
 	DefaultBranch string `yaml:"default_branch"`
 	Origin        string `yaml:"origin"`
+	Host          string `yaml:"host,omitempty"`
+}
+
+// Hosts recorded in Repository.Host.
+const (
+	HostGitHub = "github.com"
+	HostLocal  = "local"
+)
+
+// HostName returns the host of the repository: Host, or HostGitHub when
+// Host is empty.
+func (r Repository) HostName() string {
+	if r.Host == "" {
+		return HostGitHub
+	}
+	return r.Host
+}
+
+// IsGitHub reports whether the repository is hosted on github.com. Only such
+// repositories can be queried through the hosting service (gh); features
+// built on it (sync of organization listings, pull request worktrees) skip
+// the others. For other hosts the slug is informational (derived from the
+// last two components of the remote URL path).
+func (r Repository) IsGitHub() bool { return strings.EqualFold(r.HostName(), HostGitHub) }
+
+// key identifies a repository across hosts for duplicate detection.
+func (r Repository) key() string { return strings.ToLower(r.HostName() + "/" + r.Slug) }
+
+// ValidateHost accepts empty (github.com), HostLocal, or a host name made
+// of dot-separated labels of [A-Za-z0-9_-] not starting or ending with '-'
+// (no port, no user). '_' is accepted because SSH configuration aliases
+// (e.g. "github_work"), which are recorded as-is, often contain it.
+func ValidateHost(h string) error {
+	if h == "" || h == HostLocal {
+		return nil
+	}
+	if len(h) > 253 {
+		return fmt.Errorf("invalid host %q: too long", h)
+	}
+	for _, label := range strings.Split(h, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return fmt.Errorf("invalid host %q", h)
+		}
+		for _, r := range label {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+				return fmt.Errorf("invalid host %q", h)
+			}
+		}
+	}
+	return nil
 }
 
 // ValidateRepoName checks that name is usable as a directory name directly
@@ -135,6 +185,9 @@ func validateRepository(r Repository) error {
 	if err := validateOrigin(r.Origin); err != nil {
 		return fmt.Errorf("repository %q: %w", r.Name, err)
 	}
+	if err := ValidateHost(r.Host); err != nil {
+		return fmt.Errorf("repository %q: %w", r.Name, err)
+	}
 	return nil
 }
 
@@ -178,7 +231,7 @@ func (b *Bundle) Validate() error {
 			return fmt.Errorf("duplicate repository name %q", r.Name)
 		}
 		names[nk] = true
-		k := strings.ToLower(r.Slug)
+		k := r.key()
 		if slugs[k] {
 			return fmt.Errorf("duplicate repository slug %q", r.Slug)
 		}
@@ -227,6 +280,11 @@ func (b *Bundle) marshal() ([]byte, error) {
 	}
 	slices.SortFunc(c.Sources, func(x, y Source) int { return strings.Compare(x.Org, y.Org) })
 	slices.SortFunc(c.Repositories, func(x, y Repository) int { return strings.Compare(x.Name, y.Name) })
+	for i := range c.Repositories {
+		if strings.EqualFold(c.Repositories[i].Host, HostGitHub) {
+			c.Repositories[i].Host = "" // the default; keeps files clean
+		}
+	}
 	if c.Sources == nil {
 		c.Sources = []Source{}
 	}
@@ -412,7 +470,7 @@ func (b *Bundle) AddRepository(r Repository) error {
 		return err
 	}
 	for _, e := range b.Repositories {
-		if strings.EqualFold(e.Slug, r.Slug) {
+		if e.key() == r.key() {
 			return fmt.Errorf("repository %q is already in the bundle as %q", r.Slug, e.Name)
 		}
 	}

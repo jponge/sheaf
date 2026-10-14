@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -113,7 +114,18 @@ func run(ctx context.Context, o runOpts, dir string, args ...string) (string, er
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = o.stdin, &stdout, &stderr
 	pg := startGroup(cmd, delay)
 	var forced atomic.Bool
+	// Start under the read side of the gate: KillAll (write side) then sees
+	// every started process registered, and no process starts after it.
+	running.gate.RLock()
+	if running.stopped {
+		running.gate.RUnlock()
+		return "", &GitError{Args: args, Dir: dir, ExitCode: -1, Err: ErrForceKilled}
+	}
 	err := cmd.Start()
+	if err == nil {
+		register(pg, &forced)
+	}
+	running.gate.RUnlock()
 	if err == nil {
 		done := make(chan struct{})
 		stopped := make(chan struct{})
@@ -128,6 +140,7 @@ func run(ctx context.Context, o runOpts, dir string, args ...string) (string, er
 			}
 		}()
 		err = cmd.Wait()
+		unregister(pg)
 		close(done)
 		<-stopped
 	}
@@ -222,4 +235,61 @@ func StaleLockPath(err error) (string, bool) {
 		p = filepath.Join(ge.Dir, p)
 	}
 	return p, true
+}
+
+// running holds the process groups of the git invocations between Start and
+// the end of Wait, for KillAll.
+var running = struct {
+	gate    sync.RWMutex // read: starting a process; write: KillAll
+	stopped bool         // set by KillAll, guarded by gate
+	sync.Mutex
+	m map[*procGroup]*atomic.Bool
+}{m: map[*procGroup]*atomic.Bool{}}
+
+func register(pg *procGroup, forced *atomic.Bool) {
+	running.Lock()
+	running.m[pg] = forced
+	running.Unlock()
+}
+
+func unregister(pg *procGroup) {
+	running.Lock()
+	delete(running.m, pg)
+	running.Unlock()
+}
+
+// KillAll sends SIGKILL to the process group (outside Unix: the process) of
+// every git invocation currently running and returns how many were
+// signalled; their Run calls fail with an error wrapping ErrForceKilled. It
+// is meant for an emergency stop (e.g. a second Ctrl-C) right before the
+// process exits: from then on no git process is started any more (Run fails
+// with ErrForceKilled), and git does not remove its lock files on SIGKILL
+// (see StaleLockPath).
+//
+// Processes being started when KillAll is called are waited for and killed.
+// Remaining window: as with the per-call force option, an invocation whose
+// leader has just been reaped by Wait but not yet unregistered could in
+// theory be signalled after its process group id was reused by an
+// unrelated process; the window is a few instructions.
+func KillAll() int {
+	running.gate.Lock()
+	running.stopped = true
+	running.gate.Unlock()
+	running.Lock()
+	defer running.Unlock()
+	n := 0
+	for pg, forced := range running.m {
+		if pg.kill() {
+			forced.Store(true)
+			n++
+		}
+	}
+	return n
+}
+
+// resetStopped re-enables starting processes after KillAll (tests only).
+func resetStopped() {
+	running.gate.Lock()
+	running.stopped = false
+	running.gate.Unlock()
 }
