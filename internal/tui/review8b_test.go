@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // A prune candidate line as cli.pruneCandidateLines produces it.
@@ -34,20 +34,20 @@ func TestConfirmWrapsDetailsToWidth(t *testing.T) {
 	for _, width := range []int{30, 80} {
 		m, _ := NewConfirm("Prune 1 candidate?", []string{longPruneLine, "  note: 3 ignored files (deleted with the worktree)"}).
 			Update(tea.WindowSizeMsg{Width: width, Height: 40})
-		checkWrapped(t, m.View(), width, longPruneLine)
+		checkWrapped(t, view(m), width, longPruneLine)
 	}
 }
 
 func TestConfirmElisionCountsWrappedLines(t *testing.T) {
 	m, _ := NewConfirm("Prune?", []string{longPruneLine}).Update(tea.WindowSizeMsg{Width: 30, Height: 4})
-	v := m.View()
+	v := view(m)
 	lines := strings.Split(v, "\n")
 	if len(lines) > 4 {
 		t.Fatalf("%d lines for a height of 4:\n%s", len(lines), v)
 	}
 	full, _ := NewConfirm("Prune?", []string{longPruneLine}).Update(tea.WindowSizeMsg{Width: 30, Height: 100})
-	wrapped := strings.Count(full.View(), "\n") // detail lines below the question
-	shown := 4 - 2                              // question and "… and K more"
+	wrapped := strings.Count(view(full), "\n") // detail lines below the question
+	shown := 4 - 2                             // question and "… and K more"
 	want := fmt.Sprintf("… and %d more", wrapped-shown)
 	if !strings.Contains(v, want) {
 		t.Fatalf("want %q (wrapped line count %d):\n%s", want, wrapped, v)
@@ -61,7 +61,7 @@ func TestProgressAskWrapsDetails(t *testing.T) {
 		m, _ := feed(p, tea.WindowSizeMsg{Width: width, Height: 40},
 			RowUpdate{Key: "alpha", Label: "alpha (fetch)", State: RowDone, Aside: true},
 			AskMsg{Question: "Prune 1 candidate?", Details: []string{longPruneLine}, Reply: r})
-		checkWrapped(t, m.View(), width, longPruneLine)
+		checkWrapped(t, view(m), width, longPruneLine)
 	}
 }
 
@@ -79,7 +79,7 @@ func TestProgressAskFillingHeightKeepsRowsHonest(t *testing.T) {
 		RowUpdate{Key: "b", Label: "b", State: RowRunning},
 		RowUpdate{Key: "c", Label: "c", State: RowDone},
 		AskMsg{Question: "Remove?", Details: details, Reply: r})
-	v := m.View()
+	v := view(m)
 	if n := lineCount(v); n > 8 {
 		t.Fatalf("%d lines for a height of 8:\n%s", n, v)
 	}
@@ -102,13 +102,13 @@ func TestProgressAskFillingHeightKeepsRowsHonest(t *testing.T) {
 func TestProgressInterruptedMsgFromSignals(t *testing.T) {
 	p, _ := newTestProgress("Updating")
 	m, _ := feed(p, RowUpdate{Key: "a", Label: "a", State: RowRunning}, InterruptedMsg{Count: 1})
-	if v := m.View(); !strings.Contains(v, "Ctrl-C again to force") {
+	if v := view(m); !strings.Contains(v, "Ctrl-C again to force") {
 		t.Fatalf("signal interruption not shown:\n%s", v)
 	}
 	// A key press counted by the controller too is not counted twice.
 	m, _ = m.Update(keyMsg("ctrl+c"))
 	m, _ = m.Update(InterruptedMsg{Count: 2})
-	if v := m.View(); !strings.Contains(v, "forcing") {
+	if v := view(m); !strings.Contains(v, "forcing") {
 		t.Fatalf("second interruption not shown:\n%s", v)
 	}
 	if n := asProgress(t, m).Interrupts(); n != 2 {

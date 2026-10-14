@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Item is one selectable row of a MultiSelect.
@@ -41,7 +43,7 @@ func newMultiSelectKeys() multiSelectKeys {
 		PageDown:    key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")),
 		Home:        key.NewBinding(key.WithKeys("home"), key.WithHelp("home", "first")),
 		End:         key.NewBinding(key.WithKeys("end"), key.WithHelp("end", "last")),
-		Toggle:      key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle")),
+		Toggle:      key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "toggle")),
 		All:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all")),
 		None:        key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "none")),
 		Filter:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
@@ -144,10 +146,15 @@ func (m MultiSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.help.Width = msg.Width
+		m.help.SetWidth(msg.Width)
 		m.scrollToCursor()
 		return m, nil
-	case tea.KeyMsg:
+	case tea.PasteMsg:
+		if m.filtering {
+			m.setFilter(m.filter + dropControl(msg.Content))
+		}
+		return m, nil
+	case tea.KeyPressMsg:
 		if key.Matches(msg, m.keys.ForceQuit) {
 			m.cancelled, m.interrupted = true, true
 			return m, tea.Quit
@@ -160,16 +167,16 @@ func (m MultiSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m MultiSelect) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.Type == tea.KeyRunes && len(msg.Runes) > 1 && !msg.Paste {
-		return m.updateRunes(msg.Runes)
+func (m MultiSelect) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if utf8.RuneCountInString(msg.Text) > 1 {
+		return m.updateRunes([]rune(msg.Text))
 	}
 	switch {
 	case key.Matches(msg, m.keys.Confirm):
 		m.confirmed = true
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Cancel):
-		if msg.Type == tea.KeyEsc && m.filter != "" {
+		if msg.String() == "esc" && m.filter != "" {
 			m.setFilter("")
 			return m, nil
 		}
@@ -200,8 +207,8 @@ func (m MultiSelect) updateRunes(runes []rune) (tea.Model, tea.Cmd) {
 	var model tea.Model = m
 	var cmd tea.Cmd
 	for _, r := range runes {
-		var c tea.Cmd // a ' ' rune matches the space bindings like tea.KeySpace
-		model, c = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		var c tea.Cmd // a ' ' rune is the space key
+		model, c = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		if c != nil {
 			cmd = c
 		}
@@ -209,33 +216,52 @@ func (m MultiSelect) updateRunes(runes []rune) (tea.Model, tea.Cmd) {
 	return model, cmd
 }
 
-func (m MultiSelect) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch {
+func (m MultiSelect) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch s := msg.String(); {
 	case key.Matches(msg, m.keys.ApplyFilter):
 		m.filtering = false
 		m.scrollToCursor()
 	case key.Matches(msg, m.keys.ClearFilter):
 		m.filtering = false
 		m.setFilter("")
-	case msg.Type == tea.KeyCtrlU:
+	case s == "ctrl+u":
 		m.setFilter("")
-	case msg.Type == tea.KeyCtrlW:
+	case s == "ctrl+w":
 		m.setFilter(deleteLastWord(m.filter))
-	case msg.Type == tea.KeyBackspace:
+	case s == "backspace":
 		if r := []rune(m.filter); len(r) > 0 {
 			m.setFilter(string(r[:len(r)-1]))
 		}
-	case msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace:
-		m.setFilter(m.filter + dropControl(string(msg.Runes)))
-	case msg.Type == tea.KeyUp, msg.Type == tea.KeyDown, msg.Type == tea.KeyPgUp,
-		msg.Type == tea.KeyPgDown, msg.Type == tea.KeyHome, msg.Type == tea.KeyEnd:
+	case typedText(msg) != "":
+		m.setFilter(m.filter + dropControl(typedText(msg)))
+	case s == "up", s == "down", s == "pgup", s == "pgdown", s == "home", s == "end":
 		m.move(msg)
 	}
 	return m, nil
 }
 
+// typedText returns the text a key types into the filter: its text, or for
+// alt+<printable> (which has none) the printable rune, as the filter took the
+// runes of alt-modified keys with bubbletea v1.
+func typedText(msg tea.KeyPressMsg) string {
+	if msg.Text != "" {
+		return msg.Text
+	}
+	if msg.Mod&^(tea.ModShift|tea.ModCapsLock) != tea.ModAlt {
+		return ""
+	}
+	r := msg.Code
+	if msg.Mod.Contains(tea.ModShift) && msg.ShiftedCode != 0 {
+		r = msg.ShiftedCode
+	}
+	if r == tea.KeySpace || (r < tea.KeyExtended && unicode.IsPrint(r)) {
+		return string(r)
+	}
+	return ""
+}
+
 // move handles navigation keys; other keys are ignored.
-func (m *MultiSelect) move(msg tea.KeyMsg) {
+func (m *MultiSelect) move(msg tea.KeyPressMsg) {
 	switch {
 	case key.Matches(msg, m.keys.Up):
 		m.cursor--
@@ -351,7 +377,7 @@ func (m *MultiSelect) scrollToCursor() {
 }
 
 // View implements tea.Model.
-func (m MultiSelect) View() string {
+func (m MultiSelect) View() tea.View {
 	st := m.styles
 	l := m.layout()
 	var lines []string
@@ -398,7 +424,7 @@ func (m MultiSelect) View() string {
 			lines[i] = trunc.Render(line)
 		}
 	}
-	return strings.Join(lines, "\n")
+	return tea.NewView(strings.Join(lines, "\n"))
 }
 
 func (m MultiSelect) renderRow(row int) string {

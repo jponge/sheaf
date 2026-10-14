@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // RowState is the state of a Progress row.
@@ -186,8 +186,8 @@ func (m Progress) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.asks = nil
 		return m, tea.Quit
-	case tea.KeyMsg:
-		if len(m.asks) > 0 && msg.Type == tea.KeyCtrlC {
+	case tea.KeyPressMsg:
+		if len(m.asks) > 0 && msg.String() == "ctrl+c" {
 			// No, sent after the interrupt function ran: the work sees the
 			// cancellation together with the answer.
 			a := m.asks[0]
@@ -208,7 +208,7 @@ func (m Progress) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.asks) > 0 {
 			return m.answer(msg), nil
 		}
-		if msg.Type == tea.KeyCtrlC {
+		if msg.String() == "ctrl+c" {
 			m.interrupts++
 			if f := m.interrupt; f != nil {
 				return m, func() tea.Msg { f(); return nil }
@@ -249,7 +249,7 @@ func (m Progress) updateAsk(msg tea.Msg) (Confirm, tea.Cmd) {
 }
 
 // answer routes a key to the displayed question.
-func (m Progress) answer(k tea.KeyMsg) Progress {
+func (m Progress) answer(k tea.KeyPressMsg) Progress {
 	m.ask, _ = m.updateAsk(k)
 	if !m.ask.Done() {
 		return m
@@ -297,7 +297,9 @@ func (m Progress) header() string {
 }
 
 // View implements tea.Model.
-func (m Progress) View() string {
+func (m Progress) View() tea.View { return tea.NewView(m.render()) }
+
+func (m Progress) render() string {
 	lines := []string{m.header()}
 	if m.finished {
 		// bubbletea erases the last line of the final frame on exit: keep
@@ -319,7 +321,7 @@ func (m Progress) View() string {
 			h = max(1, m.height-2-len(footer))
 		}
 		ask, _ := m.ask.Update(tea.WindowSizeMsg{Width: m.width, Height: h})
-		footer = append(footer, strings.Split(ask.View(), "\n")...)
+		footer = append(footer, strings.Split(ask.View().Content, "\n")...)
 	}
 
 	visible := m.visibleRows(len(footer))

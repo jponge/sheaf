@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func abc() []Item {
@@ -49,12 +49,12 @@ func assertKeys(t *testing.T, m tea.Model, want ...string) {
 // currentLine returns the View line carrying the cursor marker.
 func currentLine(t *testing.T, m tea.Model) string {
 	t.Helper()
-	for _, l := range strings.Split(m.View(), "\n") {
+	for _, l := range strings.Split(view(m), "\n") {
 		if strings.HasPrefix(l, "> ") {
 			return l
 		}
 	}
-	t.Fatalf("no cursor line in view:\n%s", m.View())
+	t.Fatalf("no cursor line in view:\n%s", view(m))
 	return ""
 }
 
@@ -137,7 +137,7 @@ func TestMultiSelectAllAndNone(t *testing.T) {
 
 func TestMultiSelectFilterMatchesLabelAndDetailCaseInsensitively(t *testing.T) {
 	m, _ := press(NewMultiSelect("Pick", abc()), "/", "R")
-	v := m.View()
+	v := view(m)
 	// "bravo" and "charlie" match on the label, "alpha" on its detail ("first letter").
 	for _, s := range []string{"alpha", "bravo", "charlie"} {
 		if !strings.Contains(v, s) {
@@ -145,7 +145,7 @@ func TestMultiSelectFilterMatchesLabelAndDetailCaseInsensitively(t *testing.T) {
 		}
 	}
 	m, _ = press(m, "D")
-	v = m.View()
+	v = view(m)
 	if !strings.Contains(v, "third") || strings.Contains(v, "alpha") || strings.Contains(v, "bravo") {
 		t.Fatalf("filter RD: want only charlie (detail \"third\"):\n%s", v)
 	}
@@ -158,12 +158,12 @@ func TestMultiSelectFilterTypingIsNotACommand(t *testing.T) {
 		t.Fatal("typing in filter mode ended the selection")
 	}
 	assertKeys(t, m)
-	if !strings.Contains(m.View(), "q a n j") || strings.Contains(m.View(), "alpha") {
-		t.Fatalf("filter %q not applied:\n%s", "q a n j", m.View())
+	if !strings.Contains(view(m), "q a n j") || strings.Contains(view(m), "alpha") {
+		t.Fatalf("filter %q not applied:\n%s", "q a n j", view(m))
 	}
 	m, _ = press(m, "backspace", "backspace")
-	if v := m.View(); !strings.Contains(v, "/q a n") || strings.Contains(v, "/q a n j") {
-		t.Fatalf("backspace: filter line should read /q a n:\n%s", m.View())
+	if v := view(m); !strings.Contains(v, "/q a n") || strings.Contains(v, "/q a n j") {
+		t.Fatalf("backspace: filter line should read /q a n:\n%s", view(m))
 	}
 }
 
@@ -174,8 +174,8 @@ func TestMultiSelectFilterEnterKeepsFilterAndLeavesFilterMode(t *testing.T) {
 	}
 	// "alpha", "bravo", "charlie" all contain "a"; narrow further with a real filter.
 	m, _ = press(NewMultiSelect("Pick", abc()), "/", "br", "enter")
-	if strings.Contains(m.View(), "alpha") || !strings.Contains(m.View(), "bravo") {
-		t.Fatalf("filter not kept after enter:\n%s", m.View())
+	if strings.Contains(view(m), "alpha") || !strings.Contains(view(m), "bravo") {
+		t.Fatalf("filter not kept after enter:\n%s", view(m))
 	}
 	// Back in normal mode: space toggles, enter confirms.
 	m, _ = press(m, "space")
@@ -191,7 +191,7 @@ func TestMultiSelectFilterEscClears(t *testing.T) {
 	if asMS(t, m).Cancelled() {
 		t.Fatal("esc in filter mode cancelled")
 	}
-	v := m.View()
+	v := view(m)
 	if !strings.Contains(v, "alpha") || !strings.Contains(v, "charlie") || strings.Contains(v, "/br") {
 		t.Fatalf("esc did not clear the filter:\n%s", v)
 	}
@@ -205,8 +205,8 @@ func TestMultiSelectEscClearsAppliedFilterBeforeCancelling(t *testing.T) {
 	if asMS(t, m).Cancelled() {
 		t.Fatal("first esc should clear the applied filter, not cancel")
 	}
-	if !strings.Contains(m.View(), "alpha") {
-		t.Fatalf("filter not cleared:\n%s", m.View())
+	if !strings.Contains(view(m), "alpha") {
+		t.Fatalf("filter not cleared:\n%s", view(m))
 	}
 	m, cmd := press(m, "esc")
 	if !asMS(t, m).Cancelled() || !isQuit(cmd) {
@@ -261,7 +261,7 @@ func TestMultiSelectViewRendersRows(t *testing.T) {
 	items := abc()
 	items[0].Tags = []string{"fork", "archived"}
 	items[1].Selected = true
-	v := NewMultiSelect("Pick repositories", items).View()
+	v := view(NewMultiSelect("Pick repositories", items))
 	for _, s := range []string{"Pick repositories", "> [ ] alpha", "first letter", "[fork]", "[archived]", "[x] bravo", "1/3 selected", "space", "toggle", "enter", "filter"} {
 		if !strings.Contains(v, s) {
 			t.Fatalf("view lacks %q:\n%s", s, v)
@@ -271,7 +271,7 @@ func TestMultiSelectViewRendersRows(t *testing.T) {
 
 func TestMultiSelectFilterModeView(t *testing.T) {
 	m, _ := press(NewMultiSelect("Pick", abc()), "/", "br")
-	v := m.View()
+	v := view(m)
 	for _, s := range []string{"/br", "0/3 selected", "1 shown", "esc"} {
 		if !strings.Contains(v, s) {
 			t.Fatalf("filter-mode view lacks %q:\n%s", s, v)
@@ -284,7 +284,7 @@ func TestMultiSelectViewportKeepsCursorVisible(t *testing.T) {
 	m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 80, Height: height})
 	check := func(when string, in, out []string) {
 		t.Helper()
-		v := m.View()
+		v := view(m)
 		if n := strings.Count(v, "\n") + 1; n > height {
 			t.Fatalf("%s: view has %d lines, window height is %d:\n%s", when, n, height, v)
 		}
@@ -323,7 +323,7 @@ func TestMultiSelectViewportShrinkKeepsCursorVisible(t *testing.T) {
 func TestMultiSelectTruncatesToWidth(t *testing.T) {
 	items := []Item{{Key: "x", Label: strings.Repeat("long-label-", 10), Detail: "detail", Tags: []string{"fork"}}}
 	m, _ := NewMultiSelect("Pick", items).Update(tea.WindowSizeMsg{Width: 30, Height: 10})
-	for _, l := range strings.Split(m.View(), "\n") {
+	for _, l := range strings.Split(view(m), "\n") {
 		if w := lipgloss.Width(l); w > 30 {
 			t.Fatalf("line %q is %d cells wide, window is 30", l, w)
 		}
@@ -332,7 +332,7 @@ func TestMultiSelectTruncatesToWidth(t *testing.T) {
 
 func TestMultiSelectEmptyList(t *testing.T) {
 	m, _ := press(NewMultiSelect("Pick", nil), "space", "a", "n", "up", "down", "pgdown", "end", "home")
-	v := m.View()
+	v := view(m)
 	if !strings.Contains(v, "No items") || !strings.Contains(v, "0/0 selected") {
 		t.Fatalf("empty view:\n%s", v)
 	}
@@ -345,8 +345,8 @@ func TestMultiSelectEmptyList(t *testing.T) {
 
 func TestMultiSelectFilterWithNoMatch(t *testing.T) {
 	m, _ := press(NewMultiSelect("Pick", abc()), "/", "zzz")
-	if !strings.Contains(m.View(), "No matches") {
-		t.Fatalf("no-match view:\n%s", m.View())
+	if !strings.Contains(view(m), "No matches") {
+		t.Fatalf("no-match view:\n%s", view(m))
 	}
 	m, _ = press(m, "enter", "space", "a", "down", "end")
 	assertKeys(t, m)
@@ -386,18 +386,18 @@ func TestMultiSelectArrowsNavigateInFilterMode(t *testing.T) {
 func TestMultiSelectStatusShowsScrollPosition(t *testing.T) {
 	m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 80, Height: 7})
 	m, _ = press(m, "end")
-	if !strings.Contains(m.View(), "rows 17-20 of 20") {
-		t.Fatalf("status lacks scroll position:\n%s", m.View())
+	if !strings.Contains(view(m), "rows 17-20 of 20") {
+		t.Fatalf("status lacks scroll position:\n%s", view(m))
 	}
 }
 
-// Without colors (NO_COLOR, Ascii profile) faint is dropped, so disabled rows
+// Without text attributes (e.g. TERM=dumb) faint is dropped, so disabled rows
 // need a textual marker.
 func TestMultiSelectDisabledRowsHaveTextualMarker(t *testing.T) {
 	items := abc()
 	items[0].Disabled = true
 	items[1].Disabled, items[1].Selected = true, true
-	v := NewMultiSelect("Pick", items).View()
+	v := view(NewMultiSelect("Pick", items))
 	for _, s := range []string{"[-] alpha", "[+] bravo", "[ ] charlie"} {
 		if !strings.Contains(v, s) {
 			t.Fatalf("view lacks %q:\n%s", s, v)
@@ -407,16 +407,17 @@ func TestMultiSelectDisabledRowsHaveTextualMarker(t *testing.T) {
 
 func TestMultiSelectViewStripsControlCharacters(t *testing.T) {
 	items := []Item{
-		{Key: "a", Label: "evil\x1b]0;pwned\x07name", Detail: "\x1b[31mred\u009b2J", Tags: []string{"t\x1bag"}},
+		{Key: "a", Label: "evil\x1b]0;pwned\x07name" + injectedSGR, Detail: "\x1b[31mred\u009b2J" + injectedSGR, Tags: []string{"t\x1bag" + injectedSGR}},
 		{Key: "b", Label: "two\nlines", Detail: "cr\rhere\ttab"},
 	}
-	m := tea.Model(NewMultiSelect("Ti\x1b[2Jtle\n", items))
+	m := tea.Model(NewMultiSelect("Ti\x1b[2Jtle\n"+injectedSGR, items))
 	for _, size := range []tea.Msg{nil, tea.WindowSizeMsg{Width: 80, Height: 20}} {
 		if size != nil {
 			m, _ = m.Update(size)
 		}
-		v := m.View()
+		v := view(m)
 		assertNoControlChars(t, v)
+		assertNoInjectedSGR(t, m)
 		if n := lineCount(v); n != 5 { // title, 2 rows, status, help
 			t.Fatalf("view has %d lines, want 5:\n%s", n, v)
 		}
@@ -426,8 +427,9 @@ func TestMultiSelectViewStripsControlCharacters(t *testing.T) {
 func TestMultiSelectFilterDropsPastedControlCharacters(t *testing.T) {
 	m, _ := press(NewMultiSelect("Pick", abc()), "/")
 	m, _ = m.Update(paste("b\nr\x1b"))
-	v := m.View()
+	v := view(m)
 	assertNoControlChars(t, v)
+	assertNoInjectedSGR(t, m)
 	if !hasLine(v, "/br█") || !strings.Contains(v, "bravo") {
 		t.Fatalf("filter should read br and match bravo:\n%s", v)
 	}
@@ -436,8 +438,9 @@ func TestMultiSelectFilterDropsPastedControlCharacters(t *testing.T) {
 	}
 }
 
-// bubbletea delivers consecutive printable runes (typed fast, or read from a
-// non-TTY) as one KeyRunes event; list mode handles them rune by rune.
+// A key event can carry several runes (bubbletea v2: a grapheme of several
+// runes; v1 also merged runes typed fast or read from a non-TTY); list mode
+// handles them rune by rune.
 func TestMultiSelectMultiRuneKeysAreProcessedPerRune(t *testing.T) {
 	m, _ := press(NewMultiSelect("Pick", abc()), "jj")
 	if l := currentLine(t, m); !strings.Contains(l, "charlie") {
@@ -476,7 +479,7 @@ func TestMultiSelectTinyHeightsKeepCursorRowVisible(t *testing.T) {
 			if filtering {
 				m, _ = press(m, "/")
 			}
-			v := m.View()
+			v := view(m)
 			if n := lineCount(v); n > h {
 				t.Fatalf("h=%d filtering=%v: view has %d lines:\n%s", h, filtering, n, v)
 			}
@@ -496,22 +499,22 @@ func TestMultiSelectTinyHeightsKeepCursorRowVisible(t *testing.T) {
 
 func TestMultiSelectFilterLineEditing(t *testing.T) {
 	m, _ := press(NewMultiSelect("Pick", abc()), "/", "foo bar", "ctrl+w")
-	if v := m.View(); !hasLine(v, "/foo █") {
+	if v := view(m); !hasLine(v, "/foo █") {
 		t.Fatalf("ctrl+w: want filter line \"/foo █\":\n%s", v)
 	}
 	m, _ = press(m, "ctrl+w")
-	if v := m.View(); !hasLine(v, "/█") {
+	if v := view(m); !hasLine(v, "/█") {
 		t.Fatalf("second ctrl+w: want empty filter line:\n%s", v)
 	}
 	m, _ = press(m, "baz qux", "ctrl+u")
-	if v := m.View(); !hasLine(v, "/█") {
+	if v := view(m); !hasLine(v, "/█") {
 		t.Fatalf("ctrl+u: want empty filter line:\n%s", v)
 	}
 }
 
 func TestMultiSelectCommandKeysAreTypedInFilterMode(t *testing.T) {
 	m, _ := press(NewMultiSelect("Pick", abc()), "/", "k", "/", "j")
-	if v := m.View(); !hasLine(v, "/k/j█") {
+	if v := view(m); !hasLine(v, "/k/j█") {
 		t.Fatalf("want filter line \"/k/j█\":\n%s", v)
 	}
 }

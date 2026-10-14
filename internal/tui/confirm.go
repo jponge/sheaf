@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Confirm is a bubbletea model asking a yes/no question, followed by detail
@@ -59,7 +59,7 @@ func (m Confirm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "y", "Y":
 			m.done, m.confirmed = true, true
@@ -76,7 +76,7 @@ func (m Confirm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View implements tea.Model.
-func (m Confirm) View() string {
+func (m Confirm) View() tea.View {
 	st := m.styles
 	lines := []string{st.Question.Render(sanitize(m.question)) + " " + st.Status.Render("[y/N]")}
 
@@ -108,5 +108,5 @@ func (m Confirm) View() string {
 			lines[i] = trunc.Render(l)
 		}
 	}
-	return strings.Join(lines, "\n")
+	return tea.NewView(strings.Join(lines, "\n"))
 }

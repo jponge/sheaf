@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func asConfirm(t *testing.T, m tea.Model) Confirm {
@@ -51,7 +51,7 @@ func TestConfirmIgnoresKeysOnceDone(t *testing.T) {
 }
 
 func TestConfirmView(t *testing.T) {
-	v := NewConfirm("Remove 2 repositories?", []string{"boiler-vroom", "smallrye-config"}).View()
+	v := view(NewConfirm("Remove 2 repositories?", []string{"boiler-vroom", "smallrye-config"}))
 	for _, s := range []string{"Remove 2 repositories?", "boiler-vroom", "smallrye-config", "[y/N]"} {
 		if !strings.Contains(v, s) {
 			t.Fatalf("view lacks %q:\n%s", s, v)
@@ -68,7 +68,7 @@ func TestConfirmViewElidesDetailsToFitHeight(t *testing.T) {
 		details[i] = fmt.Sprintf("repo%02d", i)
 	}
 	m, _ := NewConfirm("Remove?", details).Update(tea.WindowSizeMsg{Width: 80, Height: 10})
-	v := m.View()
+	v := view(m)
 	if n := strings.Count(v, "\n") + 1; n > 10 {
 		t.Fatalf("view has %d lines, window height is 10:\n%s", n, v)
 	}
@@ -82,7 +82,7 @@ func TestConfirmViewElidesDetailsToFitHeight(t *testing.T) {
 
 func TestConfirmViewTruncatesToWidth(t *testing.T) {
 	m, _ := NewConfirm(strings.Repeat("question ", 10), []string{strings.Repeat("detail ", 10)}).Update(tea.WindowSizeMsg{Width: 25, Height: 10})
-	for _, l := range strings.Split(m.View(), "\n") {
+	for _, l := range strings.Split(view(m), "\n") {
 		if w := lipgloss.Width(l); w > 25 {
 			t.Fatalf("line %q is %d cells wide, window is 25", l, w)
 		}
@@ -90,25 +90,27 @@ func TestConfirmViewTruncatesToWidth(t *testing.T) {
 }
 
 func TestConfirmViewStripsControlCharacters(t *testing.T) {
-	v := NewConfirm("Remove\x1b[2J?\n", []string{"a\nb", "\x1b]8;;http://x\x07link\u009b"}).View()
+	m := NewConfirm("Remove\x1b[2J?\n"+injectedSGR, []string{"a\nb" + injectedSGR, "\x1b]8;;http://x\x07link\u009b"})
+	v := view(m)
 	assertNoControlChars(t, v)
+	assertNoInjectedSGR(t, m)
 	if n := lineCount(v); n != 3 {
 		t.Fatalf("view has %d lines, want 3:\n%s", n, v)
 	}
 }
 
 func TestConfirmIgnoresMultiRuneAndPastedInput(t *testing.T) {
-	for _, msg := range []tea.KeyMsg{keyMsg("yes"), keyMsg("yn"), paste("y")} {
+	for _, msg := range []tea.Msg{keyMsg("yes"), keyMsg("yn"), paste("y")} {
 		m, cmd := NewConfirm("Remove?", nil).Update(msg)
 		if c := asConfirm(t, m); c.Done() || cmd != nil {
-			t.Fatalf("%q: Done=%v cmd=%v, want ignored", msg.String(), c.Done(), cmd)
+			t.Fatalf("%v: Done=%v cmd=%v, want ignored", msg, c.Done(), cmd)
 		}
 	}
 }
 
 func TestConfirmHeightOneRendersOneLine(t *testing.T) {
 	m, _ := NewConfirm("Remove?", []string{"a", "b"}).Update(tea.WindowSizeMsg{Width: 80, Height: 1})
-	v := m.View()
+	v := view(m)
 	if n := lineCount(v); n != 1 || !strings.Contains(v, "[y/N]") {
 		t.Fatalf("view has %d lines, want just the prompt:\n%s", n, v)
 	}

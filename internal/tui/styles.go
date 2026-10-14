@@ -4,8 +4,8 @@
 package tui
 
 import (
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/lipgloss/v2"
 )
 
 // Styles groups every lipgloss style used by the widgets of this package.

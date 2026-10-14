@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // sanitize replaces control characters (C0, DEL, C1, including newlines and

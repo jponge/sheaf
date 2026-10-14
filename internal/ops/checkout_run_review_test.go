@@ -4,7 +4,9 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -194,16 +196,16 @@ func TestRunCommandSpillFilesNeverVisible(t *testing.T) {
 	spills := 0
 	old := coSpillHook
 	t.Cleanup(func() { coSpillHook = old })
-	coSpillHook = func(string) {
+	coSpillHook = func(p string) {
 		mu.Lock()
 		defer mu.Unlock()
 		spills++
-		_ = filepath.WalkDir(tmp, func(p string, d os.DirEntry, err error) error {
-			if err == nil && p != tmp {
-				visible = append(visible, p)
-			}
-			return nil
-		})
+		// Only this spill's own file: another job may be between CreateTemp
+		// and the unlink of its file (the empty TMPDIR check below covers
+		// files left behind by any job).
+		if _, err := os.Lstat(p); !errors.Is(err, fs.ErrNotExist) {
+			visible = append(visible, p)
+		}
 	}
 	sink := &coSizeSink{sizes: map[string]int{}, bad: map[string]bool{}}
 	r, err := RunCommand(context.Background(), f.w, RunOptions{

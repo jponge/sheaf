@@ -1,41 +1,44 @@
 package tui
 
 import (
-	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 	"unicode"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	tea "charm.land/bubbletea/v2"
 )
 
-// TestMain forces lipgloss to emit no ANSI sequences so that assertions on
-// View() are independent of the terminal running the tests.
-func TestMain(m *testing.M) {
-	lipgloss.SetColorProfile(termenv.Ascii)
-	os.Exit(m.Run())
+// sgr matches the SGR sequences (colors, text attributes) of lipgloss styles.
+var sgr = regexp.MustCompile("\x1b\\[[0-9;:]*m")
+
+// view returns the content of m's view without the SGR sequences of its
+// styles, so that assertions are independent of the styles, like the
+// Ascii color profile of lipgloss v1 (which rendered no SGR) made them.
+// Other escape sequences and control characters are kept.
+func view(m tea.Model) string { return sgr.ReplaceAllString(m.View().Content, "") }
+
+var namedKeys = map[string]tea.Key{
+	"up": {Code: tea.KeyUp}, "down": {Code: tea.KeyDown}, "pgup": {Code: tea.KeyPgUp},
+	"pgdown": {Code: tea.KeyPgDown}, "home": {Code: tea.KeyHome}, "end": {Code: tea.KeyEnd},
+	"space": {Code: tea.KeySpace, Text: " "}, "enter": {Code: tea.KeyEnter},
+	"esc": {Code: tea.KeyEscape}, "ctrl+c": {Code: 'c', Mod: tea.ModCtrl},
+	"backspace": {Code: tea.KeyBackspace},
+	"ctrl+u":    {Code: 'u', Mod: tea.ModCtrl}, "ctrl+w": {Code: 'w', Mod: tea.ModCtrl},
 }
 
-var namedKeys = map[string]tea.KeyType{
-	"up": tea.KeyUp, "down": tea.KeyDown, "pgup": tea.KeyPgUp, "pgdown": tea.KeyPgDown,
-	"home": tea.KeyHome, "end": tea.KeyEnd, "space": tea.KeySpace, "enter": tea.KeyEnter,
-	"esc": tea.KeyEsc, "ctrl+c": tea.KeyCtrlC, "backspace": tea.KeyBackspace,
-	"ctrl+u": tea.KeyCtrlU, "ctrl+w": tea.KeyCtrlW,
-}
-
-// keyMsg builds the KeyMsg bubbletea produces for a named key, or for the
-// literal runes of s otherwise.
-func keyMsg(s string) tea.KeyMsg {
+// keyMsg builds the KeyPressMsg bubbletea produces for a named key, or a
+// key event typing the literal runes of s otherwise (bubbletea produces one
+// per rune, or per grapheme of several runes).
+func keyMsg(s string) tea.KeyPressMsg {
 	if k, ok := namedKeys[s]; ok {
-		if k == tea.KeySpace {
-			return tea.KeyMsg{Type: k, Runes: []rune{' '}}
-		}
-		return tea.KeyMsg{Type: k}
+		return tea.KeyPressMsg(k)
 	}
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+	if r := []rune(s); len(r) == 1 {
+		return tea.KeyPressMsg{Code: r[0], Text: s}
+	}
+	return tea.KeyPressMsg{Code: tea.KeyExtended, Text: s}
 }
 
 // press feeds keys one by one and returns the final model and the last command.
@@ -55,10 +58,8 @@ func isQuit(cmd tea.Cmd) bool {
 	return ok
 }
 
-// paste builds the KeyMsg bubbletea produces for a bracketed paste of s.
-func paste(s string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s), Paste: true}
-}
+// paste builds the message bubbletea produces for a bracketed paste of s.
+func paste(s string) tea.PasteMsg { return tea.PasteMsg{Content: s} }
 
 // assertNoControlChars fails when v contains a control character other than
 // the newlines separating View lines.
@@ -68,6 +69,20 @@ func assertNoControlChars(t *testing.T, v string) {
 		if r != '\n' && unicode.IsControl(r) {
 			t.Fatalf("view contains control character %U:\n%q", r, v)
 		}
+	}
+}
+
+// injectedSGR is an SGR sequence that the styles of this package never
+// produce (256-color foreground): view strips SGR sequences, so the tests of
+// sanitization inject it into caller text and check the raw view content.
+const injectedSGR = "\x1b[38;5;201m"
+
+// assertNoInjectedSGR fails when the raw content of m's view contains
+// injectedSGR.
+func assertNoInjectedSGR(t *testing.T, m tea.Model) {
+	t.Helper()
+	if raw := m.View().Content; strings.Contains(raw, injectedSGR) {
+		t.Fatalf("raw view contains the injected SGR sequence:\n%q", raw)
 	}
 }
 

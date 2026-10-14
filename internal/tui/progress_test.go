@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // fakeClock is a settable clock for elapsed-time assertions.
@@ -55,7 +55,7 @@ func TestProgressRowsFollowEventsInOrder(t *testing.T) {
 		RowUpdate{Key: "b", Message: "fetching origin"},
 		RowUpdate{Key: "a", State: RowDone, Message: "cloned"},
 	)
-	v := m.View()
+	v := view(m)
 	lines := strings.Split(v, "\n")
 	bi, ai := -1, -1
 	for i, l := range lines {
@@ -92,20 +92,20 @@ func TestProgressHeaderCountsAndElapsed(t *testing.T) {
 		RowUpdate{Key: "r5", Label: "r5 (fetch)", State: RowDone, Aside: true},
 	)
 	clock.t = clock.t.Add(2500 * time.Millisecond)
-	header := strings.Split(m.View(), "\n")[0]
+	header := strings.Split(view(m), "\n")[0]
 	for _, want := range []string{"Updating", "1 running", "1 done", "1 skipped", "1 failed", "2.5s"} {
 		if !strings.Contains(header, want) {
 			t.Errorf("header %q lacks %q", header, want)
 		}
 	}
-	if l := rowLine(m.View(), "r3"); !strings.Contains(l, "skipped: dirty") {
+	if l := rowLine(view(m), "r3"); !strings.Contains(l, "skipped: dirty") {
 		t.Errorf("skipped row = %q", l)
 	}
-	if l := rowLine(m.View(), "r4"); !strings.Contains(l, "✗") || !strings.Contains(l, "failed: boom") {
+	if l := rowLine(view(m), "r4"); !strings.Contains(l, "✗") || !strings.Contains(l, "failed: boom") {
 		t.Errorf("failed row = %q", l)
 	}
-	if !strings.Contains(m.View(), "r5 (fetch)") {
-		t.Errorf("aside row not shown:\n%s", m.View())
+	if !strings.Contains(view(m), "r5 (fetch)") {
+		t.Errorf("aside row not shown:\n%s", view(m))
 	}
 }
 
@@ -119,9 +119,9 @@ func TestProgressMessageOnlyUpdateKeepsFinalState(t *testing.T) {
 	)
 	running, done, _, _ := asProgress(t, m).Counts()
 	if done != 1 || running != 1 {
-		t.Fatalf("running=%d done=%d, want 1 and 1:\n%s", running, done, m.View())
+		t.Fatalf("running=%d done=%d, want 1 and 1:\n%s", running, done, view(m))
 	}
-	if l := rowLine(m.View(), "late note"); !strings.Contains(l, "✓") {
+	if l := rowLine(view(m), "late note"); !strings.Contains(l, "✓") {
 		t.Errorf("row = %q, want still done", l)
 	}
 }
@@ -132,7 +132,7 @@ func TestProgressShowsWaitMessages(t *testing.T) {
 		RowUpdate{Key: "alpha/main", Label: "alpha/main", State: RowRunning, Message: "fast-forward"},
 		RowUpdate{Key: "alpha/main", Message: "waiting for in-progress fast-forward to finish (Ctrl-C again to force)"},
 	)
-	if l := rowLine(m.View(), "alpha/main"); !strings.Contains(l, "waiting for in-progress fast-forward to finish") {
+	if l := rowLine(view(m), "alpha/main"); !strings.Contains(l, "waiting for in-progress fast-forward to finish") {
 		t.Fatalf("row = %q", l)
 	}
 }
@@ -153,7 +153,7 @@ func TestProgressFinishQuitsAndRendersSummaryOnly(t *testing.T) {
 		t.Fatal("Finished() = false")
 	}
 	clock.t = clock.t.Add(time.Hour) // the elapsed time is frozen at the finish
-	v := m.View()
+	v := view(m)
 	// The header and a newline: bubbletea erases the last line of the final
 	// frame when the program exits, which must not be the header.
 	if !strings.HasSuffix(v, "\n") || lineCount(strings.TrimSuffix(v, "\n")) != 1 {
@@ -164,7 +164,7 @@ func TestProgressFinishQuitsAndRendersSummaryOnly(t *testing.T) {
 			t.Errorf("final view %q lacks %q", v, want)
 		}
 	}
-	if m2, cmd := m.Update(RowUpdate{Key: "d", Label: "delta", State: RowRunning}); cmd != nil || strings.Contains(m2.View(), "delta") {
+	if m2, cmd := m.Update(RowUpdate{Key: "d", Label: "delta", State: RowRunning}); cmd != nil || strings.Contains(view(m2), "delta") {
 		t.Error("updates after the finish are not ignored")
 	}
 }
@@ -185,7 +185,7 @@ func TestProgressCtrlCStages(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("interrupt called %d times after the first ctrl+c, want 1", calls)
 	}
-	if v := m.View(); !strings.Contains(v, "Ctrl-C again to force") {
+	if v := view(m); !strings.Contains(v, "Ctrl-C again to force") {
 		t.Errorf("view after the first ctrl+c lacks the force hint:\n%s", v)
 	}
 	if asProgress(t, m).Interrupts() != 1 {
@@ -200,7 +200,7 @@ func TestProgressCtrlCStages(t *testing.T) {
 	if calls != 2 {
 		t.Fatalf("interrupt called %d times after the second ctrl+c, want 2", calls)
 	}
-	if v := m.View(); !strings.Contains(v, "forcing") {
+	if v := view(m); !strings.Contains(v, "forcing") {
 		t.Errorf("view after the second ctrl+c lacks the forcing note:\n%s", v)
 	}
 }
@@ -215,7 +215,7 @@ func TestProgressAskConfirmsThroughReplyChannel(t *testing.T) {
 		AskMsg{Question: "Remove alpha?", Details: []string{"will delete /b/alpha"}, Reply: r1},
 		AskMsg{Question: "Remove beta?", Reply: r2},
 	)
-	v := m.View()
+	v := view(m)
 	for _, want := range []string{"Remove alpha?", "[y/N]", "will delete /b/alpha", "alpha"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view lacks %q:\n%s", want, v)
@@ -233,7 +233,7 @@ func TestProgressAskConfirmsThroughReplyChannel(t *testing.T) {
 	default:
 		t.Fatal("no reply after y")
 	}
-	if v := m.View(); !strings.Contains(v, "Remove beta?") {
+	if v := view(m); !strings.Contains(v, "Remove beta?") {
 		t.Fatalf("queued question not shown:\n%s", v)
 	}
 	// ctrl+c answers the dialog with no and interrupts, like in menus. The
@@ -245,8 +245,8 @@ func TestProgressAskConfirmsThroughReplyChannel(t *testing.T) {
 		t.Fatal("ctrl+c answered before the interrupt function ran")
 	default:
 	}
-	if strings.Contains(m.View(), "Remove beta?") {
-		t.Fatalf("dialog still shown after ctrl+c:\n%s", m.View())
+	if strings.Contains(view(m), "Remove beta?") {
+		t.Fatalf("dialog still shown after ctrl+c:\n%s", view(m))
 	}
 	if cmd == nil {
 		t.Fatal("ctrl+c in a dialog returned no command")
@@ -263,8 +263,8 @@ func TestProgressAskConfirmsThroughReplyChannel(t *testing.T) {
 	if calls != 1 || asProgress(t, m).Interrupts() != 1 {
 		t.Fatalf("ctrl+c in a dialog: interrupt called %d times, want 1", calls)
 	}
-	if strings.Contains(m.View(), "[y/N]") {
-		t.Fatalf("dialog still shown:\n%s", m.View())
+	if strings.Contains(view(m), "[y/N]") {
+		t.Fatalf("dialog still shown:\n%s", view(m))
 	}
 }
 
@@ -284,9 +284,10 @@ func TestProgressFinishAnswersPendingQuestionsNo(t *testing.T) {
 }
 
 func TestProgressSanitizesText(t *testing.T) {
-	p, _ := newTestProgress("t\x1b[2J")
-	m, _ := feed(p, RowUpdate{Key: "a", Label: "al\x1bpha", State: RowFailed, Message: "line1\nline2\x07"})
-	assertNoControlChars(t, m.View())
+	p, _ := newTestProgress("t\x1b[2J" + injectedSGR)
+	m, _ := feed(p, RowUpdate{Key: "a", Label: "al\x1bpha" + injectedSGR, State: RowFailed, Message: "line1\nline2\x07" + injectedSGR})
+	assertNoControlChars(t, view(m))
+	assertNoInjectedSGR(t, m)
 }
 
 func TestProgressFitsHeight(t *testing.T) {
@@ -297,7 +298,7 @@ func TestProgressFitsHeight(t *testing.T) {
 	}
 	msgs = append(msgs, RowUpdate{Key: "run", Label: "busy", State: RowRunning}, tea.WindowSizeMsg{Width: 80, Height: 6})
 	m, _ := feed(p, msgs...)
-	v := m.View()
+	v := view(m)
 	if n := lineCount(v); n > 6 {
 		t.Fatalf("view has %d lines for a height of 6:\n%s", n, v)
 	}

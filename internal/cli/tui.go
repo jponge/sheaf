@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/jponge/sheaf/internal/bundle"
@@ -399,7 +399,11 @@ func (k keepLastLine) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return keepLastLine{m}, cmd
 }
 
-func (k keepLastLine) View() string { return k.Model.View() + "\n" }
+func (k keepLastLine) View() tea.View {
+	v := k.Model.View()
+	v.Content += "\n"
+	return v
+}
 
 // unwrapModel returns the model wrapped by keepLastLine, or m itself.
 func unwrapModel(m tea.Model) tea.Model {

@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/jponge/sheaf/internal/bundle"
 	"github.com/jponge/sheaf/internal/hosting"
 	"github.com/jponge/sheaf/internal/ops"
@@ -109,10 +109,10 @@ func TestEventRow(t *testing.T) {
 // one, and model updates keep the wrapper.
 func TestKeepLastLineWrapper(t *testing.T) {
 	m := keepLastLine{tui.NewConfirm("Remove alpha?", []string{"will delete /b/alpha"})}
-	if v := m.View(); v != m.Model.View()+"\n" {
+	if v := m.View().Content; v != m.Model.View().Content+"\n" {
 		t.Fatalf("View = %q", v)
 	}
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	w, ok := next.(keepLastLine)
 	if !ok {
 		t.Fatalf("Update returned %T", next)
