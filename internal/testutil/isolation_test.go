@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -22,8 +23,7 @@ const (
 func runChild(t *testing.T, test string, env []string) (string, error) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^"+test+"$", "-test.count=1", "-test.v")
-	// The race detector sleeps 1 s at exit by default.
-	cmd.Env = append(env, "GORACE=atexit_sleep_ms=0")
+	cmd.Env = WithoutRaceExitDelay(env)
 	cmd.Dir = t.TempDir()
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
@@ -254,5 +254,25 @@ func TestGlobalConfigIsReadOnly(t *testing.T) {
 	}
 	if b, err := os.ReadFile(os.Getenv("GIT_CONFIG_GLOBAL")); err != nil || string(b) != gitConfig {
 		t.Errorf("global configuration changed (%v):\n%s", err, b)
+	}
+}
+
+func TestWithoutRaceExitDelay(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		env  []string
+		want []string
+	}{
+		{[]string{"A=1"}, []string{"A=1", "GORACE=atexit_sleep_ms=0"}},
+		{[]string{"GORACE=halt_on_error=1", "A=1"}, []string{"A=1", "GORACE=halt_on_error=1 atexit_sleep_ms=0"}},
+		{[]string{"GORACE=", "A=1"}, []string{"A=1", "GORACE=atexit_sleep_ms=0"}},
+	} {
+		in := append([]string(nil), c.env...)
+		if got := WithoutRaceExitDelay(c.env); !slices.Equal(got, c.want) {
+			t.Errorf("WithoutRaceExitDelay(%q) = %q, want %q", in, got, c.want)
+		}
+		if !slices.Equal(c.env, in) {
+			t.Errorf("argument modified: %q", c.env)
+		}
 	}
 }

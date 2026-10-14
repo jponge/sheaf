@@ -367,3 +367,19 @@ func removeAll(dir string) {
 	})
 	_ = os.RemoveAll(dir)
 }
+
+// WithoutRaceExitDelay returns env (e.g. for a helper process re-executing
+// the test binary) with atexit_sleep_ms=0 appended to its GORACE options:
+// under the race detector, a process otherwise sleeps 1 s before exiting.
+func WithoutRaceExitDelay(env []string) []string {
+	var out []string
+	opts := ""
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "GORACE="); ok {
+			opts = v // the last one wins, as for exec.Cmd.Env
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "GORACE="+strings.TrimSpace(opts+" atexit_sleep_ms=0"))
+}

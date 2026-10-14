@@ -191,7 +191,7 @@ func TestRunBrokenStdoutPipe(t *testing.T) {
 	defer w.Close()
 	args := []string{"--bundle", e.cwd, "run", "-j", "1", "--shell", "--", "echo $$ > '" + pidfile + "'; yes | head -c 1000000; exec sleep 30"}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestSheafProcessHelper$", "-test.count=1")
-	cmd.Env = append(os.Environ(), "SHEAF_HELPER_ARGS="+strings.Join(args, "\x1f"))
+	cmd.Env = testutil.WithoutRaceExitDelay(append(os.Environ(), "SHEAF_HELPER_ARGS="+strings.Join(args, "\x1f")))
 	cmd.Stdout = w
 	var errb bytes.Buffer
 	cmd.Stderr = &errb

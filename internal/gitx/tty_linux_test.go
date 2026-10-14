@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/jponge/sheaf/internal/testutil"
 )
 
 // openPTY allocates a pseudo-terminal pair without making it the
@@ -78,7 +80,7 @@ func TestGitCannotOpenControllingTerminal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestTTYHelperProcess$", "-test.count=1")
-	cmd.Env = append(os.Environ(), "GITX_TTY_HELPER_DIR="+dir, "GITX_TTY_HELPER_SANITY="+sanity)
+	cmd.Env = testutil.WithoutRaceExitDelay(append(os.Environ(), "GITX_TTY_HELPER_DIR="+dir, "GITX_TTY_HELPER_SANITY="+sanity))
 	cmd.Stdin = slave
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out

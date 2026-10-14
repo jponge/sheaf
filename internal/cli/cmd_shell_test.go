@@ -248,28 +248,64 @@ func TestScdBashCompletionHidesGlobalFlags(t *testing.T) {
 	}
 }
 
+// ptyDriver runs an interactive bash (rc, then PS1 set to recognise
+// prompts) on a pty and types each argument (backslash escapes decoded),
+// waiting for events instead of fixed delays: the first prompt; after keys
+// ending with a newline, the next prompt; after other keys (e.g. ending with
+// a tab), the echo of their printable part, the rest (the completion) being
+// processed by readline before the next keys, like typeahead. A wait that
+// times out (per step, and 20 s overall) is noted in the output and the
+// driver goes on; the test's assertions report it.
 const ptyDriver = `
-import os, pty, select, sys, time
+import os, pty, select, shlex, sys, time
 bindir, cwd, rc = sys.argv[1:4]
+# The system bashrc may set PS1: set it after rc, to recognise prompts.
+wrapper = rc + "-driver"
+with open(wrapper, "w") as f:
+    f.write(". %s\nPS1='PROMPT$ '\n" % shlex.quote(rc))
 pid, fd = pty.fork()
 if pid == 0:
     os.chdir(cwd)
     env = {"PATH": bindir + ":/usr/bin:/bin", "HOME": cwd, "TERM": "dumb", "PS1": "PROMPT$ ", "LC_ALL": "C"}
-    os.execve("/bin/bash", ["bash", "--noprofile", "--rcfile", rc, "-i"], env)
-def read(t):
-    out = b""; end = time.time() + t
-    while time.time() < end:
+    os.execve("/bin/bash", ["bash", "--noprofile", "--rcfile", wrapper, "-i"], env)
+overall = time.time() + 20
+out = b""
+eof = False
+def wait(what, cond, step=10):
+    global out, eof
+    end = min(time.time() + step, overall)
+    while not cond(out.decode(errors="replace")):
+        if eof or time.time() >= end:
+            out += ("\nDRIVER: gave up waiting for %s\n" % what).encode()
+            return
         r, _, _ = select.select([fd], [], [], 0.05)
         if r:
-            try: out += os.read(fd, 65536)
-            except OSError: break
-    return out.decode(errors="replace")
-res = read(1.5)
+            try:
+                b = os.read(fd, 65536)
+            except OSError:
+                b = b""
+            if not b:
+                eof = True
+            out += b
+prompts = lambda s: s.count("PROMPT$ ")
+wait("the first prompt", lambda s: prompts(s) >= 1)
 for keys in sys.argv[4:]:
-    os.write(fd, keys.encode().decode("unicode_escape").encode())
-    res += read(1.0)
-os.write(fd, b"exit\n"); res += read(0.3)
-sys.stdout.write(res)
+    k = keys.encode().decode("unicode_escape")
+    if k.endswith("\n"):
+        n = prompts(out.decode(errors="replace"))
+        os.write(fd, k.encode())
+        wait("the prompt after %r" % keys, lambda s, n=n: prompts(s) > n)
+    else:
+        start = len(out.decode(errors="replace"))
+        os.write(fd, k.encode())
+        echo = k.rstrip("".join(map(chr, range(32))))  # without the tab
+        wait("the echo of %r" % keys, lambda s, start=start, echo=echo: echo in s[start:])
+os.write(fd, b"exit\n")
+wait("bash to exit", lambda s: eof, step=5)
+if not eof:
+    os.kill(pid, 9)
+os.waitpid(pid, 0)
+sys.stdout.write(out.decode(errors="replace"))
 `
 
 // TestScdBashCompletionInteractive drives a real readline through a pty: the
