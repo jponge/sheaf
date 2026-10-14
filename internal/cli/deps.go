@@ -25,6 +25,9 @@ type Deps struct {
 	// Getwd returns the directory used for bundle discovery and relative
 	// paths; default: os.Getwd.
 	Getwd func() (string, error)
+	// GHProbe checks that gh is installed and authenticated (doctor);
+	// default: defaultGHProbe, which runs `gh auth status`.
+	GHProbe func(context.Context) error
 }
 
 func (d Deps) hosting() hosting.Hosting {

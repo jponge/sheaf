@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -21,7 +22,7 @@ func addWorktreeCommands(root *cobra.Command, d Deps) {
 			"<bundle>/<repo>/<normalized branch>/ next to the primary checkout.\n\n" +
 			singleArgHelp,
 	}
-	wt.AddCommand(newWorktreeAddCmd(d), newWorktreeListCmd(d), newWorktreeRemoveCmd(d))
+	wt.AddCommand(newWorktreeAddCmd(d), newWorktreeListCmd(d), newWorktreeRemoveCmd(d), newWorktreePRCmd(d))
 	root.AddCommand(wt, newPathCmd(d))
 }
 
@@ -377,4 +378,65 @@ func newPathCmd(d Deps) *cobra.Command {
 		return nil
 	}
 	return cmd
+}
+
+func newWorktreePRCmd(d Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "pr [<repo>] <number>",
+		Short: "Check out a GitHub pull request in a worktree and print its path",
+		Long: "Resolve the pull request with gh (GitHub repositories only) and fetch origin.\n" +
+			"A pull request from a branch of the repository is checked out like `sheaf wt add\n" +
+			"<head branch>`. A pull request from a fork (or whose head branch was deleted) is\n" +
+			"fetched from refs/pull/<number>/head into the local branch pr/<number>, at\n" +
+			"<repo>/pr-<number>/, tracking that ref (git pull works there; `sheaf update` skips\n" +
+			"it). Running the command again for such a pull request fast-forwards its worktree\n" +
+			"to the current head: it refuses uncommitted changes and force-pushed heads.\n" +
+			"The number may be written #<number>. The path is printed on stdout.\n\n" +
+			"With one argument the repository is inferred from the working directory.",
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(c *cobra.Command, args []string) error {
+			numArg := args[len(args)-1]
+			n, err := parsePRNumber(numArg)
+			if err != nil {
+				return err
+			}
+			w, err := openWorkspace(c, d)
+			if err != nil {
+				return err
+			}
+			wd, err := d.getwd()
+			if err != nil {
+				return err
+			}
+			repoArg := ""
+			if len(args) == 2 {
+				repoArg = args[0]
+			}
+			rc, err := ops.ResolveRepo(w, repoArg, wd)
+			if err != nil {
+				return err
+			}
+			emit := eventSink(c, rc.Name, ops.PhasePR)
+			res, err := ops.AddPRWorktree(checkoutContext(c), w, d.hosting(), rc.Name, n, emit)
+			if err != nil {
+				return err
+			}
+			emit(ops.Event{Worktree: res.Dir, Message: res.Message})
+			fmt.Fprintln(c.OutOrStdout(), res.Path)
+			return nil
+		},
+	}
+}
+
+// parsePRNumber accepts a positive decimal number without sign or leading
+// zero, optionally prefixed with '#'.
+func parsePRNumber(arg string) (int, error) {
+	digits := strings.TrimPrefix(arg, "#")
+	bad := digits == "" || digits[0] < '1' || digits[0] > '9' ||
+		strings.ContainsFunc(digits, func(r rune) bool { return r < '0' || r > '9' })
+	n, err := strconv.Atoi(digits)
+	if bad || err != nil {
+		return 0, fmt.Errorf("invalid pull request number %q", arg)
+	}
+	return n, nil
 }

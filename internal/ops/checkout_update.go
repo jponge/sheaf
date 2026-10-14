@@ -262,6 +262,8 @@ func coClassifyUpdate(ctx context.Context, c Checkout, r gitx.PullResult) Checko
 		u.Reason = "no upstream branch configured"
 		if s := st(); s != nil && s.Upstream != "" && s.UpstreamGone {
 			u.Reason = "upstream " + s.Upstream + " is gone (deleted on the remote)"
+		} else if why := coPullRequestReason(ctx, c); why != "" {
+			u.Reason = why
 		}
 	case gitx.PullSkippedDiverged:
 		u.Reason = "diverged from its upstream: merge or rebase manually"

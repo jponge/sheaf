@@ -115,3 +115,5 @@ The orchestrator appends one line per completed step: commit, review rounds, not
 - Decision 2026-10-14 (user): prune removes worktrees with ignored files (listed, not blocking) — 'when we prune, we prune'.
 - Step 7 — sync. Opus impl, Opus review x2: round 1 blocking (deleted remote + --offline hint → last copy deleted), mass-gone, alias-host duplicates; round 2: token-scope contradiction refusal, alias-only host matching. Verified in isolation.
 - Step 9 — completion + shell-init/scd. Sonnet impl, Opus review: no blocking; fixed bash escaping (pty-tested), --bundle forms, directives. zsh/fish not executable in sandbox (unverified). Verified in isolation.
+- Decision 2026-10-14 (user): sync --remove-gone requires --force for any repo with a checkout whose remote is gone or contradicts the API (history may exist nowhere else).
+- Step 10 — prune, wt pr, doctor. Opus impl, Opus review x2: round 1 blocking (branch mid-rebase deleted), round 2 should-fix (reftable HEAD placeholder hid checked-out branches; PR head read from shared FETCH_HEAD). Fixed test-first.

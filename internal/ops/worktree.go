@@ -591,6 +591,9 @@ type WorktreeRemoveOptions struct {
 	Offline bool
 	// WorkingDir is the caller's working directory; empty means os.Getwd.
 	WorkingDir string
+	// originFetched (ops-internal) skips the fetch of origin, already done
+	// by the caller (prune); nested repositories are still fetched.
+	originFetched bool
 	// Confirm is called with the plan once RemoveWorktree may proceed;
 	// returning false (or a nil Confirm) aborts with ErrNotConfirmed.
 	Confirm func(WorktreeRemovePlan) bool
@@ -735,12 +738,14 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 	if opts.Offline {
 		ev(PhaseFetch, "offline: not fetching; the remote state may be stale")
 	} else {
-		ev(PhaseFetch, "fetching origin")
-		if err := gitx.Fetch(ctx, primary); err != nil {
-			if ctx.Err() != nil {
-				return "", ctx.Err()
+		if !opts.originFetched {
+			ev(PhaseFetch, "fetching origin")
+			if err := gitx.Fetch(ctx, primary); err != nil {
+				if ctx.Err() != nil {
+					return "", ctx.Err()
+				}
+				fetchMsg = fetchProblem(err)
 			}
-			fetchMsg = fetchProblem(err)
 		}
 		fetched := map[string]error{}
 		fetchNested = func(ctx context.Context, dir string) error {
@@ -910,14 +915,15 @@ func planWorktreeRemoval(ctx context.Context, r bundle.Repository, repoDir, prim
 		if err := checkMerged(ctx, primary, r, wt.Branch, &plan); err != nil {
 			return plan, err
 		}
-		// Normally impossible (git worktree add -f): the branch survives.
-		wts, err := gitx.WorktreeList(ctx, primary)
+		// Normally impossible (git worktree add -f, or a rebase or bisect
+		// of it elsewhere): the branch survives.
+		inUse, err := gitx.BranchesInUse(ctx, primary)
 		if err != nil {
 			return plan, err
 		}
-		for _, o := range wts {
-			if o.Branch == wt.Branch && filepath.Clean(o.Path) != wt.Path {
-				plan.BranchKept = fmt.Sprintf("branch %s is checked out at %s and will be kept", wt.Branch, filepath.Clean(o.Path))
+		for _, u := range inUse[wt.Branch] {
+			if filepath.Clean(u.Path) != wt.Path {
+				plan.BranchKept = fmt.Sprintf("branch %s is %s and will be kept", wt.Branch, describeUse(u))
 				break
 			}
 		}
@@ -1013,18 +1019,29 @@ func revCount(ctx context.Context, dir string, args ...string) (int, error) {
 	return n, nil
 }
 
-// deleteBranchIfUnchanged deletes refs/heads/branch if it is checked out in
-// no worktree and still points at oid, then its configuration section (best
+// describeUse says how a branch is in use: "checked out at <path>", "being
+// rebased in <path>" or "being bisected in <path>".
+func describeUse(u gitx.BranchUse) string {
+	switch u.How {
+	case "rebasing":
+		return "being rebased in " + u.Path
+	case "bisecting":
+		return "being bisected in " + u.Path
+	}
+	return "checked out at " + u.Path
+}
+
+// deleteBranchIfUnchanged deletes refs/heads/branch if it is in use in no
+// work tree (checked out, being rebased or bisected, see gitx.BranchesInUse)
+// and still points at oid, then its configuration section (best
 // effort). It returns why the branch was kept, or "" once deleted.
 func deleteBranchIfUnchanged(ctx context.Context, dir, branch, oid string) string {
-	wts, err := gitx.WorktreeList(ctx, dir)
+	inUse, err := gitx.BranchesInUse(ctx, dir)
 	if err != nil {
-		return "cannot list worktrees: " + err.Error()
+		return "cannot check whether it is in use: " + err.Error()
 	}
-	for _, wt := range wts {
-		if wt.Branch == branch {
-			return "it is checked out at " + wt.Path
-		}
+	if uses := inUse[branch]; len(uses) > 0 {
+		return "it is " + describeUse(uses[0])
 	}
 	if _, err := gitx.Run(ctx, dir, "update-ref", "-d", "refs/heads/"+branch, oid); err != nil {
 		return "it changed since it was checked (" + firstLineOf(err.Error()) + ")"
