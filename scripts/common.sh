@@ -32,6 +32,8 @@ require_image() {
 build_run_args() {
   PODMAN_RUN_ARGS=(
     --rm -it
+    # Run an init as PID 1 so orphaned processes (e.g. git's detached maintenance) are reaped.
+    --init
     --userns="keep-id:uid=${CONTAINER_UID},gid=${CONTAINER_GID}"
     --cap-drop=ALL
     --security-opt no-new-privileges
