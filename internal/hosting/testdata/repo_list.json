@@ -1,0 +1,6 @@
+[
+  {"name":"zeta","owner":{"id":"MDEyOk9yZ2FuaXphdGlvbjE=","login":"smallrye"},"url":"https://github.com/smallrye/zeta","sshUrl":"git@github.com:smallrye/zeta.git","defaultBranchRef":{"name":"main"},"isArchived":false,"isFork":false,"description":"Zeta library"},
+  {"name":"alpha","owner":{"id":"MDEyOk9yZ2FuaXphdGlvbjE=","login":"smallrye"},"url":"https://github.com/smallrye/alpha","sshUrl":"git@github.com:smallrye/alpha.git","defaultBranchRef":{"name":"master"},"isArchived":true,"isFork":false,"description":"Old and archived"},
+  {"name":"forky","owner":{"id":"MDEyOk9yZ2FuaXphdGlvbjE=","login":"smallrye"},"url":"https://github.com/smallrye/forky","sshUrl":"git@github.com:smallrye/forky.git","defaultBranchRef":{"name":"develop"},"isArchived":false,"isFork":true,"description":""},
+  {"name":"empty","owner":{"id":"MDEyOk9yZ2FuaXphdGlvbjE=","login":"smallrye"},"url":"https://github.com/smallrye/empty","sshUrl":"git@github.com:smallrye/empty.git","defaultBranchRef":null,"isArchived":false,"isFork":false,"description":"No commits yet"}
+]
