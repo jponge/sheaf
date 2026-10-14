@@ -119,6 +119,7 @@ func (e *env) runTUI(t *testing.T, in io.Reader, out *syncBuffer, args ...string
 }
 
 func TestTUIDecisionIsInjectableAndPlainByDefault(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	e.coAddRepo(t, "alpha")
 	// Not forced: the test streams are not terminals, remove needs --yes.
@@ -129,6 +130,7 @@ func TestTUIDecisionIsInjectableAndPlainByDefault(t *testing.T) {
 }
 
 func TestTUIAddOrgMenuSelectsTwoOfThree(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	for _, n := range []string{"a", "b", "c"} {
 		e.origin(t, "o", n, false)
@@ -159,6 +161,7 @@ func TestTUIAddOrgMenuSelectsTwoOfThree(t *testing.T) {
 }
 
 func TestTUIAddOrgMenuShowsPresentAndCancelChangesNothing(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	for _, n := range []string{"a", "b"} {
 		e.origin(t, "o", n, false)
@@ -180,6 +183,7 @@ func TestTUIAddOrgMenuShowsPresentAndCancelChangesNothing(t *testing.T) {
 }
 
 func TestTUISyncAddsSelectedAndDeclinesExclusion(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	var out syncBuffer
 	// Proposals: new b, new c. Select b; then decline excluding c.
@@ -203,6 +207,7 @@ func TestTUISyncAddsSelectedAndDeclinesExclusion(t *testing.T) {
 }
 
 func TestTUISyncExcludesChosenNewRepository(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	var out syncBuffer
 	// Select nothing; exclude c (second item of the exclusion menu).
@@ -309,6 +314,7 @@ func TestTUIRemoveConfirmNo(t *testing.T) {
 }
 
 func TestTUIRemoveWithYesDoesNotAsk(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	e.coAddRepo(t, "alpha")
 	var out syncBuffer
@@ -366,6 +372,7 @@ func TestTUIPruneConfirms(t *testing.T) {
 }
 
 func TestTUIInitAdoptsSelectedCandidates(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	dir := t.TempDir()
 	for _, n := range []string{"alpha", "beta"} {
@@ -389,6 +396,7 @@ func TestTUIInitAdoptsSelectedCandidates(t *testing.T) {
 }
 
 func TestTUIUpdateProgressAndSummary(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	o, _ := e.coAddRepo(t, "alpha")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")

@@ -80,6 +80,7 @@ func exists(p string) bool {
 }
 
 func TestEndToEnd(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.origin(t, "o", "a", false)
 	e.origin(t, "o", "b", false)
@@ -144,6 +145,7 @@ func TestEndToEnd(t *testing.T) {
 }
 
 func TestCreateAndInit(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	dir := filepath.Join(t.TempDir(), "new")
 	out := e.mustRun(t, "create", dir)
@@ -178,6 +180,7 @@ func TestCreateAndInit(t *testing.T) {
 }
 
 func TestAddCLIErrors(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.origin(t, "o", "a", false)
 	e.origin(t, "o", "zz", false)
@@ -205,6 +208,7 @@ func TestAddCLIErrors(t *testing.T) {
 }
 
 func TestAddReportsFailuresWithExitCode(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.origin(t, "o", "a", false)
 	root := t.TempDir()
@@ -228,6 +232,7 @@ func TestAddReportsFailuresWithExitCode(t *testing.T) {
 }
 
 func TestRemoveRequiresYesInCLIMode(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.origin(t, "o", "a", false)
 	root := t.TempDir()
@@ -243,6 +248,7 @@ func TestRemoveRequiresYesInCLIMode(t *testing.T) {
 }
 
 func TestCommandsHonourCancelledContext(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.origin(t, "o", "a", false)
 	root := t.TempDir()
@@ -261,6 +267,7 @@ func TestCommandsHonourCancelledContext(t *testing.T) {
 }
 
 func TestRemoveDisplaysInformationalRisks(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	o := e.origin(t, "o", "a", false)
 	work := filepath.Join(t.TempDir(), "work")
@@ -282,6 +289,7 @@ func TestRemoveDisplaysInformationalRisks(t *testing.T) {
 }
 
 func TestAdoptDefaultBranchFlag(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	root := t.TempDir()
 	e.mustRun(t, "create", root)
@@ -305,6 +313,7 @@ func TestAdoptDefaultBranchFlag(t *testing.T) {
 }
 
 func TestRemoveOfflineFlag(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.origin(t, "o", "a", false)
 	root := t.TempDir()
@@ -326,6 +335,7 @@ func TestRemoveOfflineFlag(t *testing.T) {
 }
 
 func TestAdoptHostFlag(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	root := t.TempDir()
 	e.mustRun(t, "create", root)
@@ -341,6 +351,7 @@ func TestAdoptHostFlag(t *testing.T) {
 }
 
 func TestRemoveUsesInjectedWorkingDir(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.origin(t, "o", "a", false)
 	root := t.TempDir()

@@ -42,6 +42,7 @@ func goneMergedTopic(t *testing.T) (*fixture, string) {
 // B1: a branch being rebased in the primary checkout (HEAD detached) is in
 // use: not proposed, not deleted.
 func TestR10PrimaryMidRebaseBranchDeleted(t *testing.T) {
+	t.Parallel()
 	f, primary := goneMergedTopic(t)
 	testutil.Git(t, primary, "switch", "-q", "topic")
 	stopRebaseIn(t, primary)
@@ -62,6 +63,7 @@ func TestR10PrimaryMidRebaseBranchDeleted(t *testing.T) {
 
 // B1: same in a linked worktree; and bisect.
 func TestR10LinkedWorktreeMidRebaseAndBisect(t *testing.T) {
+	t.Parallel()
 	f, primary, _ := pruneScenario(t)
 	stopRebaseIn(t, filepath.Join(f.w.Root, "a", "merged"))
 	testutil.Git(t, filepath.Join(f.w.Root, "a", "done"), "bisect", "start", "HEAD", "HEAD~2")
@@ -88,6 +90,7 @@ func TestR10LinkedWorktreeMidRebaseAndBisect(t *testing.T) {
 
 // B1 at deletion time (wt rm -d/-D, prune): a branch being rebased is kept.
 func TestR10DeleteBranchIfUnchangedKeepsBranchInUse(t *testing.T) {
+	t.Parallel()
 	f, primary := goneMergedTopic(t)
 	testutil.Git(t, primary, "switch", "-q", "topic")
 	oid := testutil.Git(t, primary, "rev-parse", "topic")
@@ -101,6 +104,7 @@ func TestR10DeleteBranchIfUnchangedKeepsBranchInUse(t *testing.T) {
 
 // S4: a commit in the worktree after the plan keeps it, with a clear message.
 func TestR10HeadMovedAfterPlan(t *testing.T) {
+	t.Parallel()
 	f, _, _ := pruneScenario(t)
 	opts := PruneOptions{WorkingDir: f.w.Root, Offline: true}
 	plan := f.prunePlan(t, PruneOptions{WorkingDir: f.w.Root})
@@ -115,6 +119,7 @@ func TestR10HeadMovedAfterPlan(t *testing.T) {
 
 // S4: the worktree directory now holds another branch on the same commit.
 func TestR10WorktreeSwitchedBranchAfterPlan(t *testing.T) {
+	t.Parallel()
 	f, primary, _ := pruneScenario(t)
 	opts := PruneOptions{WorkingDir: f.w.Root, Offline: true}
 	plan := f.prunePlan(t, PruneOptions{WorkingDir: f.w.Root})
@@ -129,6 +134,7 @@ func TestR10WorktreeSwitchedBranchAfterPlan(t *testing.T) {
 
 // S4: a branch without worktree that moved after the plan is kept.
 func TestR10BranchMovedAfterPlan(t *testing.T) {
+	t.Parallel()
 	f, primary, _ := pruneScenario(t)
 	opts := PruneOptions{WorkingDir: f.w.Root, IncludeBranches: true, Offline: true}
 	plan := f.prunePlan(t, PruneOptions{WorkingDir: f.w.Root, IncludeBranches: true})
@@ -142,6 +148,7 @@ func TestR10BranchMovedAfterPlan(t *testing.T) {
 
 // NIT: the candidate's branch is now checked out in the primary: kept.
 func TestR10CandidateNowInPrimaryIsKept(t *testing.T) {
+	t.Parallel()
 	f, primary, _ := pruneScenario(t)
 	opts := PruneOptions{WorkingDir: f.w.Root, Offline: true}
 	plan := f.prunePlan(t, PruneOptions{WorkingDir: f.w.Root})
@@ -156,6 +163,7 @@ func TestR10CandidateNowInPrimaryIsKept(t *testing.T) {
 
 // NIT: the plan fetched already; removals do not fetch origin again.
 func TestR10ApplyDoesNotRefetch(t *testing.T) {
+	t.Parallel()
 	f, _, _ := pruneScenario(t)
 	opts := PruneOptions{WorkingDir: f.w.Root}
 	plan := f.prunePlan(t, opts)
@@ -170,6 +178,7 @@ func TestR10ApplyDoesNotRefetch(t *testing.T) {
 
 // S5: non-blocking risks are listed in the plan and the results.
 func TestR10NonBlockingRisksListed(t *testing.T) {
+	t.Parallel()
 	f, primary, _ := pruneScenario(t)
 	common := testutil.Git(t, primary, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	writeFile(t, filepath.Join(common, "info", "exclude"), "*.bin\n")
@@ -198,6 +207,7 @@ func TestR10NonBlockingRisksListed(t *testing.T) {
 // E2: a gone branch with commits on no remote is never deleted, even with
 // --delete-branches and --include-branches.
 func TestR10GoneUnpushedDeleteBranches(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, o := f.clonedRepo(t, "a")
 	f.mustAddWT(t, "a", "feat")
@@ -215,6 +225,7 @@ func TestR10GoneUnpushedDeleteBranches(t *testing.T) {
 
 // E8: doctor changes nothing in the bundle.
 func TestR10DoctorReadOnly(t *testing.T) {
+	t.Parallel()
 	f, primary, _ := pruneScenario(t)
 	writeFile(t, filepath.Join(f.w.Root, "a", "feat", "file-1.txt"), "dirty\n")
 	writeFile(t, filepath.Join(f.w.Root, "a", "wip", "untracked.txt"), "u\n")
@@ -248,6 +259,7 @@ func TestR10DoctorReadOnly(t *testing.T) {
 
 // N1: in a reftable repository a checked-out branch is not deleted.
 func TestR10DeleteBranchIfUnchangedReftable(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	dir := filepath.Join(t.TempDir(), "r")
 	if out, err := exec.Command("git", "init", "-q", "--ref-format=reftable", "-b", "main", dir).CombinedOutput(); err != nil {
@@ -264,6 +276,7 @@ func TestR10DeleteBranchIfUnchangedReftable(t *testing.T) {
 
 // NIT: a worktree moved after the plan (git worktree move) is kept.
 func TestR10WorktreeMovedAfterPlan(t *testing.T) {
+	t.Parallel()
 	f, primary, _ := pruneScenario(t)
 	plan := f.prunePlan(t, PruneOptions{WorkingDir: f.w.Root})
 	moved := filepath.Join(f.w.Root, "a", "merged-moved")
@@ -277,6 +290,7 @@ func TestR10WorktreeMovedAfterPlan(t *testing.T) {
 
 // NIT: a gh probe timeout is not reported as an authentication failure.
 func TestR10DoctorGHTimeout(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	cs := f.doctor(t, DoctorOptions{GH: func(context.Context) error {
 		return fmt.Errorf("%w within 20s", ErrGHProbeTimeout)

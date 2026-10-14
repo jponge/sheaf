@@ -13,6 +13,7 @@ import (
 )
 
 func TestUseTUIDecision(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		in, out, noTUI, want bool
 	}{
@@ -29,6 +30,7 @@ func TestUseTUIDecision(t *testing.T) {
 }
 
 func TestIsTerminal(t *testing.T) {
+	t.Parallel()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)

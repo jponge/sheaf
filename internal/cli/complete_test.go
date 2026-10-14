@@ -61,6 +61,7 @@ func complBundle(t *testing.T) (*env, string) {
 }
 
 func TestCompleteRepoNames(t *testing.T) {
+	t.Parallel()
 	e, _ := complBundle(t)
 	both := []string{"a", "b"}
 	e.wantComplete(t, both, "remove", "")
@@ -78,6 +79,7 @@ func TestCompleteRepoNames(t *testing.T) {
 }
 
 func TestCompleteWorktreeNames(t *testing.T) {
+	t.Parallel()
 	e, root := complBundle(t)
 	e.wantComplete(t, []string{"feat-x", "feat/x", "main"}, "path", "a", "")
 	e.wantComplete(t, []string{"feat-x", "feat/x"}, "wt", "remove", "a", "")
@@ -98,6 +100,7 @@ func TestCompleteWorktreeNames(t *testing.T) {
 }
 
 func TestCompleteBranchesForWorktreeAdd(t *testing.T) {
+	t.Parallel()
 	e, root := complBundle(t)
 	// local and origin/* branches, minus the checked-out ones (main, feat/x)
 	e.wantComplete(t, []string{"dev", "local-only", "topic/y"}, "wt", "add", "a", "")
@@ -109,6 +112,7 @@ func TestCompleteBranchesForWorktreeAdd(t *testing.T) {
 }
 
 func TestCompleteOrgs(t *testing.T) {
+	t.Parallel()
 	e, _ := complBundle(t)
 	e.wantComplete(t, nil, "add", "--org", "")
 	e.mustRun(t, "add", "--org", "o", "--all")
@@ -117,6 +121,7 @@ func TestCompleteOrgs(t *testing.T) {
 }
 
 func TestCompleteHonoursBundleFlagAndStaysSilentOnFailure(t *testing.T) {
+	t.Parallel()
 	e, root := complBundle(t)
 	e.cwd = t.TempDir() // not inside a bundle
 	e.wantComplete(t, nil, "remove", "")
@@ -135,6 +140,7 @@ func TestCompleteHonoursBundleFlagAndStaysSilentOnFailure(t *testing.T) {
 }
 
 func TestEveryCompletionTargetExists(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	root := NewRootCmdWithDeps(Streams{}, e.deps())
 	if missing := installCompletionsReport(root, e.deps()); len(missing) != 0 {
@@ -143,6 +149,7 @@ func TestEveryCompletionTargetExists(t *testing.T) {
 }
 
 func TestCompleteNothingApplies(t *testing.T) {
+	t.Parallel()
 	e, _ := complBundle(t)
 	for _, args := range [][]string{
 		{"status", ""}, {"update", ""}, {"fetch", ""}, {"version", ""},
@@ -157,6 +164,7 @@ func TestCompleteNothingApplies(t *testing.T) {
 }
 
 func TestCompleteBundleFlagOffersDirectories(t *testing.T) {
+	t.Parallel()
 	e, _ := complBundle(t)
 	got, dir := e.complete(t, "--bundle", "")
 	if len(got) != 0 || dir != ":16" { // cobra.ShellCompDirectiveFilterDirs
@@ -169,12 +177,14 @@ func TestCompleteBundleFlagOffersDirectories(t *testing.T) {
 }
 
 func TestCompleteSyncOrg(t *testing.T) {
+	t.Parallel()
 	e, _ := complBundle(t)
 	e.mustRun(t, "add", "--org", "o", "--all")
 	e.wantComplete(t, []string{"o"}, "sync", "--org", "")
 }
 
 func TestCompleteMissingCheckoutsAreNotOfferedByPath(t *testing.T) {
+	t.Parallel()
 	e, root := complBundle(t)
 	if err := os.RemoveAll(filepath.Join(root, "a", "feat-x")); err != nil {
 		t.Fatal(err)
@@ -185,6 +195,7 @@ func TestCompleteMissingCheckoutsAreNotOfferedByPath(t *testing.T) {
 }
 
 func TestCompleteNeverUsesTheNetwork(t *testing.T) {
+	t.Parallel()
 	e, root := complBundle(t)
 	for _, r := range []string{"a", "b"} {
 		testutil.Git(t, filepath.Join(root, r, "main"), "remote", "set-url", "origin", "http://127.0.0.1:1/unreachable.git")

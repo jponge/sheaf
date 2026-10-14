@@ -11,6 +11,7 @@ import (
 )
 
 func TestParseRemoteURLGitHubAliasesAndSSHConfigHosts(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{
 		"ssh://git@ssh.github.com:443/o/x.git": "github.com",
 		"https://www.github.com/o/x":           "github.com",
@@ -25,6 +26,7 @@ func TestParseRemoteURLGitHubAliasesAndSSHConfigHosts(t *testing.T) {
 }
 
 func TestAdoptHostAliasAndOverride(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{})
 	alias := filepath.Join(f.w.Root, "alias")
@@ -60,6 +62,7 @@ func TestAdoptHostAliasAndOverride(t *testing.T) {
 
 // NIT: the post-confirmation re-check ignores informational changes.
 func TestRemoveRecheckIgnoresInformationalChanges(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	writeFile(t, filepath.Join(primary, ".git", "info", "exclude"), "*.log\n")
@@ -74,6 +77,7 @@ func TestRemoveRecheckIgnoresInformationalChanges(t *testing.T) {
 
 // NIT: the working directory comes from the caller.
 func TestRemoveUsesGivenWorkingDir(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	_, err := f.removeOpts(t, "a", RemoveOptions{Force: true, Confirm: yes, WorkingDir: filepath.Join(primary, "sub")})
@@ -84,6 +88,7 @@ func TestRemoveUsesGivenWorkingDir(t *testing.T) {
 
 // NIT: create refuses nested bundles but allows a work tree.
 func TestCreateRefusesNestedBundle(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	outer, err := Create(t.TempDir())
 	if err != nil {

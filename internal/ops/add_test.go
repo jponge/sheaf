@@ -74,6 +74,7 @@ func repoNames(b *bundle.Bundle) []string {
 }
 
 func TestAddSlugsClonesIntoLayoutAndRecords(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.repo(t, "o", "a", "main", false)
 	f.repo(t, "o", "b", "dev/next", false)
@@ -111,6 +112,7 @@ func (f *fixture) mustRepo(t *testing.T, owner, name string) hosting.Repo {
 }
 
 func TestAddSkipsExistingAndReportsPerRepoFailures(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.repo(t, "o", "a", "main", false)
 	f.repo(t, "o", "b", "main", false)
@@ -158,6 +160,7 @@ func mapsEqual(a, b map[string]Status) bool {
 }
 
 func TestAddNameCollisionNeedsAs(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.repo(t, "o", "a", "main", false)
 	f.repo(t, "p", "a", "main", false)
@@ -190,6 +193,7 @@ func TestAddNameCollisionNeedsAs(t *testing.T) {
 }
 
 func TestAddRefusesUnregisteredExistingDirectory(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.repo(t, "o", "a", "main", false)
 	keep := filepath.Join(f.w.Root, "a", "notes.txt")
@@ -209,6 +213,7 @@ func TestAddRefusesUnregisteredExistingDirectory(t *testing.T) {
 }
 
 func TestAddInvalidRequests(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.repo(t, "o", "a", "main", false)
 	for name, req := range map[string]AddRequest{
@@ -233,6 +238,7 @@ func TestAddInvalidRequests(t *testing.T) {
 }
 
 func TestAddOrg(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.repo(t, "Org", "a", "main", false)
 	f.repo(t, "Org", "b", "main", false)
@@ -281,6 +287,7 @@ func TestAddOrg(t *testing.T) {
 }
 
 func TestAddCancelledMidwayLeavesNothingBehind(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.repo(t, "o", "a", "main", false)
 	ctx, cancel := context.WithCancel(context.Background())

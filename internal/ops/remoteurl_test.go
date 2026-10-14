@@ -3,6 +3,7 @@ package ops
 import "testing"
 
 func TestSlugFromRemoteURL(t *testing.T) {
+	t.Parallel()
 	ok := map[string]string{
 		"git@github.com:jponge/boiler-vroom.git":          "jponge/boiler-vroom",
 		"git@github.com:jponge/boiler-vroom":              "jponge/boiler-vroom",

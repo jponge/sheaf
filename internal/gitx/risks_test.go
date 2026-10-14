@@ -42,6 +42,7 @@ func wantRisks(t *testing.T, risks []Risk, want map[RiskKind]int) {
 }
 
 func TestDeletionRisksClean(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{Branches: []string{"pushed"}})
 	testutil.Git(t, dir, "branch", "--track", "pushed", "origin/pushed")
 	r := mustRisks(t, dir)
@@ -52,6 +53,7 @@ func TestDeletionRisksClean(t *testing.T) {
 }
 
 func TestDeletionRisksWorkTreeChanges(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{Commits: 2})
 	writeFile(t, dir, "file-1.txt", "staged\n")
 	testutil.Git(t, dir, "add", "file-1.txt")
@@ -65,6 +67,7 @@ func TestDeletionRisksWorkTreeChanges(t *testing.T) {
 }
 
 func TestDeletionRisksUntrackedOnlyIsUnsafe(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "config", "status.showUntrackedFiles", "no")
 	writeFile(t, dir, "notes.txt", "precious\n")
@@ -76,6 +79,7 @@ func TestDeletionRisksUntrackedOnlyIsUnsafe(t *testing.T) {
 }
 
 func TestDeletionRisksConflict(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "checkout", "-q", "-b", "other")
 	testutil.CommitFile(t, dir, "file-1.txt", "other side\n", "other")
@@ -88,6 +92,7 @@ func TestDeletionRisksConflict(t *testing.T) {
 }
 
 func TestDeletionRisksStash(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	writeFile(t, dir, "file-1.txt", "wip\n")
 	testutil.Git(t, dir, "stash", "push", "-q")
@@ -95,6 +100,7 @@ func TestDeletionRisksStash(t *testing.T) {
 }
 
 func TestDeletionRisksUnpushedBranchCommits(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "checkout", "-q", "-b", "side")
 	testutil.CommitFile(t, dir, "s1.txt", "1\n", "side 1")
@@ -104,6 +110,7 @@ func TestDeletionRisksUnpushedBranchCommits(t *testing.T) {
 }
 
 func TestDeletionRisksDetachedCommits(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "checkout", "-q", "--detach")
 	testutil.CommitFile(t, dir, "d.txt", "d\n", "detached")
@@ -111,6 +118,7 @@ func TestDeletionRisksDetachedCommits(t *testing.T) {
 }
 
 func TestDeletionRisksTagOnlyCommits(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "checkout", "-q", "--detach")
 	testutil.CommitFile(t, dir, "t1.txt", "1\n", "tagged 1")
@@ -121,6 +129,7 @@ func TestDeletionRisksTagOnlyCommits(t *testing.T) {
 }
 
 func TestDeletionRisksIgnoredFilesAreInformational(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.CommitFile(t, dir, ".gitignore", "*.log\n", "ignore logs")
 	testutil.Git(t, dir, "push", "-q", "origin", "main")
@@ -133,6 +142,7 @@ func TestDeletionRisksIgnoredFilesAreInformational(t *testing.T) {
 }
 
 func TestDeletionRisksWithoutRemoteAndUnborn(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	dir := t.TempDir()
 	testutil.Git(t, dir, "init", "-q")
@@ -143,6 +153,7 @@ func TestDeletionRisksWithoutRemoteAndUnborn(t *testing.T) {
 }
 
 func TestRiskKindString(t *testing.T) {
+	t.Parallel()
 	for k, want := range map[RiskKind]string{
 		RiskStaged:                "staged changes",
 		RiskUnstaged:              "unstaged changes",
@@ -166,6 +177,7 @@ func TestRiskKindString(t *testing.T) {
 // Review 2, item 5: tags are normally fetched from origin; a commit reachable
 // only from such a tag must not make a fresh clone unsafe to delete.
 func TestDeletionRisksFetchedTagOnlyCommitIsInformational(t *testing.T) {
+	t.Parallel()
 	o := testutil.NewOrigin(t, testutil.OriginOpts{})
 	w := filepath.Join(t.TempDir(), "w")
 	testutil.Git(t, filepath.Dir(w), "clone", "-q", o.Path, w)
@@ -187,6 +199,7 @@ func TestDeletionRisksFetchedTagOnlyCommitIsInformational(t *testing.T) {
 // Review 2, item 6: modifications of files flagged skip-worktree or
 // assume-unchanged are hidden from status but lost on deletion.
 func TestDeletionRisksHiddenModifications(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{Commits: 3})
 	// A tracked symlink and a file in a subdirectory, pushed.
 	if err := os.Symlink("file-1.txt", filepath.Join(dir, "link")); err != nil {
@@ -230,6 +243,7 @@ func TestDeletionRisksHiddenModifications(t *testing.T) {
 
 // Review 2, item 8: risk scope.
 func TestRiskScopeAndSafeToRemoveWorktree(t *testing.T) {
+	t.Parallel()
 	repoWide := map[RiskKind]bool{
 		RiskStaged: false, RiskUnstaged: false, RiskConflicted: false, RiskUntracked: false,
 		RiskStash: true, RiskUnpushedBranchCommits: true, RiskDetachedCommits: false,
@@ -272,6 +286,7 @@ func flag(t *testing.T, dir, mode string, paths ...string) {
 // hash-object` (which does not consult the index) would convert the work-tree
 // file to LF and report a different id. Not a modification.
 func TestHiddenModificationsCRLFBlobIsNotAModification(t *testing.T) {
+	t.Parallel()
 	for name, setup := range map[string]func(t *testing.T, dir string){
 		"text=auto attribute": func(t *testing.T, dir string) {
 			writeFile(t, filepath.Join(dir, ".git"), "info/attributes", "* text=auto\n")
@@ -310,6 +325,7 @@ func TestHiddenModificationsCRLFBlobIsNotAModification(t *testing.T) {
 // With core.symlinks=false git checks a symlink out as a regular file holding
 // the link target; that is not a modification.
 func TestHiddenModificationsSymlinkCheckedOutAsFile(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{Commits: 1})
 	if err := os.Symlink("file-1.txt", filepath.Join(dir, "link")); err != nil {
 		t.Fatal(err)
@@ -335,6 +351,7 @@ func TestHiddenModificationsSymlinkCheckedOutAsFile(t *testing.T) {
 // newline-separated, strips a trailing CR and unquotes a leading double quote:
 // such paths must still be compared correctly.
 func TestHiddenModificationsAwkwardPaths(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	names := []string{"new\nline.txt", "trailing-cr\r", "\"quoted.txt", "plain.txt", "sp ace.txt", "unié.txt"}
 	for _, n := range names {
@@ -352,6 +369,7 @@ func TestHiddenModificationsAwkwardPaths(t *testing.T) {
 // A required clean filter that cannot run (Git LFS not installed) makes the
 // content of flagged files unverifiable, not DeletionRisks fail.
 func TestHiddenModificationsRequiredFilterMissing(t *testing.T) {
+	t.Parallel()
 	for name, clean := range map[string]string{"no command": "", "command not found": "sheaf-no-such-binary clean %f"} {
 		t.Run(name, func(t *testing.T) {
 			_, dir := cloneOrigin(t, testutil.OriginOpts{})

@@ -20,6 +20,7 @@ func mustUnpushed(t *testing.T, dir string, want int) {
 }
 
 func TestUnpushedCommits(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{Commits: 2})
 	mustUnpushed(t, dir, 0)
 
@@ -40,6 +41,7 @@ func TestUnpushedCommits(t *testing.T) {
 }
 
 func TestUnpushedCommitsWithoutRemoteAndUnborn(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	dir := t.TempDir()
 	testutil.Git(t, dir, "init", "-q")
@@ -50,6 +52,7 @@ func TestUnpushedCommitsWithoutRemoteAndUnborn(t *testing.T) {
 }
 
 func TestGoneBranches(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{Branches: []string{"feat/gone", "keep"}})
 	testutil.Git(t, dir, "branch", "--track", "feat/gone", "origin/feat/gone")
 	testutil.Git(t, dir, "branch", "--track", "keep", "origin/keep")
@@ -68,6 +71,7 @@ func TestGoneBranches(t *testing.T) {
 }
 
 func TestMergedBranches(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "branch", "merged/one")
 	testutil.Git(t, dir, "checkout", "-q", "-b", "unmerged")

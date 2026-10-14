@@ -71,6 +71,7 @@ func wantProposals(t *testing.T, r SyncReport, want ...string) {
 }
 
 func TestSyncProposesNewReposOnly(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}},
 		bundle.Repository{Name: "a", Slug: "o/a", Origin: "org:o"},
@@ -93,6 +94,7 @@ func TestSyncProposesNewReposOnly(t *testing.T) {
 }
 
 func TestSyncHonoursExcludeCaseInsensitively(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o", Exclude: []string{"Legacy"}}})
 	listed(f, "o", "legacy", "fresh")
@@ -100,6 +102,7 @@ func TestSyncHonoursExcludeCaseInsensitively(t *testing.T) {
 }
 
 func TestSyncArchivedHandling(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}},
 		bundle.Repository{Name: "kept", Slug: "o/kept", Origin: "org:o"},
@@ -122,6 +125,7 @@ func TestSyncArchivedHandling(t *testing.T) {
 }
 
 func TestSyncProposesGoneOrgRepos(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}},
 		bundle.Repository{Name: "a", Slug: "o/a", Origin: "org:o"},
@@ -159,6 +163,7 @@ func (h truncating) ListRepos(ctx context.Context, owner string) ([]hosting.Repo
 }
 
 func TestSyncTruncatedListingNeverProposesGone(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}},
 		bundle.Repository{Name: "beyond-limit", Slug: "o/beyond-limit", Origin: "org:o"})
@@ -174,6 +179,7 @@ func TestSyncTruncatedListingNeverProposesGone(t *testing.T) {
 }
 
 func TestSyncListingErrorIsPerOrg(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "broken"}, {Org: "o"}},
 		bundle.Repository{Name: "b1", Slug: "broken/b1", Origin: "org:broken"})
@@ -190,6 +196,7 @@ func TestSyncListingErrorIsPerOrg(t *testing.T) {
 }
 
 func TestSyncOrgSelection(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}, {Org: "p"}})
 	listed(f, "o", "o1")
@@ -202,6 +209,7 @@ func TestSyncOrgSelection(t *testing.T) {
 }
 
 func TestSyncWithoutSourcesFails(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	if _, err := Sync(context.Background(), f.w, f.fake, SyncOptions{}); err == nil {
 		t.Fatal("Sync without sources succeeded")
@@ -209,6 +217,7 @@ func TestSyncWithoutSourcesFails(t *testing.T) {
 }
 
 func TestSyncNotesDirectoryNameClash(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "p"}},
 		bundle.Repository{Name: "common", Slug: "o/common", Origin: "explicit"})
@@ -221,6 +230,7 @@ func TestSyncNotesDirectoryNameClash(t *testing.T) {
 }
 
 func TestSyncAddNewClonesWithOrgOrigin(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.repo(t, "o", "a", "main", false)
 	if s, err := f.add(t, AddRequest{Org: "o", All: true}); err != nil || s.Err() != nil {
@@ -245,6 +255,7 @@ func TestSyncAddNewClonesWithOrgOrigin(t *testing.T) {
 }
 
 func TestSyncAddNewIgnoresOtherKinds(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	s := SyncAddNew(context.Background(), f.w, []Proposal{{Key: "gone:o/a", Kind: ProposalGone, Org: "o", Name: "a", Slug: "o/a"}}, 1, Discard)
 	if got := statuses(s); !mapsEqual(got, map[string]Status{"a": StatusFailed}) {
@@ -253,6 +264,7 @@ func TestSyncAddNewIgnoresOtherKinds(t *testing.T) {
 }
 
 func TestSyncExcludeStopsProposals(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}})
 	listed(f, "O", "noise", "keep")
@@ -272,6 +284,7 @@ func TestSyncExcludeStopsProposals(t *testing.T) {
 }
 
 func TestSyncRemoveGoneKeepsSafetyOfRemove(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	for _, n := range []string{"clean", "risky", "stays"} {
 		f.repo(t, "o", n, "main", false)
@@ -332,6 +345,7 @@ func TestSyncRemoveGoneKeepsSafetyOfRemove(t *testing.T) {
 }
 
 func TestSyncRemoveGoneIgnoresOtherKinds(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}}, bundle.Repository{Name: "a", Slug: "o/a", Origin: "org:o"})
 	opts := SyncRemoveOptions{Remove: RemoveOptions{WorkingDir: t.TempDir(), Confirm: func(RemovePlan) bool { return true }, Force: true}}

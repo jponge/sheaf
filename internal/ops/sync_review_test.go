@@ -32,6 +32,7 @@ func (h tweaked) Repo(ctx context.Context, owner, name string) (hosting.Repo, er
 }
 
 func TestSyncAliasHostEntryIsNotNew(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}},
 		bundle.Repository{Name: "a-work", Slug: "o/a", Origin: "adopted", Host: "github_work"})
@@ -44,6 +45,7 @@ func TestSyncAliasHostEntryIsNotNew(t *testing.T) {
 }
 
 func TestAddOrgSkipsSlugRecordedUnderAliasHost(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, nil, bundle.Repository{Name: "a-work", Slug: "o/a", Origin: "adopted", Host: "github_work"})
 	f.repo(t, "o", "a", "main", false)
@@ -60,6 +62,7 @@ func TestAddOrgSkipsSlugRecordedUnderAliasHost(t *testing.T) {
 }
 
 func TestSyncGoneIsConfirmedByLookup(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}},
 		bundle.Repository{Name: "a", Slug: "o/a", Origin: "org:o"},
@@ -81,6 +84,7 @@ func TestSyncGoneIsConfirmedByLookup(t *testing.T) {
 }
 
 func TestSyncMovedRepoBetweenTrackedOrgs(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}, {Org: "p"}},
 		bundle.Repository{Name: "a", Slug: "o/a", Origin: "org:o"},
@@ -103,6 +107,7 @@ func TestSyncMovedRepoBetweenTrackedOrgs(t *testing.T) {
 }
 
 func TestSyncMassGoneNeedsExplicitPermission(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}},
 		bundle.Repository{Name: "a", Slug: "o/a", Origin: "org:o"},
@@ -138,6 +143,7 @@ func TestSyncMassGoneNeedsExplicitPermission(t *testing.T) {
 }
 
 func TestSyncAddNewSkipsEmptyRepositories(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}})
 	f.fake.AddRepo(hosting.Repo{Owner: "o", Name: "empty", CloneURL: "file:///nowhere.git"})
@@ -150,6 +156,7 @@ func TestSyncAddNewSkipsEmptyRepositories(t *testing.T) {
 }
 
 func TestSyncRemoveGoneSkipsEntriesChangedSinceSync(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}},
 		bundle.Repository{Name: "a", Slug: "o/a", Origin: "org:o"},

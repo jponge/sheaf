@@ -40,6 +40,7 @@ func readYAML(t *testing.T, root string) string {
 }
 
 func TestSyncDryRunListsProposals(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	before := readYAML(t, root)
 	out, errs, code := e.run(t, "sync")
@@ -99,6 +100,7 @@ func TestSyncJSON(t *testing.T) {
 }
 
 func TestSyncAddNewWithExclude(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	if _, errs, code := e.run(t, "sync", "--exclude", "nope"); code == 0 || !strings.Contains(errs, "nope") {
 		t.Fatalf("--exclude nope: exit %d, stderr %s", code, errs)
@@ -127,6 +129,7 @@ func TestSyncAddNewWithExclude(t *testing.T) {
 }
 
 func TestSyncRemoveGone(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	e.mustRun(t, "add", "--org", "o", "--repo", "b")
 	if err := os.WriteFile(filepath.Join(root, "b", "main", "precious.txt"), []byte("work"), 0o644); err != nil {
@@ -184,6 +187,7 @@ func (h truncatedHosting) ListRepos(ctx context.Context, owner string) ([]hostin
 }
 
 func TestSyncTruncatedAndFailedListings(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	e.fake = hosting.NewFake()
 	e.origin(t, "o", "c", false) // a looks gone, but the listing may be truncated
@@ -209,6 +213,7 @@ func TestSyncTruncatedAndFailedListings(t *testing.T) {
 }
 
 func TestSyncFlagValidation(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	before := readYAML(t, root)
 	for _, tc := range []struct {

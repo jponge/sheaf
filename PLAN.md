@@ -61,6 +61,8 @@ repositories:
 - `gh` is never invoked in tests: `hosting` is covered by a fake, and the gh adapter by parsing recorded JSON fixtures (plus a stub `gh` script placed on `PATH` in a temp dir).
 - TUI models are tested by feeding `tea.Msg`s to `Update` and asserting on state and `View()` output (no extra dependency).
 - `go vet ./...` and `go test -race ./...` must be green at the end of every step.
+- Packages that run git call `testutil.Main` from TestMain (process-wide isolation, read-only global git config, fail fast without it). Use `t.Parallel()` unless the test touches process-global state (env, PATH stubs, package seams/hooks, signals, KillAll, pty, timing assertions, cwd, executable scripts). Tests that write the global git config call `testutil.IsolateGitPerTest`.
+- `make test-symlinked-tmp` must stay green (macOS /var → /private/var class of bugs).
 
 ## Steps
 
@@ -149,3 +151,4 @@ What to do differently
 - Prefer targeted re-reviews over full ones after a blocking fix; the last focused re-review ran long and was stopped.
 - Test speed (user: do what's best): ops 20.5 s Linux / 72.9 s macOS, 210 serial tests (~0.1 s each, git process spawns), 0 t.Parallel because IsolateGit uses t.Setenv. Plan after the macOS path fix: package-level isolation in TestMain + t.Parallel where no process-global state, cached fixture repos copied per test, before/after measurements. Target: <5 s per package on Linux, full suite <30 s.
 - macOS: 15 failures were test expectations using unresolved temp paths (no product bug); force-kill delay attributed to a fork racing the group SIGKILL (macOS reasoning unverified), fixed with straggler re-kill; added make test-symlinked-tmp. Takeaway: a step-0 portability finding (N5) was dropped and no non-Linux check existed.
+- Test speed-up: package-level isolation (testutil.Main), t.Parallel where safe (ops 186/210, gitx 113/148, cli 96/142), cached NewOrigin fixtures, sheaf binary built once per cli test process. Full suite ~27 s → ~11 s plain, ~28 s → ~14 s -race (Linux, 5 CPUs). Floors: gitx cancel/deadline tests (~8 s), cli pty completion driver with fixed windows (~6 s).

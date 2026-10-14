@@ -98,6 +98,7 @@ func TestUpdateLockWaitHonoursCancellation(t *testing.T) {
 // Adopt's rollback runs when the registration is cancelled while waiting
 // for the lock.
 func TestAdoptRollsBackWhenRegistrationCancelled(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	dir := filepath.Join(f.w.Root, "x")
 	plainClone(t, testutil.NewOrigin(t, testutil.OriginOpts{}), dir)

@@ -48,6 +48,7 @@ func coCheckoutNames(cs []Checkout) []string {
 }
 
 func TestListCheckoutsPrimaryFirstThenWorktreesByDir(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, beta := coAddRepoWith(t, f, "beta")
 	_, alpha := coAddRepoWith(t, f, "alpha", "feat/b", "feat/a")
@@ -77,6 +78,7 @@ func TestListCheckoutsPrimaryFirstThenWorktreesByDir(t *testing.T) {
 }
 
 func TestListCheckoutsReportsMissingDirectoriesAsProblems(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, alpha := coAddRepoWith(t, f, "alpha", "feat")
 	_, beta := coAddRepoWith(t, f, "beta")
@@ -107,6 +109,7 @@ func TestListCheckoutsReportsMissingDirectoriesAsProblems(t *testing.T) {
 }
 
 func TestListCheckoutsFilters(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, alpha := coAddRepoWith(t, f, "alpha", "feat")
 	coAddRepoWith(t, f, "alps")

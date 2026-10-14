@@ -36,6 +36,7 @@ func noLeftovers(t *testing.T, root string) {
 
 // S1: linked worktrees nested inside the moved clone are repaired.
 func TestAdoptRepairsWorktreesNestedInTheClone(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat"}})
 	dir := filepath.Join(f.w.Root, "x")
@@ -61,6 +62,7 @@ func TestAdoptRepairsWorktreesNestedInTheClone(t *testing.T) {
 
 // S5: an undeterminable default branch is refused unless given.
 func TestAdoptUnknownDefaultBranch(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat"}})
 	dir := filepath.Join(f.w.Root, "x")
@@ -88,6 +90,7 @@ func TestAdoptUnknownDefaultBranch(t *testing.T) {
 
 // R7: the same directory given twice is adopted once.
 func TestAdoptAllDeduplicatesDirectories(t *testing.T) {
+	t.Parallel()
 	for i := range 5 {
 		f := newFixture(t)
 		dir := filepath.Join(f.w.Root, "x")
@@ -105,6 +108,7 @@ func TestAdoptAllDeduplicatesDirectories(t *testing.T) {
 
 // S7: adopt records the host of the origin.
 func TestAdoptRecordsHost(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{})
 	local := filepath.Join(f.w.Root, "l")
@@ -127,6 +131,7 @@ func TestAdoptRecordsHost(t *testing.T) {
 }
 
 func TestParseRemoteURLHost(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string][2]string{
 		"git@github.com:o/n.git":                        {"github.com", "o/n"},
 		"https://GitHub.com/o/n":                        {"github.com", "o/n"},
@@ -249,6 +254,7 @@ func TestAdoptLaidOutRenameRollbackWithSibling(t *testing.T) {
 // Review 5, N4: an unreadable directory in an ignored tree cannot be
 // checked; even a forced remove must fail rather than delete unchecked.
 func TestRemoveUnreadableIgnoredDirFailsSafely(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("SKIP: root can read everything")
 	}

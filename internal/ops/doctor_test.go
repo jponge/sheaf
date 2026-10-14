@@ -64,6 +64,7 @@ func wantCheck(t *testing.T, cs []Check, level CheckLevel, name, repo, substr st
 }
 
 func TestCheckLevelText(t *testing.T) {
+	t.Parallel()
 	for l, want := range map[CheckLevel]string{CheckOK: "ok", CheckInfo: "info", CheckWarn: "warn", CheckFail: "fail"} {
 		if b, _ := l.MarshalText(); string(b) != want || l.String() != want {
 			t.Errorf("%d: %q", int(l), b)
@@ -72,6 +73,7 @@ func TestCheckLevelText(t *testing.T) {
 }
 
 func TestDoctorHealthyBundle(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
 	f.mustAddWT(t, "a", "feat")
@@ -93,6 +95,7 @@ func TestDoctorHealthyBundle(t *testing.T) {
 }
 
 func TestDoctorEnvironment(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	old := func(context.Context) (gitx.GitVersion, error) { return gitx.GitVersion{Major: 2, Minor: 30}, nil }
 	cs := f.doctor(t, DoctorOptions{GitVersion: old, GH: func(context.Context) error { return hosting.ErrGHNotFound }})
@@ -112,6 +115,7 @@ func TestDoctorEnvironment(t *testing.T) {
 }
 
 func TestDoctorBundleProblems(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	cs := f.doctor(t, DoctorOptions{RootErr: errors.New("no sheaf.yaml found")})
 	wantCheck(t, cs, CheckFail, "bundle", "", "no sheaf.yaml found")
@@ -123,6 +127,7 @@ func TestDoctorBundleProblems(t *testing.T) {
 }
 
 func TestDoctorRepositoryProblems(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
 	f.clonedRepo(t, "b")
@@ -187,6 +192,7 @@ func TestDoctorRepositoryProblems(t *testing.T) {
 }
 
 func TestDoctorUnregisteredDirectories(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
 	o := testutil.NewOrigin(t, testutil.OriginOpts{})

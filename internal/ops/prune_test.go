@@ -110,6 +110,7 @@ func pruneScenario(t *testing.T) (*fixture, string, testutil.Origin) {
 }
 
 func TestPlanPruneFindsGoneAndMergedWorktrees(t *testing.T) {
+	t.Parallel()
 	f, _, _ := pruneScenario(t)
 	plan := f.prunePlan(t, PruneOptions{})
 	want := []string{"a/done:wt:gone+merged", "a/feat:wt:gone", "a/merged:wt:merged"}
@@ -142,6 +143,7 @@ func TestPlanPruneFindsGoneAndMergedWorktrees(t *testing.T) {
 }
 
 func TestPlanPruneFetchesUnlessOffline(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, o := f.clonedRepo(t, "a")
 	f.mustAddWT(t, "a", "feat")
@@ -155,6 +157,7 @@ func TestPlanPruneFetchesUnlessOffline(t *testing.T) {
 }
 
 func TestPlanPruneNeverProposesThePrimary(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, o := f.clonedRepo(t, "a")
 	// The primary checkout is temporarily on feat, which then disappears.
@@ -170,6 +173,7 @@ func TestPlanPruneNeverProposesThePrimary(t *testing.T) {
 }
 
 func TestPlanPruneSkipsPullRequestBranches(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, o := f.clonedRepo(t, "a")
 	pushBranch(t, o, "contrib")
@@ -201,6 +205,7 @@ func resultFor(rs []PruneResult, branch string) (PruneResult, bool) {
 }
 
 func TestApplyPruneRemovesWorktreesKeepsBranches(t *testing.T) {
+	t.Parallel()
 	f, primary, _ := pruneScenario(t)
 	opts := PruneOptions{IncludeBranches: true, WorkingDir: f.w.Root}
 	plan := f.prunePlan(t, opts)
@@ -234,6 +239,7 @@ func TestApplyPruneRemovesWorktreesKeepsBranches(t *testing.T) {
 }
 
 func TestApplyPruneDeleteBranchesUsesMergedSemantics(t *testing.T) {
+	t.Parallel()
 	f, primary, _ := pruneScenario(t)
 	opts := PruneOptions{DeleteBranches: true, WorkingDir: f.w.Root}
 	plan := f.prunePlan(t, opts)
@@ -253,6 +259,7 @@ func TestApplyPruneDeleteBranchesUsesMergedSemantics(t *testing.T) {
 }
 
 func TestApplyPruneKeepsWorktreeContainingWorkingDir(t *testing.T) {
+	t.Parallel()
 	f, _, _ := pruneScenario(t)
 	wd := filepath.Join(f.w.Root, "a", "merged")
 	opts := PruneOptions{WorkingDir: wd}
@@ -264,6 +271,7 @@ func TestApplyPruneKeepsWorktreeContainingWorkingDir(t *testing.T) {
 }
 
 func TestApplyPruneKeepsWorktreeChangedSincePlan(t *testing.T) {
+	t.Parallel()
 	f, primary, _ := pruneScenario(t)
 	opts := PruneOptions{WorkingDir: f.w.Root, Offline: true}
 	plan := f.prunePlan(t, PruneOptions{WorkingDir: f.w.Root})

@@ -42,6 +42,7 @@ func wantCounts(t *testing.T, st *RepoStatus, staged, unstaged, untracked, confl
 }
 
 func TestStatusClean(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	st := mustStatus(t, dir)
 	if st.Branch != "main" || st.Detached || st.Unborn {
@@ -60,6 +61,7 @@ func TestStatusClean(t *testing.T) {
 }
 
 func TestStatusStagedUnstagedUntracked(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{Commits: 3})
 
 	writeFile(t, dir, "file-1.txt", "staged change\n")
@@ -80,6 +82,7 @@ func TestStatusStagedUnstagedUntracked(t *testing.T) {
 }
 
 func TestStatusMergeConflict(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "checkout", "-q", "-b", "other")
 	testutil.CommitFile(t, dir, "file-1.txt", "other side\n", "other")
@@ -93,6 +96,7 @@ func TestStatusMergeConflict(t *testing.T) {
 }
 
 func TestStatusAheadBehindDiverged(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 
 	testutil.CommitFile(t, dir, "local.txt", "x\n", "local")
@@ -116,6 +120,7 @@ func TestStatusAheadBehindDiverged(t *testing.T) {
 }
 
 func TestStatusNoUpstreamAndGoneUpstream(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "checkout", "-q", "-b", "local-only")
 	st := mustStatus(t, dir)
@@ -132,6 +137,7 @@ func TestStatusNoUpstreamAndGoneUpstream(t *testing.T) {
 }
 
 func TestStatusDetached(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "checkout", "-q", "--detach")
 	st := mustStatus(t, dir)
@@ -144,6 +150,7 @@ func TestStatusDetached(t *testing.T) {
 }
 
 func TestStatusStashes(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	for i, c := range []string{"one\n", "two\n"} {
 		writeFile(t, dir, "file-1.txt", c)
@@ -157,6 +164,7 @@ func TestStatusStashes(t *testing.T) {
 }
 
 func TestStatusUnborn(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	dir := t.TempDir()
 	testutil.Git(t, dir, "init", "-q", "-b", "main")
@@ -169,6 +177,7 @@ func TestStatusUnborn(t *testing.T) {
 }
 
 func TestStatusAwkwardPaths(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.CommitFile(t, dir, "old name.txt", "o\n", "awkward")
 	testutil.CommitFile(t, dir, "sp ace.txt", "s\n", "awkward 2")
@@ -183,6 +192,7 @@ func TestStatusAwkwardPaths(t *testing.T) {
 }
 
 func TestParseStatusRejectsGarbage(t *testing.T) {
+	t.Parallel()
 	for _, in := range []string{
 		"# branch.ab +x -1\x00",
 		"Z what\x00",
@@ -242,6 +252,7 @@ func TestStatusIgnoresConfigHidingSubmoduleChanges(t *testing.T) {
 // A submodule whose only change is untracked content counts as untracked,
 // consistently with Dirty's rule that untracked files never make a tree dirty.
 func TestStatusSubmoduleWithOnlyUntrackedContent(t *testing.T) {
+	t.Parallel()
 	dir := cloneWithSubmodule(t)
 	writeFile(t, filepath.Join(dir, "sub"), "scratch.txt", "u\n")
 	wantCounts(t, mustStatus(t, dir), 0, 0, 1, 0, false)

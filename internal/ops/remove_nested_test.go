@@ -41,6 +41,7 @@ func staleNestedClone(t *testing.T, parent string) string {
 
 // B1: nested repositories are fetched before being assessed.
 func TestRemoveFetchesNestedRepositories(t *testing.T) {
+	t.Parallel()
 	f, primary := nestedSetup(t)
 	n := staleNestedClone(t, filepath.Join(primary, "vendor"))
 	_, err := f.remove(t, "a", false, yes)
@@ -53,6 +54,7 @@ func TestRemoveFetchesNestedRepositories(t *testing.T) {
 }
 
 func TestRemoveNestedFetchFailureBlocks(t *testing.T) {
+	t.Parallel()
 	f, primary := nestedSetup(t)
 	n := filepath.Join(primary, "vendor", "lib")
 	plainClone(t, testutil.NewOrigin(t, testutil.OriginOpts{}), n)
@@ -64,6 +66,7 @@ func TestRemoveNestedFetchFailureBlocks(t *testing.T) {
 }
 
 func TestRemoveOfflineDoesNotFetchNested(t *testing.T) {
+	t.Parallel()
 	f, primary := nestedSetup(t)
 	staleNestedClone(t, filepath.Join(primary, "vendor"))
 	evs, err := f.removeOpts(t, "a", RemoveOptions{Offline: true, Confirm: yes})
@@ -80,6 +83,7 @@ func TestRemoveOfflineDoesNotFetchNested(t *testing.T) {
 // S1: a bare repository in the tree, and a nested repository whose only
 // remote is inside the tree, block.
 func TestRemoveNestedBareAndInsideRemoteBlock(t *testing.T) {
+	t.Parallel()
 	t.Run("bare", func(t *testing.T) {
 		f, primary := nestedSetup(t)
 		work := filepath.Join(t.TempDir(), "w")
@@ -107,6 +111,7 @@ func TestRemoveNestedBareAndInsideRemoteBlock(t *testing.T) {
 
 // Review 6 probes kept as guards.
 func TestRemoveNestedEdgeCasesBlock(t *testing.T) {
+	t.Parallel()
 	for name, setup := range map[string]func(t *testing.T, n string){
 		"never fetched, unreachable remote": func(t *testing.T, n string) {
 			testutil.Git(t, filepath.Dir(n), "init", "-q", "-b", "main", n)
@@ -140,6 +145,7 @@ func TestRemoveNestedEdgeCasesBlock(t *testing.T) {
 // NIT: when the final sheaf.yaml update is cancelled after the directory
 // was deleted, the update is retried once without cancellation.
 func TestRemoveRetriesRegistrationAfterCancel(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
 	ctx, cancel := context.WithCancel(context.Background())

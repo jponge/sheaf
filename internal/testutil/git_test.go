@@ -8,7 +8,15 @@ import (
 )
 
 func TestIsolateGit(t *testing.T) {
-	realHome := os.Getenv("HOME")
+	t.Parallel()
+	// Main isolated HOME before the tests run: the real one is the one the
+	// process started with.
+	var realHome string
+	for _, kv := range ToolchainEnv() {
+		if v, ok := strings.CutPrefix(kv, "HOME="); ok {
+			realHome = v
+		}
+	}
 	IsolateGit(t)
 	if h := os.Getenv("HOME"); h == realHome || h == "" {
 		t.Fatalf("HOME not isolated: %q", h)
@@ -30,6 +38,7 @@ func TestIsolateGit(t *testing.T) {
 }
 
 func TestCommitFileAndGit(t *testing.T) {
+	t.Parallel()
 	IsolateGit(t)
 	dir := t.TempDir()
 	Git(t, dir, "init")
@@ -47,6 +56,7 @@ func TestCommitFileAndGit(t *testing.T) {
 }
 
 func TestNewOriginDefaults(t *testing.T) {
+	t.Parallel()
 	IsolateGit(t)
 	o := NewOrigin(t, OriginOpts{})
 	if !strings.HasPrefix(o.URL, "file://") || strings.TrimPrefix(o.URL, "file://") != o.Path {
@@ -64,6 +74,7 @@ func TestNewOriginDefaults(t *testing.T) {
 }
 
 func TestNewOriginCustomBranchesAndClone(t *testing.T) {
+	t.Parallel()
 	IsolateGit(t)
 	o := NewOrigin(t, OriginOpts{DefaultBranch: "master", Commits: 3, Branches: []string{"feat/x", "dev"}})
 	if got := Git(t, o.Path, "symbolic-ref", "--short", "HEAD"); got != "master" {
@@ -87,6 +98,7 @@ func TestNewOriginCustomBranchesAndClone(t *testing.T) {
 }
 
 func TestNewOriginsAreIndependent(t *testing.T) {
+	t.Parallel()
 	IsolateGit(t)
 	a, b := NewOrigin(t, OriginOpts{}), NewOrigin(t, OriginOpts{})
 	if a.Path == b.Path {
@@ -171,6 +183,7 @@ func TestNewOriginIsolatesGitItself(t *testing.T) {
 }
 
 func TestAdvanceOrigin(t *testing.T) {
+	t.Parallel()
 	IsolateGit(t)
 	o := NewOrigin(t, OriginOpts{Branches: []string{"feat/x"}})
 	before := Git(t, t.TempDir(), "ls-remote", o.URL, "refs/heads/main", "refs/heads/feat/x")

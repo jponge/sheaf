@@ -6,10 +6,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/jponge/sheaf/internal/testutil"
 )
 
 func TestCompletionScriptsAndHelp(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	for _, sh := range []string{"bash", "zsh", "fish"} {
 		out := e.mustRun(t, "completion", sh)
@@ -40,6 +44,7 @@ func TestCompletionScriptsAndHelp(t *testing.T) {
 }
 
 func TestShellInitScripts(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	for _, sh := range []string{"bash", "zsh", "fish"} {
 		out := e.mustRun(t, "shell-init", sh)
@@ -64,6 +69,7 @@ func TestShellInitScripts(t *testing.T) {
 // TestGeneratedScriptsParse syntax-checks every generated script with the
 // shells installed on the machine; the others are skipped explicitly.
 func TestGeneratedScriptsParse(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	checks := map[string][]string{
 		"bash": {"bash", "-n"},
@@ -90,18 +96,34 @@ func TestGeneratedScriptsParse(t *testing.T) {
 	}
 }
 
-// sheafBinary builds the sheaf binary into a temp directory.
+// sheafBin is the sheaf binary built by sheafBinary.
+var sheafBin struct {
+	once sync.Once
+	dir  string
+	out  []byte
+	err  error
+}
+
+// sheafBinary builds the sheaf binary once per test process, into a
+// directory of the process (callers must not write into it), and returns the
+// directory. The Go toolchain runs with the environment the process started
+// with (see testutil.ToolchainEnv): its caches are under the real HOME.
 func sheafBinary(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not on PATH: cannot build the sheaf binary")
 	}
-	dir := t.TempDir()
-	cmd := exec.Command("go", "build", "-o", filepath.Join(dir, "sheaf"), "github.com/jponge/sheaf/cmd/sheaf")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
+	dir := filepath.Join(testutil.ProcessTempDir(t), "sheaf-bin")
+	sheafBin.once.Do(func() {
+		cmd := exec.Command("go", "build", "-o", filepath.Join(dir, "sheaf"), "github.com/jponge/sheaf/cmd/sheaf")
+		cmd.Env = testutil.ToolchainEnv()
+		sheafBin.out, sheafBin.err = cmd.CombinedOutput()
+		sheafBin.dir = dir
+	})
+	if sheafBin.err != nil {
+		t.Fatalf("go build: %v\n%s", sheafBin.err, sheafBin.out)
 	}
-	return dir
+	return sheafBin.dir
 }
 
 // runBash runs script in bash with the sheaf binary on PATH, from dir.
@@ -122,6 +144,7 @@ func runBash(t *testing.T, binDir, dir, script string) string {
 }
 
 func TestScdEndToEndInBash(t *testing.T) {
+	t.Parallel()
 	bin := sheafBinary(t)
 	_, root := complBundle(t)
 	pre := `eval "$(sheaf shell-init bash)"; `
@@ -165,6 +188,7 @@ func scdComplete(words ...string) string {
 }
 
 func TestScdBashCompletionEscapesCandidates(t *testing.T) {
+	t.Parallel()
 	bin := sheafBinary(t)
 	e, root := complBundle(t)
 	e.mustRun(t, "wt", "add", "a", "q&r", "--no-fetch")
@@ -177,6 +201,7 @@ func TestScdBashCompletionEscapesCandidates(t *testing.T) {
 }
 
 func TestScdBashCompletionBundleFlag(t *testing.T) {
+	t.Parallel()
 	bin := sheafBinary(t)
 	_, root := complBundle(t)
 	home, name := filepath.Dir(root), filepath.Base(root)
@@ -207,6 +232,7 @@ func TestScdBashCompletionBundleFlag(t *testing.T) {
 }
 
 func TestScdBashCompletionHidesGlobalFlags(t *testing.T) {
+	t.Parallel()
 	bin := sheafBinary(t)
 	_, root := complBundle(t)
 	got := runBash(t, bin, root, `eval "$(sheaf shell-init bash)"; `+scdComplete("scd", "-"))

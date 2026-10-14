@@ -23,6 +23,7 @@ func coUpdatesByName(r UpdateReport) map[string]CheckoutUpdate {
 }
 
 func TestUpdateClassifiesEveryCheckout(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o, alpha := coAddRepoWith(t, f, "alpha", "clean", "dirty", "gone", "div")
 	coAddRepoWith(t, f, "beta")
@@ -107,6 +108,7 @@ func TestUpdateClassifiesEveryCheckout(t *testing.T) {
 }
 
 func TestUpdateFetchFailureFailsTheRepositoryCheckouts(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, alpha := coAddRepoWith(t, f, "alpha")
 	testutil.Git(t, alpha, "remote", "set-url", "origin", "file://"+filepath.Join(t.TempDir(), "missing.git"))

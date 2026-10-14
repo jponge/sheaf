@@ -17,6 +17,7 @@ import (
 )
 
 func TestExecuteRecoversPanics(t *testing.T) {
+	t.Parallel()
 	s := Execute(context.Background(), 2, []Task{
 		{Repo: "a", Run: func(context.Context, func(Event)) (string, error) { panic("kaboom") }},
 		{Repo: "b", Run: func(context.Context, func(Event)) (string, error) { return "", nil }},
@@ -32,6 +33,7 @@ func TestExecuteRecoversPanics(t *testing.T) {
 // S4: two Workspaces on the same bundle (two sheaf processes) must not lose
 // each other's updates.
 func TestTwoWorkspacesDoNotLoseUpdates(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	w2, err := OpenWorkspace(f.w.Root)
 	if err != nil {
@@ -78,6 +80,7 @@ func TestTwoWorkspacesDoNotLoseUpdates(t *testing.T) {
 
 // NIT: the org is tracked only when the request did not entirely fail.
 func TestAddOrgSourceRecordedUnlessEverythingFailed(t *testing.T) {
+	t.Parallel()
 	t.Run("all clones failed", func(t *testing.T) {
 		f := newFixture(t)
 		f.fake.AddRepo(hosting.Repo{Owner: "o", Name: "broken", CloneURL: "file:///nonexistent/b.git", DefaultBranch: "main"})
@@ -116,6 +119,7 @@ func TestAddOrgSourceRecordedUnlessEverythingFailed(t *testing.T) {
 
 // NIT: a truncated listing still lets named repositories be added.
 func TestAddOrgTruncatedListing(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.repo(t, "o", "a", "main", false)
 	f.fake.ListErr["o"] = fmt.Errorf("listing o: %w", hosting.ErrPossiblyTruncated)
@@ -131,6 +135,7 @@ func TestAddOrgTruncatedListing(t *testing.T) {
 // NIT: init refuses inside a work tree or another bundle, and writes
 // nothing when detection fails.
 func TestInitRefusals(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{})
 	clone := filepath.Join(t.TempDir(), "c")
@@ -181,6 +186,7 @@ func TestInitRefusals(t *testing.T) {
 // script that signals it started and sleeps; cancellation kills git's whole
 // process group.
 func TestAddCancelKillsRunningClone(t *testing.T) {
+	testutil.IsolateGitPerTest(t) // writable global configuration
 	f := newFixture(t)
 	f.repo(t, "o", "a", "main", false)
 	scripts := t.TempDir()

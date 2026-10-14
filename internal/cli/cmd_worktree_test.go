@@ -27,6 +27,7 @@ func wtBundle(t *testing.T) (*env, string) {
 }
 
 func TestWorktreeAddPrintsOnlyThePath(t *testing.T) {
+	t.Parallel()
 	e, root := wtBundle(t)
 	out, errs, code := e.run(t, "wt", "add", "a", "feat/x", "--no-fetch")
 	if code != 0 {
@@ -111,6 +112,7 @@ func TestWorktreeListAndPath(t *testing.T) {
 }
 
 func TestWorktreeRemoveNeedsYes(t *testing.T) {
+	t.Parallel()
 	e, root := wtBundle(t)
 	p := filepath.Join(root, "a", "feat-x")
 	e.mustRun(t, "wt", "add", "a", "feat/x", "--no-fetch")
@@ -133,6 +135,7 @@ func TestWorktreeRemoveNeedsYes(t *testing.T) {
 }
 
 func TestWorktreeRemoveUnmergedBranchNeedsD(t *testing.T) {
+	t.Parallel()
 	e, root := wtBundle(t)
 	p := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "work", "--no-fetch"))
 	testutil.CommitFile(t, p, "w.txt", "w\n", "work")

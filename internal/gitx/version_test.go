@@ -7,6 +7,7 @@ import (
 )
 
 func TestParseVersion(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		in   string
 		want GitVersion
@@ -32,6 +33,7 @@ func TestParseVersion(t *testing.T) {
 }
 
 func TestGitVersionCompareAndString(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		v    GitVersion
 		want bool
@@ -57,6 +59,7 @@ func TestGitVersionCompareAndString(t *testing.T) {
 }
 
 func TestVersionAndCheckVersionWithInstalledGit(t *testing.T) {
+	t.Parallel()
 	v, err := Version(context.Background())
 	if err != nil {
 		t.Fatal(err)

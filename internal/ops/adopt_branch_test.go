@@ -41,6 +41,7 @@ func onlyEntries(t *testing.T, dir string, want ...string) {
 // The primary is <repo>/<default branch>/ whatever branch it has checked
 // out: a plain clone on another branch is moved as it is, nothing switched.
 func TestAdoptPlainCloneOnFeatureBranchMovesAsIs(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x"}})
 	dir := filepath.Join(f.w.Root, "p")
@@ -71,6 +72,7 @@ func TestAdoptPlainCloneOnFeatureBranchMovesAsIs(t *testing.T) {
 }
 
 func TestAdoptPlainCloneDetachedMovesAsIs(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{DefaultBranch: "trunk"})
 	dir := filepath.Join(f.w.Root, "p")
@@ -92,6 +94,7 @@ func TestAdoptPlainCloneDetachedMovesAsIs(t *testing.T) {
 // The default branch checked out in a linked worktree does not matter any
 // more: nothing is switched.
 func TestAdoptFeatureBranchWithExistingLinkedWorktrees(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x"}})
 	dir := filepath.Join(f.w.Root, "p")
@@ -121,6 +124,7 @@ func TestAdoptFeatureBranchWithExistingLinkedWorktrees(t *testing.T) {
 // Laid out: the primary is <repo>/<normalized default branch>/ with any
 // branch checked out (or detached); it is only registered.
 func TestAdoptLaidOutPrimaryOnAnyBranchOnlyRegisters(t *testing.T) {
+	t.Parallel()
 	for name, setup := range map[string]func(t *testing.T, primary string){
 		"feature branch": func(t *testing.T, p string) { testutil.Git(t, p, "checkout", "-q", "feat/x") },
 		"detached":       func(t *testing.T, p string) { testutil.Git(t, p, "checkout", "-q", "--detach") },
@@ -153,6 +157,7 @@ func TestAdoptLaidOutPrimaryOnAnyBranchOnlyRegisters(t *testing.T) {
 // Laid out with another child name: renamed to the default branch's
 // directory, checkout untouched, worktrees repaired.
 func TestAdoptLaidOutRenamesPrimaryToDefaultBranchDir(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"dev", "feat", "other"}})
 	repo := filepath.Join(f.w.Root, "foo")
@@ -198,6 +203,7 @@ func TestAdoptLaidOutRenamesPrimaryToDefaultBranchDir(t *testing.T) {
 }
 
 func TestAdoptLaidOutRefusesWhenDefaultBranchDirExists(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"dev"}})
 	repo := filepath.Join(f.w.Root, "foo")
@@ -220,6 +226,7 @@ func TestAdoptLaidOutRefusesWhenDefaultBranchDirExists(t *testing.T) {
 // names fit: the child is named after its current or default branch, or the
 // origin repository is named like the directory.
 func TestAdoptLaidOutPlausibility(t *testing.T) {
+	t.Parallel()
 	t.Run("docs/somerepo refused", func(t *testing.T) {
 		f := newFixture(t)
 		o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat"}})

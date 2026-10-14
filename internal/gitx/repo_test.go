@@ -23,6 +23,7 @@ func cloneOrigin(t *testing.T, opts testutil.OriginOpts) (testutil.Origin, strin
 }
 
 func TestCloneDefaultBranch(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{DefaultBranch: "trunk", Branches: []string{"dev"}})
 	if got := testutil.Git(t, dir, "symbolic-ref", "--short", "HEAD"); got != "trunk" {
 		t.Fatalf("HEAD = %q, want trunk", got)
@@ -33,6 +34,7 @@ func TestCloneDefaultBranch(t *testing.T) {
 }
 
 func TestCloneExplicitBranchIntoMissingParents(t *testing.T) {
+	t.Parallel()
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x"}})
 	dir := filepath.Join(t.TempDir(), "a", "b", "clone")
 	if err := Clone(context.Background(), o.URL, dir, "feat/x"); err != nil {
@@ -44,6 +46,7 @@ func TestCloneExplicitBranchIntoMissingParents(t *testing.T) {
 }
 
 func TestCloneFailureIsGitError(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	missing := "file://" + filepath.Join(t.TempDir(), "nope.git")
 	err := Clone(context.Background(), missing, filepath.Join(t.TempDir(), "c"), "")
@@ -54,6 +57,7 @@ func TestCloneFailureIsGitError(t *testing.T) {
 }
 
 func TestDefaultBranchFromOriginHEAD(t *testing.T) {
+	t.Parallel()
 	for _, b := range []string{"master", "trunk"} {
 		t.Run(b, func(t *testing.T) {
 			_, dir := cloneOrigin(t, testutil.OriginOpts{DefaultBranch: b, Branches: []string{"other"}})
@@ -71,6 +75,7 @@ func TestDefaultBranchFromOriginHEAD(t *testing.T) {
 }
 
 func TestDefaultBranchFallsBackToLsRemote(t *testing.T) {
+	t.Parallel()
 	for _, b := range []string{"master", "trunk"} {
 		t.Run(b, func(t *testing.T) {
 			_, dir := cloneOrigin(t, testutil.OriginOpts{DefaultBranch: b, Branches: []string{"other"}})
@@ -88,6 +93,7 @@ func TestDefaultBranchFallsBackToLsRemote(t *testing.T) {
 }
 
 func TestDefaultBranchNoOrigin(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	dir := t.TempDir()
 	testutil.Git(t, dir, "init", "-q")
@@ -97,6 +103,7 @@ func TestDefaultBranchNoOrigin(t *testing.T) {
 }
 
 func TestCurrentBranch(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{Branches: []string{"feat/cli/rework-ergonomics"}})
 	testutil.Git(t, dir, "checkout", "-q", "feat/cli/rework-ergonomics")
 	got, err := CurrentBranch(context.Background(), dir)
@@ -110,6 +117,7 @@ func TestCurrentBranch(t *testing.T) {
 }
 
 func TestCurrentBranchUnborn(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	dir := t.TempDir()
 	testutil.Git(t, dir, "init", "-q", "-b", "fresh")
@@ -120,6 +128,7 @@ func TestCurrentBranchUnborn(t *testing.T) {
 }
 
 func TestRemoteURL(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	got, err := RemoteURL(context.Background(), dir, "origin")
 	if err != nil || got != o.URL {
@@ -131,6 +140,7 @@ func TestRemoteURL(t *testing.T) {
 }
 
 func TestTopLevelAndIsRepo(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	sub := filepath.Join(dir, "sub", "deeper")
 	if err := os.MkdirAll(sub, 0o755); err != nil {

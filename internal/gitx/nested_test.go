@@ -33,6 +33,7 @@ func wantBlockingNested(t *testing.T, risks []Risk, rel string) {
 }
 
 func TestDeletionRisksNestedCloneInIgnoredDir(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	writeFile(t, dir, ".git/info/exclude", "vendor/\n")
 	o2 := testutil.NewOrigin(t, testutil.OriginOpts{})
@@ -46,6 +47,7 @@ func TestDeletionRisksNestedCloneInIgnoredDir(t *testing.T) {
 }
 
 func TestDeletionRisksCleanPushedNestedIsInformational(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	writeFile(t, dir, ".git/info/exclude", "vendor/\n")
 	o2 := testutil.NewOrigin(t, testutil.OriginOpts{})
@@ -64,6 +66,7 @@ func TestDeletionRisksCleanPushedNestedIsInformational(t *testing.T) {
 }
 
 func TestDeletionRisksNestedWithoutRemoteBlocks(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	writeFile(t, dir, ".git/info/exclude", "scratch/\n")
 	testutil.Git(t, dir, "init", "-q", "scratch")
@@ -71,6 +74,7 @@ func TestDeletionRisksNestedWithoutRemoteBlocks(t *testing.T) {
 }
 
 func TestDeletionRisksNestedWorktreeOfAnotherRepo(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	_, other := cloneOrigin(t, testutil.OriginOpts{Branches: []string{"feat"}})
 	wt := filepath.Join(dir, "tmp", "wt")
@@ -81,6 +85,7 @@ func TestDeletionRisksNestedWorktreeOfAnotherRepo(t *testing.T) {
 
 // R1 (a): a repository embedded as a gitlink without .gitmodules.
 func TestDeletionRisksEmbeddedGitlink(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	o2 := testutil.NewOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "clone", "-q", o2.URL, "lib")
@@ -93,6 +98,7 @@ func TestDeletionRisksEmbeddedGitlink(t *testing.T) {
 
 // R1 (b): an old-style submodule (.git directory inside its work tree).
 func TestDeletionRisksOldStyleSubmoduleUnpushed(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	o2 := testutil.NewOrigin(t, testutil.OriginOpts{})
 	lib := filepath.Join(dir, "lib")
@@ -110,6 +116,7 @@ func TestDeletionRisksOldStyleSubmoduleUnpushed(t *testing.T) {
 // R1 (b'): a modern submodule (gitdir under .git/modules) with an unpushed
 // commit.
 func TestDeletionRisksModernSubmoduleUnpushed(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	sub := testutil.NewOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "submodule", "add", "-q", sub.URL, "sub")
@@ -123,6 +130,7 @@ func TestDeletionRisksModernSubmoduleUnpushed(t *testing.T) {
 
 // R1 (c): a repository nested in a tracked directory.
 func TestDeletionRisksNestedRepoInTrackedDir(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	d := filepath.Join(dir, "vendor", "lib")
 	if err := os.MkdirAll(d, 0o755); err != nil {
@@ -140,6 +148,7 @@ func TestDeletionRisksNestedRepoInTrackedDir(t *testing.T) {
 
 // Recursion: data at risk two levels down blocks the outer repository.
 func TestDeletionRisksNestedRecursively(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	writeFile(t, dir, ".git/info/exclude", "deps/\n")
 	o2 := testutil.NewOrigin(t, testutil.OriginOpts{})
@@ -155,6 +164,7 @@ func TestDeletionRisksNestedRecursively(t *testing.T) {
 }
 
 func TestDeletionRisksIgnoresOwnWorktreesAndSymlinks(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{Branches: []string{"feat"}})
 	writeFile(t, dir, ".git/info/exclude", ".wt/\nlink\n")
 	testutil.Git(t, dir, "worktree", "add", "-q", ".wt/feat", "feat")

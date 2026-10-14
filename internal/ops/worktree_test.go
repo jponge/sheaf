@@ -59,6 +59,7 @@ func messages(evs []Event) string {
 }
 
 func TestResolveRepo(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "alpha")
 	f.clonedRepo(t, "beta")
@@ -96,6 +97,7 @@ func TestResolveRepo(t *testing.T) {
 }
 
 func TestAddWorktreeModes(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	root := f.w.Root
@@ -144,6 +146,7 @@ func TestAddWorktreeModes(t *testing.T) {
 }
 
 func TestAddWorktreeFetchesFirst(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, o := f.clonedRepo(t, "a")
 	// A branch pushed to origin after the clone.
@@ -174,6 +177,7 @@ func TestAddWorktreeFetchesFirst(t *testing.T) {
 }
 
 func TestAddWorktreeRefusals(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	testutil.Git(t, primary, "remote", "add", "upstream", "file:///nonexistent")
@@ -210,6 +214,7 @@ func TestAddWorktreeRefusals(t *testing.T) {
 }
 
 func TestAddWorktreeWarnsAboutOtherUpstream(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	testutil.Git(t, primary, "branch", "--track", "mine", "origin/feat")
@@ -232,6 +237,7 @@ func TestAddWorktreeWarnsAboutOtherUpstream(t *testing.T) {
 }
 
 func TestListWorktrees(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primaryA, _ := f.clonedRepo(t, "a")
 	f.clonedRepo(t, "b")
@@ -290,6 +296,7 @@ func TestListWorktrees(t *testing.T) {
 }
 
 func TestListWorktreesReportsBrokenRepoButListsOthers(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
 	f.clonedRepo(t, "b")
@@ -306,6 +313,7 @@ func TestListWorktreesReportsBrokenRepoButListsOthers(t *testing.T) {
 }
 
 func TestRemoveWorktreeClean(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	root := f.w.Root
@@ -331,6 +339,7 @@ func TestRemoveWorktreeClean(t *testing.T) {
 }
 
 func TestRemoveWorktreeRefusals(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	root := f.w.Root
@@ -375,6 +384,7 @@ func TestRemoveWorktreeRefusals(t *testing.T) {
 }
 
 func TestRemoveWorktreeSymlinkedDirRefused(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	root := f.w.Root
@@ -392,6 +402,7 @@ func TestRemoveWorktreeSymlinkedDirRefused(t *testing.T) {
 }
 
 func TestRemoveWorktreeRisks(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	dirty := f.mustAddWT(t, "a", "dirty").Path
@@ -435,6 +446,7 @@ func hasKind(rs []gitx.Risk, k gitx.RiskKind) bool {
 }
 
 func TestRemoveWorktreeDeleteBranch(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 
@@ -495,6 +507,7 @@ func TestRemoveWorktreeDeleteBranch(t *testing.T) {
 }
 
 func TestRemoveWorktreeFetchFailureRefusesUnlessOffline(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	p := f.mustAddWT(t, "a", "x").Path
@@ -509,6 +522,7 @@ func TestRemoveWorktreeFetchFailureRefusesUnlessOffline(t *testing.T) {
 }
 
 func TestResolvePath(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	f.clonedRepo(t, "b")

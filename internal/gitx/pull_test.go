@@ -27,6 +27,7 @@ func wantOutcome(t *testing.T, r PullResult, want PullOutcome) {
 }
 
 func TestFetchUpdatesAndPrunes(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{Branches: []string{"doomed"}})
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	testutil.Git(t, o.Path, "branch", "-D", "doomed")
@@ -43,6 +44,7 @@ func TestFetchUpdatesAndPrunes(t *testing.T) {
 }
 
 func TestPullUpToDate(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	h := head(t, dir)
 	r := PullFFOnly(context.Background(), dir)
@@ -53,12 +55,14 @@ func TestPullUpToDate(t *testing.T) {
 }
 
 func TestPullAheadOnlyIsUpToDate(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.CommitFile(t, dir, "l.txt", "l\n", "local")
 	wantOutcome(t, PullFFOnly(context.Background(), dir), PullUpToDate)
 }
 
 func TestPullFastForwards(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	old := head(t, dir)
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
@@ -74,6 +78,7 @@ func TestPullFastForwards(t *testing.T) {
 }
 
 func TestPullSkipsDirtyWithoutTouchingAnything(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	before := head(t, dir)
 	trackingBefore := testutil.Git(t, dir, "rev-parse", "origin/main")
@@ -93,6 +98,7 @@ func TestPullSkipsDirtyWithoutTouchingAnything(t *testing.T) {
 }
 
 func TestPullSkipsNoUpstreamAndGoneUpstream(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "checkout", "-q", "-b", "local-only")
 	wantOutcome(t, PullFFOnly(context.Background(), dir), PullSkippedNoUpstream)
@@ -103,12 +109,14 @@ func TestPullSkipsNoUpstreamAndGoneUpstream(t *testing.T) {
 }
 
 func TestPullSkipsDetached(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "checkout", "-q", "--detach")
 	wantOutcome(t, PullFFOnly(context.Background(), dir), PullSkippedDetached)
 }
 
 func TestPullSkipsKnownDivergence(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.CommitFile(t, dir, "l.txt", "l\n", "local")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
@@ -122,6 +130,7 @@ func TestPullSkipsKnownDivergence(t *testing.T) {
 
 // Divergence only visible after the pull's own fetch.
 func TestPullDetectsDivergenceAfterFetch(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.CommitFile(t, dir, "l.txt", "l\n", "local")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
@@ -133,6 +142,7 @@ func TestPullDetectsDivergenceAfterFetch(t *testing.T) {
 }
 
 func TestPullFailure(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "remote", "set-url", "origin", "file://"+t.TempDir()+"/missing.git")
 	r := PullFFOnly(context.Background(), dir)
@@ -144,6 +154,7 @@ func TestPullFailure(t *testing.T) {
 }
 
 func TestPullOutcomeString(t *testing.T) {
+	t.Parallel()
 	for o, want := range map[PullOutcome]string{
 		PullUpToDate:          "up-to-date",
 		PullFastForwarded:     "fast-forwarded",
@@ -162,6 +173,7 @@ func TestPullOutcomeString(t *testing.T) {
 
 // A pull.rebase=true configuration must not turn the ff-only pull into a rebase.
 func TestPullIgnoresPullRebaseConfig(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "config", "pull.rebase", "true")
 	testutil.CommitFile(t, dir, "l.txt", "l\n", "local")
@@ -176,6 +188,7 @@ func TestPullIgnoresPullRebaseConfig(t *testing.T) {
 // FastForward never runs a network operation: it uses the remote-tracking
 // ref as of the last Fetch.
 func TestFastForwardUsesLastFetchOnly(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	old := head(t, dir)
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
@@ -195,6 +208,7 @@ func TestFastForwardUsesLastFetchOnly(t *testing.T) {
 }
 
 func TestFastForwardSkips(t *testing.T) {
+	t.Parallel()
 	t.Run("dirty", func(t *testing.T) {
 		o, dir := cloneOrigin(t, testutil.OriginOpts{})
 		testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
@@ -225,6 +239,7 @@ func TestFastForwardSkips(t *testing.T) {
 // merge.ff=false, branch.<b>.mergeOptions=--no-ff) must never produce a merge
 // commit; a diverged branch must never move.
 func TestFastForwardIgnoresNoFFConfig(t *testing.T) {
+	testutil.IsolateGitPerTest(t) // writable global configuration
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	// AdvanceOrigin re-isolates git (fresh global config), so configure after it.
 	noFF := func() {
@@ -269,6 +284,7 @@ func TestFastForwardIgnoresNoFFConfig(t *testing.T) {
 // An untracked file that the fast-forward would overwrite makes it fail
 // without touching the file.
 func TestFastForwardRefusesToOverwriteUntrackedFile(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "from remote\n", "remote")
 	if err := Fetch(context.Background(), dir); err != nil {
@@ -289,6 +305,7 @@ func TestFastForwardRefusesToOverwriteUntrackedFile(t *testing.T) {
 // Review 2, item 2: Fetch fetches origin even when the current branch's
 // upstream is a local branch (branch.<b>.remote = .).
 func TestFetchFetchesOriginWhenUpstreamIsLocal(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "checkout", "-q", "-b", "topic", "--track", "main")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")

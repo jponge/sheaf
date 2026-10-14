@@ -41,6 +41,7 @@ func (h redirecting) Repo(ctx context.Context, owner, name string) (hosting.Repo
 // B1: the org deleted a; its remote no longer exists, the clone may be the
 // last copy.
 func TestSyncRemoveGoneDeletedRemote(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	o := e.origin(t, "o", "a", false)
 	e.origin(t, "o", "b", false)
@@ -75,6 +76,7 @@ func TestSyncRemoveGoneDeletedRemote(t *testing.T) {
 // S1: an empty but successful listing (e.g. a token without access to
 // private repositories) must not remove everything.
 func TestSyncEmptyListingNeedsAllowMassRemoval(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	e.mustRun(t, "add", "--org", "o", "--repo", "b")
 	e.mustRun(t, "add", "--org", "o", "--repo", "c")
@@ -108,6 +110,7 @@ func TestSyncEmptyListingNeedsAllowMassRemoval(t *testing.T) {
 
 // S3: empty repositories are skipped, not failed.
 func TestSyncAddNewSkipsEmptyRepository(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	e.fake.AddRepo(hosting.Repo{Owner: "o", Name: "empty", CloneURL: "file:///nowhere"})
 	out, errs, code := e.run(t, "sync", "--exclude", "b", "--exclude", "c", "--add-new")
@@ -122,6 +125,7 @@ func TestSyncAddNewSkipsEmptyRepository(t *testing.T) {
 // S4: a transfer between two tracked organizations is reported, never
 // removed nor added again.
 func TestSyncTransferBetweenTrackedOrgs(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	e.origin(t, "p", "z", false)
 	e.mustRun(t, "add", "--org", "p", "--repo", "z")
@@ -146,6 +150,7 @@ func TestSyncTransferBetweenTrackedOrgs(t *testing.T) {
 }
 
 func TestSyncExcludeErrorsExplainWhy(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	before := readYAML(t, root)
 	if _, errs, code := e.run(t, "sync", "--exclude", "old"); code == 0 || !strings.Contains(errs, "--include-archived") {
@@ -174,6 +179,7 @@ func twoOrgs(t *testing.T) (*env, string) {
 }
 
 func TestSyncExcludeAmbiguousAcrossOrgs(t *testing.T) {
+	t.Parallel()
 	e, root := twoOrgs(t)
 	if _, errs, code := e.run(t, "sync", "--exclude", "x"); code == 0 || !strings.Contains(errs, "several organizations") || !strings.Contains(errs, "<org>/x") {
 		t.Fatalf("exit %d, stderr %s", code, errs)
@@ -188,6 +194,7 @@ func TestSyncExcludeAmbiguousAcrossOrgs(t *testing.T) {
 }
 
 func TestSyncAddNewSameNameInTwoOrgs(t *testing.T) {
+	t.Parallel()
 	e, root := twoOrgs(t)
 	out, errs, code := e.run(t, "sync", "--add-new")
 	if code != 1 || !strings.Contains(out, "1 done, 0 skipped, 1 failed") || !strings.Contains(errs, "--as <dir>") {
@@ -199,6 +206,7 @@ func TestSyncAddNewSameNameInTwoOrgs(t *testing.T) {
 }
 
 func TestSyncJSONReviewDetails(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	a, _ := load(t, root).Repository("a")
 	e.fake = hosting.NewFake()
@@ -248,6 +256,7 @@ func TestSyncJSONReviewDetails(t *testing.T) {
 }
 
 func TestSyncTruncatedWarningPluralization(t *testing.T) {
+	t.Parallel()
 	e, _ := syncBundle(t)
 	e.fake = hosting.NewFake()
 	e.origin(t, "o", "a", false)
@@ -265,6 +274,7 @@ func (h failingLookup) Repo(context.Context, string, string) (hosting.Repo, erro
 }
 
 func TestSyncUnconfirmedGoneExitsNonZero(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	e.fake = hosting.NewFake()
 	e.origin(t, "o", "b", false) // a is a gone candidate, its lookup fails
@@ -287,6 +297,7 @@ func TestSyncUnconfirmedGoneExitsNonZero(t *testing.T) {
 }
 
 func TestSyncSingleOrgPossiblyMoved(t *testing.T) {
+	t.Parallel()
 	e, root := syncBundle(t)
 	a, _ := load(t, root).Repository("a")
 	e.origin(t, "p", "z", false)

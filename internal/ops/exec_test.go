@@ -74,6 +74,7 @@ func TestExecuteBoundedParallelism(t *testing.T) {
 }
 
 func TestExecuteResultsSortedIndependentOfCompletionOrder(t *testing.T) {
+	t.Parallel()
 	// c finishes first, a last.
 	order := map[string]chan struct{}{"a": make(chan struct{}), "b": make(chan struct{}), "c": make(chan struct{})}
 	var finished sync.WaitGroup
@@ -104,6 +105,7 @@ func TestExecuteResultsSortedIndependentOfCompletionOrder(t *testing.T) {
 }
 
 func TestExecuteCollectsErrorsAndSkips(t *testing.T) {
+	t.Parallel()
 	boom := errors.New("boom")
 	rec := &recorder{}
 	tasks := []Task{
@@ -148,6 +150,7 @@ func TestExecuteCollectsErrorsAndSkips(t *testing.T) {
 }
 
 func TestExecuteNoFailureMeansNilErr(t *testing.T) {
+	t.Parallel()
 	s := Execute(context.Background(), 4, []Task{
 		{Repo: "a", Run: func(context.Context, func(Event)) (string, error) { return "", nil }},
 		{Repo: "b", Run: func(context.Context, func(Event)) (string, error) { return "", Skip("x") }},
@@ -161,6 +164,7 @@ func TestExecuteNoFailureMeansNilErr(t *testing.T) {
 }
 
 func TestExecuteReporterCallsAreSerialized(t *testing.T) {
+	t.Parallel()
 	rec := &recorder{}
 	var tasks []Task
 	for i := range 16 {
@@ -181,6 +185,7 @@ func TestExecuteReporterCallsAreSerialized(t *testing.T) {
 }
 
 func TestExecuteCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	started := make(chan struct{})
 	var ran atomic.Int32

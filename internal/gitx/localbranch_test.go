@@ -12,6 +12,7 @@ import (
 )
 
 func TestPullRequestRef(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		ref  string
 		n    int
@@ -35,6 +36,7 @@ func TestPullRequestRef(t *testing.T) {
 }
 
 func TestLocalBranches(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{Branches: []string{"feat/gone", "keep"}})
 	testutil.Git(t, dir, "branch", "--track", "feat/gone", "origin/feat/gone")
 	testutil.Git(t, dir, "branch", "--track", "keep", "origin/keep")
@@ -97,6 +99,7 @@ func TestLocalBranches(t *testing.T) {
 }
 
 func TestFetchRefspecsDoesNotForce(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{Branches: []string{"a", "b"}})
 	testutil.Git(t, o.Path, "update-ref", "refs/pull/1/head", "refs/heads/a")
 	ctx := context.Background()
@@ -115,6 +118,7 @@ func TestFetchRefspecsDoesNotForce(t *testing.T) {
 }
 
 func TestLockFiles(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "worktree", "add", "-q", "-b", "side", filepath.Join(filepath.Dir(dir), "side"))
 	git := filepath.Join(dir, ".git")

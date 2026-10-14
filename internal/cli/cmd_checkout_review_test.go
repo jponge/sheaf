@@ -17,6 +17,7 @@ import (
 
 // Failures keep git's full (multi-line) error in the update summary.
 func TestUpdateSummaryKeepsFullError(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	_, alpha := e.coAddRepo(t, "alpha")
 	testutil.Git(t, alpha, "remote", "set-url", "origin", "file://"+filepath.Join(t.TempDir(), "missing.git"))
@@ -27,6 +28,7 @@ func TestUpdateSummaryKeepsFullError(t *testing.T) {
 }
 
 func TestUpdateUntrackedInTheWayShownAsSkipped(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	o, alpha := e.coAddRepo(t, "alpha")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "remote\n", "remote")
@@ -39,6 +41,7 @@ func TestUpdateUntrackedInTheWayShownAsSkipped(t *testing.T) {
 
 // Stashes appear on the repository's first row whose status is known.
 func TestStatusTableStashOnFirstSuccessfulRow(t *testing.T) {
+	t.Parallel()
 	r := ops.StatusReport{Checkouts: []ops.CheckoutStatus{
 		{Checkout: ops.Checkout{Repo: "a", Dir: "main", Primary: true, Branch: "main"}, Err: errors.New("boom")},
 		{Checkout: ops.Checkout{Repo: "a", Dir: "feat", Branch: "feat"}, Status: &gitx.RepoStatus{Branch: "feat", Stashes: 2}},
@@ -57,6 +60,7 @@ func TestStatusTableStashOnFirstSuccessfulRow(t *testing.T) {
 
 // Worktrees outside <bundle>/<repo>/ are marked in every output.
 func TestOutsideWorktreeMarked(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	_, alpha := e.coAddRepo(t, "alpha", "far")
 	far := filepath.Join(t.TempDir(), "far")
@@ -78,6 +82,7 @@ func TestOutsideWorktreeMarked(t *testing.T) {
 
 // Not-started work reads the same everywhere.
 func TestNotStartedEventWording(t *testing.T) {
+	t.Parallel()
 	var b bytes.Buffer
 	r := coCheckoutRenderer{plainRenderer{&b}}
 	r.Report(ops.Event{Repo: "a", Worktree: "main", Phase: ops.PhaseUpdate, Kind: ops.KindFailed, Message: "not started (interrupted)", Err: context.Canceled})
@@ -89,6 +94,7 @@ func TestNotStartedEventWording(t *testing.T) {
 }
 
 func TestUpdateSummaryPluralization(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	_, alpha := e.coAddRepo(t, "alpha")
 	e.coAddRepo(t, "beta")
@@ -102,6 +108,7 @@ func TestUpdateSummaryPluralization(t *testing.T) {
 }
 
 func TestRunBlockShowsNote(t *testing.T) {
+	t.Parallel()
 	var b bytes.Buffer
 	s := &coBlockSink{w: &b}
 	w := s.Begin(ops.Checkout{Repo: "a", Dir: "main"})

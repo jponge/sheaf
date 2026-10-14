@@ -37,6 +37,7 @@ func (f *fixture) wtPR(t *testing.T, repo string, n int) (PRWorktreeResult, erro
 }
 
 func TestPRWorktreeSameRepository(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
 	f.fake.AddPR("o", "a", hosting.PR{Number: 3, HeadBranch: "feat", HeadOwner: "o", HeadRepo: "a"})
@@ -59,6 +60,7 @@ func TestPRWorktreeSameRepository(t *testing.T) {
 }
 
 func TestPRWorktreeFromFork(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, o := f.clonedRepo(t, "a")
 	head := pushPullRef(t, o, 7, "main", "fork.txt")
@@ -91,6 +93,7 @@ func TestPRWorktreeFromFork(t *testing.T) {
 }
 
 func TestPRWorktreeDeletedForkAndDeletedHeadBranch(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, o := f.clonedRepo(t, "a")
 	head := pushPullRef(t, o, 8, "main", "gone-fork.txt")
@@ -110,6 +113,7 @@ func TestPRWorktreeDeletedForkAndDeletedHeadBranch(t *testing.T) {
 }
 
 func TestPRWorktreeRefresh(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, o := f.clonedRepo(t, "a")
 	head := pushPullRef(t, o, 7, "main", "fork.txt")
@@ -151,6 +155,7 @@ func TestPRWorktreeRefresh(t *testing.T) {
 }
 
 func TestPRWorktreeRefusesForeignLocalBranch(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, o := f.clonedRepo(t, "a")
 	pushPullRef(t, o, 7, "main", "fork.txt")
@@ -162,6 +167,7 @@ func TestPRWorktreeRefusesForeignLocalBranch(t *testing.T) {
 }
 
 func TestPRWorktreeErrors(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
 	if _, err := f.wtPR(t, "a", 42); !errors.Is(err, hosting.ErrNotFound) {
@@ -188,6 +194,7 @@ func TestPRWorktreeErrors(t *testing.T) {
 }
 
 func TestUpdateReportsPullRequestBranches(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, o := f.clonedRepo(t, "a")
 	pushPullRef(t, o, 7, "main", "fork.txt")

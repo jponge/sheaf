@@ -14,6 +14,7 @@ import (
 )
 
 func TestChildEnvStripsRepoVariablesAndPinsLocale(t *testing.T) {
+	t.Parallel()
 	in := []string{
 		"PATH=/usr/bin",
 		"HOME=/home/x",
@@ -51,6 +52,7 @@ func TestChildEnvStripsRepoVariablesAndPinsLocale(t *testing.T) {
 }
 
 func TestRunReturnsStdout(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	dir := t.TempDir()
 	testutil.Git(t, dir, "init", "-q")
@@ -64,6 +66,7 @@ func TestRunReturnsStdout(t *testing.T) {
 }
 
 func TestRunReturnsTypedError(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	dir := t.TempDir()
 	_, err := Run(context.Background(), dir, "rev-parse", "--verify", "no-such-ref")
@@ -86,12 +89,14 @@ func TestRunReturnsTypedError(t *testing.T) {
 }
 
 func TestRunRejectsEmptyDir(t *testing.T) {
+	t.Parallel()
 	if _, err := Run(context.Background(), "", "version"); err == nil {
 		t.Fatal("expected error for empty dir")
 	}
 }
 
 func TestRunHonoursContext(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -129,6 +134,7 @@ func TestRunIgnoresInheritedRepoEnv(t *testing.T) {
 // --local-env-vars) is stripped, except the config-injection variables, which
 // carry user configuration rather than a repository location.
 func TestStrippedEnvCoversGitLocalEnvVars(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	out := testutil.Git(t, t.TempDir(), "rev-parse", "--local-env-vars")
 	keep := map[string]bool{"GIT_CONFIG_PARAMETERS": true, "GIT_CONFIG_COUNT": true}
@@ -142,6 +148,7 @@ func TestStrippedEnvCoversGitLocalEnvVars(t *testing.T) {
 // Review 2, item 7: a stale lock file (e.g. left by a killed fetch) is
 // recognized and its path exposed.
 func TestStaleLockPath(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	dir = resolved(t, dir) // git reports lock paths with symlinks resolved
 	ctx := context.Background()

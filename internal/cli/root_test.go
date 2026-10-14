@@ -43,6 +43,7 @@ func TestVersionHonoursOverride(t *testing.T) {
 }
 
 func TestPersistentFlagsDefaults(t *testing.T) {
+	t.Parallel()
 	cmd := NewRootCmd(Streams{})
 	f := cmd.PersistentFlags()
 	if fl := f.Lookup("bundle"); fl == nil || fl.DefValue != "" {
@@ -64,6 +65,7 @@ func TestPersistentFlagsDefaults(t *testing.T) {
 }
 
 func TestFlagsParsedIntoOptions(t *testing.T) {
+	t.Parallel()
 	var got Options
 	cmd := NewRootCmd(Streams{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}})
 	probe := &cobra.Command{Use: "probe", RunE: func(c *cobra.Command, _ []string) error {
@@ -82,12 +84,14 @@ func TestFlagsParsedIntoOptions(t *testing.T) {
 }
 
 func TestUnknownCommandFails(t *testing.T) {
+	t.Parallel()
 	if _, _, err := run(t, "nope"); err == nil {
 		t.Fatal("expected error for unknown command")
 	}
 }
 
 func TestExecuteExitCodes(t *testing.T) {
+	t.Parallel()
 	var out, errb bytes.Buffer
 	s := Streams{In: strings.NewReader(""), Out: &out, Err: &errb}
 	if code := Execute([]string{"version"}, s); code != 0 {
@@ -102,6 +106,7 @@ func TestExecuteExitCodes(t *testing.T) {
 }
 
 func TestJobsMustBePositive(t *testing.T) {
+	t.Parallel()
 	for _, j := range []string{"0", "-5"} {
 		_, _, err := run(t, "-j", j, "version")
 		if err == nil || !strings.Contains(err.Error(), "--jobs") {

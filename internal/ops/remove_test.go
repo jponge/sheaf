@@ -48,6 +48,7 @@ func riskKinds(c RemoveItem) []gitx.RiskKind {
 }
 
 func TestRemoveCleanRepoWithWorktree(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	testutil.Git(t, primary, "worktree", "add", "-q", "../feat", "feat")
@@ -79,6 +80,7 @@ func TestRemoveCleanRepoWithWorktree(t *testing.T) {
 }
 
 func TestRemoveFetchesBeforeCheckingRisks(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, o := f.clonedRepo(t, "a")
 	// topic is pushed, so the local remote-tracking ref makes it look safe...
@@ -103,6 +105,7 @@ func TestRemoveFetchesBeforeCheckingRisks(t *testing.T) {
 }
 
 func TestRemoveRefusesRisksUnlessForced(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	wt := filepath.Join(f.w.Root, "a", "feat")
@@ -146,6 +149,7 @@ func TestRemoveRefusesRisksUnlessForced(t *testing.T) {
 }
 
 func TestRemoveNeedsConfirmation(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	for name, c := range map[string]func(RemovePlan) bool{"nil": nil, "no": func(RemovePlan) bool { return false }} {
@@ -159,6 +163,7 @@ func TestRemoveNeedsConfirmation(t *testing.T) {
 }
 
 func TestRemoveRefusesUnknownEntriesUnlessForced(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
 	notes := filepath.Join(f.w.Root, "a", "notes")
@@ -176,6 +181,7 @@ func TestRemoveRefusesUnknownEntriesUnlessForced(t *testing.T) {
 }
 
 func TestRemoveNeverDeletesOutsideTheRepositoryDirectory(t *testing.T) {
+	t.Parallel()
 	t.Run("worktree outside", func(t *testing.T) {
 		f := newFixture(t)
 		primary, _ := f.clonedRepo(t, "a")
@@ -235,6 +241,7 @@ func TestRemoveNeverDeletesOutsideTheRepositoryDirectory(t *testing.T) {
 }
 
 func TestRemoveUnknownAndMissing(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	if _, err := f.remove(t, "nope", true, yes); err == nil {
 		t.Fatal("removing an unknown repository succeeded")
@@ -253,6 +260,7 @@ func TestRemoveUnknownAndMissing(t *testing.T) {
 }
 
 func TestRemoveRefusesHiddenModifications(t *testing.T) {
+	t.Parallel()
 	for _, where := range []string{"primary", "worktree"} {
 		t.Run(where, func(t *testing.T) {
 			f := newFixture(t)
@@ -285,6 +293,7 @@ func TestRemoveRefusesHiddenModifications(t *testing.T) {
 }
 
 func TestRemoveTagOnlyCommitsAreInformational(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{})
 	// A release tag on a commit that is on no branch of origin.
@@ -312,6 +321,7 @@ func TestRemoveTagOnlyCommitsAreInformational(t *testing.T) {
 }
 
 func TestRemoveStaleLockOnFetch(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, o := f.clonedRepo(t, "a")
 	testutil.AdvanceOrigin(t, o, "main", "new.txt", "new\n", "advance")

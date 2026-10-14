@@ -79,6 +79,7 @@ func coThreeCheckouts(t *testing.T) (*fixture, string) {
 }
 
 func TestRunCommandOrderedBlocksAndExitCodes(t *testing.T) {
+	t.Parallel()
 	f, _ := coThreeCheckouts(t)
 	sink := &coRecSink{}
 	r, err := RunCommand(context.Background(), f.w, RunOptions{
@@ -116,6 +117,7 @@ func TestRunCommandOrderedBlocksAndExitCodes(t *testing.T) {
 }
 
 func TestRunCommandWithoutShellAndFilters(t *testing.T) {
+	t.Parallel()
 	f, alpha := coThreeCheckouts(t)
 	writeFile(t, filepath.Join(alpha, "file-1.txt"), "dirty\n")
 	sink := &coRecSink{}
@@ -154,6 +156,7 @@ func TestRunCommandWithoutShellAndFilters(t *testing.T) {
 // With Stream, Begin is called before the command starts and the output is
 // written to the returned writer.
 func TestRunCommandStreamBeginsBeforeStart(t *testing.T) {
+	t.Parallel()
 	f, _ := coThreeCheckouts(t)
 	marker := filepath.Join(t.TempDir(), "ran")
 	sink := &coRecSink{}

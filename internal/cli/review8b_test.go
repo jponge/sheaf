@@ -28,6 +28,7 @@ func TestInterruptControllerNotifies(t *testing.T) {
 
 // Ctrl-C in a menu interrupts the command like SIGINT: exit 130.
 func TestTUIMenuCtrlCExits130(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	e.origin(t, "o", "a", false)
 	before := readYAML(t, e.cwd)
@@ -99,6 +100,7 @@ func informationalBundle(t *testing.T) (*env, string) {
 }
 
 func TestTUIReplaysWarningsLikeCLI(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -126,6 +128,7 @@ func TestTUIReplaysWarningsLikeCLI(t *testing.T) {
 }
 
 func TestCredentialHint(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		msg  string
 		want bool
@@ -146,6 +149,7 @@ func TestCredentialHint(t *testing.T) {
 // Confirming only repositories that are already present tracks the
 // organization, like --repo with them or --all would.
 func TestTUIAddOrgPresentOnlyTracksSource(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	e.origin(t, "o", "a", false)
 	e.origin(t, "o", "b", false)

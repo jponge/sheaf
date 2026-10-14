@@ -33,6 +33,7 @@ func forkPR7(t *testing.T, localCommit bool) (*fixture, string, testutil.Origin,
 
 // S1: pr/7 ahead of the PR head: the worktree is added on the local branch.
 func TestR10PRLocalAhead(t *testing.T) {
+	t.Parallel()
 	f, primary, _, _ := forkPR7(t, true)
 	local := testutil.Git(t, primary, "rev-parse", "pr/7")
 	res, err := f.wtPR(t, "a", 7)
@@ -46,6 +47,7 @@ func TestR10PRLocalAhead(t *testing.T) {
 
 // S1: pr/7 behind the PR head: fast-forwarded, then added.
 func TestR10PRLocalBehind(t *testing.T) {
+	t.Parallel()
 	f, _, o, head := forkPR7(t, false)
 	next := pushPullRef(t, o, 7, head, "fork2.txt")
 	res, err := f.wtPR(t, "a", 7)
@@ -61,6 +63,7 @@ func TestR10PRLocalBehind(t *testing.T) {
 // and the message says that local commits would be lost (2: the previous
 // PR head commit and the local fixup are both only on pr/7 now).
 func TestR10PRLocalDiverged(t *testing.T) {
+	t.Parallel()
 	f, primary, o, _ := forkPR7(t, true)
 	local := testutil.Git(t, primary, "rev-parse", "pr/7")
 	pushPullRef(t, o, 7, "main", "rewritten.txt")
@@ -86,6 +89,7 @@ func samePR3(t *testing.T) (*fixture, string, testutil.Origin) {
 
 // S2: a local head branch strictly behind origin is fast-forwarded first.
 func TestR10SameRepoStaleLocal(t *testing.T) {
+	t.Parallel()
 	f, primary, o := samePR3(t)
 	testutil.Git(t, primary, "branch", "--track", "feat", "origin/feat")
 	testutil.AdvanceOrigin(t, o, "feat", "new.txt", "new\n", "pr update")
@@ -100,6 +104,7 @@ func TestR10SameRepoStaleLocal(t *testing.T) {
 
 // S2: a diverged local head branch is checked out as is, with a warning.
 func TestR10SameRepoDivergedLocal(t *testing.T) {
+	t.Parallel()
 	f, primary, o := samePR3(t)
 	testutil.Git(t, primary, "branch", "--track", "feat", "origin/feat")
 	testutil.Git(t, primary, "switch", "-q", "feat")
@@ -118,6 +123,7 @@ func TestR10SameRepoDivergedLocal(t *testing.T) {
 
 // S2: already checked out and behind: warned, not modified.
 func TestR10SameRepoCheckedOutBehind(t *testing.T) {
+	t.Parallel()
 	f, _, o := samePR3(t)
 	wt := f.mustAddWT(t, "a", "feat")
 	before := testutil.Git(t, wt.Path, "rev-parse", "HEAD")
@@ -133,6 +139,7 @@ func TestR10SameRepoCheckedOutBehind(t *testing.T) {
 
 // NIT: SSH aliases of github.com (as add treats them) are accepted.
 func TestR10PRAliasHost(t *testing.T) {
+	t.Parallel()
 	f, _, _ := samePR3(t)
 	if err := f.w.update(func(b *bundle.Bundle) error {
 		b.Repositories[0].Host = "github_work"
@@ -147,6 +154,7 @@ func TestR10PRAliasHost(t *testing.T) {
 
 // NIT: no trailing space for a lock without reason.
 func TestR10DoctorLockedWithoutReason(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	wt := f.mustAddWT(t, "a", "feat")

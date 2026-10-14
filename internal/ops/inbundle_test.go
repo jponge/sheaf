@@ -10,6 +10,7 @@ import (
 // same slug (case-insensitively) on github.com or on an SSH alias of it,
 // not on another host.
 func TestInBundle(t *testing.T) {
+	t.Parallel()
 	b := &bundle.Bundle{Repositories: []bundle.Repository{
 		{Name: "alpha", Slug: "O/Alpha"},
 		{Name: "beta-work", Slug: "o/beta", Host: "github_work"},

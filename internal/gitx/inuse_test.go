@@ -25,6 +25,7 @@ func stopRebase(t *testing.T, dir string) {
 }
 
 func TestBranchesInUse(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{Commits: 2, Branches: []string{"feat", "rb", "bis", "free"}})
 	ctx := context.Background()
 	for _, b := range []string{"feat", "rb", "bis", "free"} {
@@ -86,6 +87,7 @@ func TestBranchesInUse(t *testing.T) {
 // N1: in a reftable repository HEAD files hold "ref: refs/heads/.invalid";
 // checked-out branches come from `git worktree list`.
 func TestBranchesInUseReftable(t *testing.T) {
+	t.Parallel()
 	testutil.IsolateGit(t)
 	dir := filepath.Join(t.TempDir(), "r")
 	if out, err := exec.Command("git", "init", "-q", "--ref-format=reftable", "-b", "main", dir).CombinedOutput(); err != nil {
@@ -111,6 +113,7 @@ func TestBranchesInUseReftable(t *testing.T) {
 // NIT: a relative gitdir file (worktree.useRelativePaths, git >= 2.48) is
 // resolved against the directory holding it.
 func TestBranchesInUseRelativeGitdir(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{Branches: []string{"feat2"}})
 	testutil.Git(t, dir, "branch", "--track", "feat2", "origin/feat2")
 	wt := filepath.Join(filepath.Dir(dir), "wt")

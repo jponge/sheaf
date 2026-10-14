@@ -9,6 +9,7 @@ import (
 )
 
 func TestFastForwardOnMergeStartOnlyWhenMerging(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	calls := 0
 	opts := FastForwardOptions{OnMergeStart: func() { calls++ }}

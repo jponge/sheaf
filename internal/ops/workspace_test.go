@@ -22,6 +22,7 @@ func resolved(t *testing.T, p string) string {
 }
 
 func TestCreateMakesDirectoriesAndBundle(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "a", "b")
 	root, err := Create(dir)
 	if err != nil {
@@ -39,6 +40,7 @@ func TestCreateMakesDirectoriesAndBundle(t *testing.T) {
 }
 
 func TestFindBundle(t *testing.T) {
+	t.Parallel()
 	root, err := Create(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +66,7 @@ func TestFindBundle(t *testing.T) {
 }
 
 func TestWorkspaceUpdatePersistsAndIsolatesOnError(t *testing.T) {
+	t.Parallel()
 	root, err := Create(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +109,7 @@ func plainClone(t *testing.T, o testutil.Origin, dest string) {
 }
 
 func TestInitDetectsCandidates(t *testing.T) {
+	t.Parallel()
 	o := testutil.NewOrigin(t, testutil.OriginOpts{})
 	dir := t.TempDir()
 	plainClone(t, o, filepath.Join(dir, "plain"))
@@ -154,6 +158,7 @@ func TestInitDetectsCandidates(t *testing.T) {
 }
 
 func TestCandidatesExcludeRegistered(t *testing.T) {
+	t.Parallel()
 	o := testutil.NewOrigin(t, testutil.OriginOpts{})
 	root, err := Create(t.TempDir())
 	if err != nil {

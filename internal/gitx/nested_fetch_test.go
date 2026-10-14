@@ -38,6 +38,7 @@ func staleNested(t *testing.T, parent, rel string) string {
 }
 
 func TestDeletionRisksBeforeNestedHookSeesFreshRemoteState(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	dir = resolved(t, dir) // git, hence the hook, sees resolved paths
 	writeFile(t, dir, ".git/info/exclude", "vendor/\n")
@@ -61,6 +62,7 @@ func TestDeletionRisksBeforeNestedHookSeesFreshRemoteState(t *testing.T) {
 }
 
 func TestDeletionRisksBeforeNestedFailureBlocks(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	writeFile(t, dir, ".git/info/exclude", "vendor/\n")
 	testutil.Git(t, dir, "clone", "-q", testutil.NewOrigin(t, testutil.OriginOpts{}).URL, "vendor/lib")
@@ -80,6 +82,7 @@ func TestDeletionRisksBeforeNestedFailureBlocks(t *testing.T) {
 }
 
 func TestFetchAllPrunesEveryRemote(t *testing.T) {
+	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{Branches: []string{"gone"}})
 	o2 := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"other"}})
 	testutil.Git(t, dir, "remote", "add", "second", o2.URL)
@@ -95,6 +98,7 @@ func TestFetchAllPrunesEveryRemote(t *testing.T) {
 
 // S1: bare repositories inside the checkout are nested repositories.
 func TestDeletionRisksNestedBareRepository(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	writeFile(t, dir, ".git/info/exclude", "vendor/\n")
 	work := filepath.Join(t.TempDir(), "w")
@@ -113,6 +117,7 @@ func TestDeletionRisksNestedBareRepository(t *testing.T) {
 
 // S1: a remote inside the tree being deleted is no remote.
 func TestDeletionRisksRemoteInsideDeletedTree(t *testing.T) {
+	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	writeFile(t, dir, ".git/info/exclude", "vendor/\n")
 	vendor := filepath.Join(dir, "vendor")

@@ -14,6 +14,7 @@ import (
 )
 
 func TestOrgRepoItems(t *testing.T) {
+	t.Parallel()
 	b := &bundle.Bundle{Repositories: []bundle.Repository{{Name: "alpha", Slug: "o/Alpha"}}}
 	avail := []hosting.Repo{
 		{Owner: "o", Name: "alpha", Description: "already here"},
@@ -32,6 +33,7 @@ func TestOrgRepoItems(t *testing.T) {
 }
 
 func TestProposalItems(t *testing.T) {
+	t.Parallel()
 	ps := []ops.Proposal{
 		{Key: "new:o/b", Kind: ops.ProposalNew, Org: "o", Name: "b", Slug: "o/b", Repo: hosting.Repo{Owner: "o", Name: "b", Description: "bee", Fork: true}},
 		{Key: "new:o/c", Kind: ops.ProposalNew, Org: "o", Name: "c", Slug: "o/c", Repo: hosting.Repo{Owner: "o", Name: "c"}, Note: "directory c already used"},
@@ -53,6 +55,7 @@ func TestProposalItems(t *testing.T) {
 }
 
 func TestExcludeItems(t *testing.T) {
+	t.Parallel()
 	ps := []ops.Proposal{{Key: "new:o/c", Kind: ops.ProposalNew, Org: "o", Name: "c", Slug: "o/c"}}
 	want := []tui.Item{{Key: "new:o/c", Label: "c", Detail: "o/c"}}
 	if got := excludeItems(ps); !reflect.DeepEqual(got, want) {
@@ -61,6 +64,7 @@ func TestExcludeItems(t *testing.T) {
 }
 
 func TestCandidateItems(t *testing.T) {
+	t.Parallel()
 	cs := []ops.Candidate{
 		{Name: "alpha", Path: "/b/alpha", Kind: ops.CandidatePlainClone, Primary: "/b/alpha"},
 		{Name: "beta", Path: "/b/beta", Kind: ops.CandidateLaidOut, Primary: "/b/beta/main"},
@@ -75,6 +79,7 @@ func TestCandidateItems(t *testing.T) {
 }
 
 func TestEventRow(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		e     ops.Event
@@ -108,6 +113,7 @@ func TestEventRow(t *testing.T) {
 // the last line of the final frame on exit, so the session adds an empty
 // one, and model updates keep the wrapper.
 func TestKeepLastLineWrapper(t *testing.T) {
+	t.Parallel()
 	m := keepLastLine{tui.NewConfirm("Remove alpha?", []string{"will delete /b/alpha"})}
 	if v := m.View().Content; v != m.Model.View().Content+"\n" {
 		t.Fatalf("View = %q", v)

@@ -14,6 +14,7 @@ import (
 )
 
 func TestCollectStatusCountsAndCleanliness(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, alpha := coAddRepoWith(t, f, "alpha", "feat")
 	coAddRepoWith(t, f, "beta")
@@ -61,6 +62,7 @@ func TestCollectStatusCountsAndCleanliness(t *testing.T) {
 
 // status never fetches unless asked to.
 func TestCollectStatusFetchesOnlyWithFetchOption(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o, _ := coAddRepoWith(t, f, "alpha")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
@@ -83,6 +85,7 @@ func TestCollectStatusFetchesOnlyWithFetchOption(t *testing.T) {
 }
 
 func TestCollectStatusReportsProblems(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, alpha := coAddRepoWith(t, f, "alpha")
 	if err := os.RemoveAll(alpha); err != nil {
@@ -98,6 +101,7 @@ func TestCollectStatusReportsProblems(t *testing.T) {
 }
 
 func TestFetchReposOneTaskPerRepository(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o, alpha := coAddRepoWith(t, f, "alpha", "feat")
 	coAddRepoWith(t, f, "beta")
@@ -121,6 +125,7 @@ func TestFetchReposOneTaskPerRepository(t *testing.T) {
 }
 
 func TestFetchReposMissingPrimaryFails(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, alpha := coAddRepoWith(t, f, "alpha")
 	coAddRepoWith(t, f, "beta")

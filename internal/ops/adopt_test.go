@@ -41,6 +41,7 @@ func originSlug(t *testing.T, o testutil.Origin) string {
 }
 
 func TestAdoptPlainCloneMovesAndRegisters(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x"}})
 	dir := filepath.Join(f.w.Root, "p")
@@ -89,6 +90,7 @@ func TestAdoptPlainCloneMovesAndRegisters(t *testing.T) {
 }
 
 func TestAdoptLaidOutOnlyRegisters(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{})
 	primary := filepath.Join(f.w.Root, "p", "main")
@@ -106,6 +108,7 @@ func TestAdoptLaidOutOnlyRegisters(t *testing.T) {
 }
 
 func TestAdoptRefusals(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{})
 	// Already registered: skipped.
@@ -224,6 +227,7 @@ func TestAdoptRestoresOnFailureAfterMove(t *testing.T) {
 }
 
 func TestAdoptAllRunsTasks(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	a := filepath.Join(f.w.Root, "a")
 	b := filepath.Join(f.w.Root, "b")

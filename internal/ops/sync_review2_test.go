@@ -23,6 +23,7 @@ func (h failingLookup) Repo(context.Context, string, string) (hosting.Repo, erro
 // A gone candidate whose remote still answers contradicts the hosting
 // service (token scope): refused, even with AllowMassRemoval, unless Force.
 func TestSyncRemoveGoneRefusesWhenRemoteStillAnswers(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	for _, n := range []string{"p1", "p2", "p3", "p4", "p5"} {
 		f.repo(t, "p", n, "main", false)
@@ -64,6 +65,7 @@ func TestSyncRemoveGoneRefusesWhenRemoteStillAnswers(t *testing.T) {
 }
 
 func TestSyncEmptyListingFlagsMassRemovalForSingleRepo(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}}, bundle.Repository{Name: "only", Slug: "o/only", Origin: "org:o"})
 	listed(f, "o")
@@ -75,6 +77,7 @@ func TestSyncEmptyListingFlagsMassRemovalForSingleRepo(t *testing.T) {
 }
 
 func TestAddNotBlockedByMirrorOnRealOtherHost(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, nil, bundle.Repository{Name: "a-lab", Slug: "o/a", Origin: "explicit", Host: "gitlab.com"})
 	f.repo(t, "o", "a", "main", false)
@@ -94,6 +97,7 @@ func TestAddNotBlockedByMirrorOnRealOtherHost(t *testing.T) {
 }
 
 func TestSyncMirrorOnRealOtherHostDoesNotSuppressNew(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}},
 		bundle.Repository{Name: "a-lab", Slug: "o/a", Origin: "explicit", Host: "gitlab.com"},
@@ -107,6 +111,7 @@ func TestSyncMirrorOnRealOtherHostDoesNotSuppressNew(t *testing.T) {
 }
 
 func TestSyncSingleOrgFlagsPossiblyMovedRepos(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.repo(t, "o", "a", "main", false)
 	f.repo(t, "o", "keep", "main", false)
@@ -139,6 +144,7 @@ func TestSyncSingleOrgFlagsPossiblyMovedRepos(t *testing.T) {
 }
 
 func TestSyncUnconfirmedGoneCandidatesAreAnError(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	syncRecord(t, f, []bundle.Source{{Org: "o"}},
 		bundle.Repository{Name: "a", Slug: "o/a", Origin: "org:o"},

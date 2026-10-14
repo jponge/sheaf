@@ -66,6 +66,7 @@ func layout(t *testing.T, opts testutil.OriginOpts) (o testutil.Origin, repo, pr
 }
 
 func TestWorktreeListPrimaryOnly(t *testing.T) {
+	t.Parallel()
 	_, _, primary := layout(t, testutil.OriginOpts{})
 	wts := mustList(t, primary)
 	if len(wts) != 1 {
@@ -81,6 +82,7 @@ func TestWorktreeListPrimaryOnly(t *testing.T) {
 }
 
 func TestWorktreeListBare(t *testing.T) {
+	t.Parallel()
 	o := testutil.NewOrigin(t, testutil.OriginOpts{})
 	wts := mustList(t, o.Path)
 	if len(wts) != 1 || !wts[0].Bare || wts[0].Path != resolved(t, o.Path) {
@@ -89,6 +91,7 @@ func TestWorktreeListBare(t *testing.T) {
 }
 
 func TestWorktreeAddExistingLocalBranch(t *testing.T) {
+	t.Parallel()
 	_, repo, primary := layout(t, testutil.OriginOpts{})
 	testutil.Git(t, primary, "branch", "local-work")
 	path := filepath.Join(repo, "local work dir")
@@ -100,6 +103,7 @@ func TestWorktreeAddExistingLocalBranch(t *testing.T) {
 }
 
 func TestWorktreeAddRemoteBranchCreatesTrackingBranch(t *testing.T) {
+	t.Parallel()
 	const b = "feat/cli/rework-ergonomics"
 	_, repo, primary := layout(t, testutil.OriginOpts{Branches: []string{b}})
 	path := filepath.Join(repo, "feat-cli-rework-ergonomics")
@@ -117,6 +121,7 @@ func TestWorktreeAddRemoteBranchCreatesTrackingBranch(t *testing.T) {
 }
 
 func TestWorktreeAddNewBranchFromOriginDefault(t *testing.T) {
+	t.Parallel()
 	_, repo, primary := layout(t, testutil.OriginOpts{DefaultBranch: "trunk", Branches: []string{"other"}})
 	// Move the primary away from origin/trunk so HEAD is not a valid base.
 	testutil.Git(t, primary, "checkout", "-q", "other")
@@ -138,6 +143,7 @@ func TestWorktreeAddNewBranchFromOriginDefault(t *testing.T) {
 }
 
 func TestWorktreeAddNewBranchFromExplicitBase(t *testing.T) {
+	t.Parallel()
 	_, repo, primary := layout(t, testutil.OriginOpts{Branches: []string{"other"}})
 	path := filepath.Join(repo, "from-other")
 	mustAdd(t, primary, path, "from-other", WorktreeAddOpts{Base: "origin/other"}, WorktreeNewBranch)
@@ -147,6 +153,7 @@ func TestWorktreeAddNewBranchFromExplicitBase(t *testing.T) {
 }
 
 func TestWorktreeAddErrors(t *testing.T) {
+	t.Parallel()
 	_, repo, primary := layout(t, testutil.OriginOpts{})
 	ctx := context.Background()
 	if _, err := WorktreeAdd(ctx, primary, filepath.Join(repo, "x"), "", WorktreeAddOpts{}); err == nil {
@@ -165,6 +172,7 @@ func TestWorktreeAddErrors(t *testing.T) {
 }
 
 func TestWorktreeRemove(t *testing.T) {
+	t.Parallel()
 	_, repo, primary := layout(t, testutil.OriginOpts{})
 	ctx := context.Background()
 	path := filepath.Join(repo, "tmp")
@@ -186,6 +194,7 @@ func TestWorktreeRemove(t *testing.T) {
 }
 
 func TestWorktreeListDetachedLockedPrunableAndRepair(t *testing.T) {
+	t.Parallel()
 	_, repo, primary := layout(t, testutil.OriginOpts{})
 	ctx := context.Background()
 
@@ -221,6 +230,7 @@ func TestWorktreeListDetachedLockedPrunableAndRepair(t *testing.T) {
 }
 
 func TestWorktreeAddModeString(t *testing.T) {
+	t.Parallel()
 	for m, want := range map[WorktreeAddMode]string{
 		WorktreeLocalBranch:  "local-branch",
 		WorktreeRemoteBranch: "remote-branch",
@@ -243,6 +253,7 @@ func wantNoBranch(t *testing.T, dir, branch string) {
 // S5: a non-empty or non-directory target path is refused before anything is
 // created, whatever the mode.
 func TestWorktreeAddRefusesOccupiedPath(t *testing.T) {
+	t.Parallel()
 	_, repo, primary := layout(t, testutil.OriginOpts{Branches: []string{"remote-b"}})
 	ctx := context.Background()
 	occupied := filepath.Join(repo, "occupied")
@@ -266,6 +277,7 @@ func TestWorktreeAddRefusesOccupiedPath(t *testing.T) {
 }
 
 func TestWorktreeAddAcceptsEmptyDirectory(t *testing.T) {
+	t.Parallel()
 	_, repo, primary := layout(t, testutil.OriginOpts{})
 	path := filepath.Join(repo, "empty")
 	if err := os.Mkdir(path, 0o755); err != nil {
@@ -276,6 +288,7 @@ func TestWorktreeAddAcceptsEmptyDirectory(t *testing.T) {
 
 // S5: when git fails after creating the branch, the branch is deleted.
 func TestWorktreeAddDeletesBranchCreatedByFailedAdd(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("SKIP: running as root, a read-only directory does not make git fail")
 	}
@@ -304,6 +317,7 @@ func TestWorktreeAddDeletesBranchCreatedByFailedAdd(t *testing.T) {
 // WorktreeAdd never reaches the network: without Base and without a local
 // refs/remotes/origin/HEAD it fails instead of asking the remote.
 func TestWorktreeAddWithoutBaseNeedsLocalOriginHEAD(t *testing.T) {
+	t.Parallel()
 	_, repo, primary := layout(t, testutil.OriginOpts{})
 	testutil.Git(t, primary, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
 	_, err := WorktreeAdd(context.Background(), primary, filepath.Join(repo, "x"), "x", WorktreeAddOpts{})
@@ -316,6 +330,7 @@ func TestWorktreeAddWithoutBaseNeedsLocalOriginHEAD(t *testing.T) {
 // The result exposes the upstream so callers can warn when an existing local
 // branch tracks something other than origin/<branch>.
 func TestWorktreeAddReportsUpstream(t *testing.T) {
+	t.Parallel()
 	_, repo, primary := layout(t, testutil.OriginOpts{Branches: []string{"feat", "other"}})
 	if res := mustAdd(t, primary, filepath.Join(repo, "feat"), "feat", WorktreeAddOpts{}, WorktreeRemoteBranch); res.Upstream != "origin/feat" {
 		t.Errorf("remote mode upstream = %q", res.Upstream)
@@ -336,6 +351,7 @@ func TestWorktreeAddReportsUpstream(t *testing.T) {
 // Review 2, item 4: the cleanup after a failed `worktree add -b` deletes the
 // branch only if this call created it and it still points at the start point.
 func TestCleanupCreatedBranchSparesBranchesItDidNotCreate(t *testing.T) {
+	t.Parallel()
 	_, repo, primary := layout(t, testutil.OriginOpts{})
 	ctx := context.Background()
 	start := testutil.Git(t, primary, "rev-parse", "origin/main")
@@ -384,6 +400,7 @@ func TestCleanupCreatedBranchSparesBranchesItDidNotCreate(t *testing.T) {
 // before the add (pinned by id), so a base that moves in between cannot leak
 // into the branch. The branch reflog records the start point git was given.
 func TestWorktreeAddNewBranchIsCreatedFromResolvedStartPoint(t *testing.T) {
+	t.Parallel()
 	_, repo, primary := layout(t, testutil.OriginOpts{})
 	want := testutil.Git(t, primary, "rev-parse", "origin/main")
 	mustAdd(t, primary, filepath.Join(repo, "pinned"), "pinned", WorktreeAddOpts{}, WorktreeNewBranch)

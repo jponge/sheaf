@@ -56,6 +56,7 @@ func coWantNotWorkTree(t *testing.T, what string, probs []Problem, primary strin
 // B1: a primary without .git inside an enclosing work tree must not be
 // mistaken for the enclosing repository.
 func TestCheckoutsPrimaryWithoutGitInsideOuterRepo(t *testing.T) {
+	t.Parallel()
 	f, outer, primary := coNestedBundle(t)
 	ctx := context.Background()
 	before := testutil.Git(t, outer, "rev-parse", "HEAD")
@@ -100,6 +101,7 @@ func TestCheckoutsPrimaryWithoutGitInsideOuterRepo(t *testing.T) {
 
 // A primary that is a linked worktree of another checkout is not a primary.
 func TestCheckoutsPrimaryThatIsALinkedWorktree(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, primary := coAddRepoWith(t, f, "r1", "dev")
 	repoDir := filepath.Dir(primary)
@@ -126,6 +128,7 @@ func checkoutNamesOf(cs []Checkout) []string { return coCheckoutNames(cs) }
 // tree is a problem, never the enclosing repository; the primary is still
 // processed.
 func TestCheckoutsLinkedWorktreeWithoutGitInsideOuterRepo(t *testing.T) {
+	t.Parallel()
 	f, outer, primary := coNestedBundleIntact(t, "r1")
 	wt := coAddWorktree(t, primary, "feat", "feat", true)
 	if err := os.Remove(filepath.Join(wt, ".git")); err != nil {

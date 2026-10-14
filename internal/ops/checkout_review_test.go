@@ -13,6 +13,7 @@ import (
 // An untracked file in the way of the fast-forward is a skip with the file
 // list, not a failure; the full git error is kept.
 func TestUpdateUntrackedFilesInTheWayIsSkipped(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o, alpha := coAddRepoWith(t, f, "alpha")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "remote\n", "remote")
@@ -35,6 +36,7 @@ func TestUpdateUntrackedFilesInTheWayIsSkipped(t *testing.T) {
 
 // Linked worktrees outside <bundle>/<repo>/ are listed, marked Outside.
 func TestListCheckoutsMarksOutsideWorktrees(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, alpha := coAddRepoWith(t, f, "alpha", "feat", "far")
 	coAddWorktree(t, alpha, "feat", "feat", true)

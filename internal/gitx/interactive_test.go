@@ -7,6 +7,7 @@ import (
 )
 
 func TestWithInteractiveMarksContext(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	if IsInteractive(ctx) {
 		t.Fatal("background context reported interactive")
@@ -24,6 +25,7 @@ func TestWithInteractiveMarksContext(t *testing.T) {
 // Interactive invocations may prompt (that is their purpose), so they must
 // not force GIT_TERMINAL_PROMPT=0; the user's own value is kept.
 func TestInteractiveEnvAllowsTerminalPrompts(t *testing.T) {
+	t.Parallel()
 	in := []string{"PATH=/bin", "GIT_DIR=/elsewhere", "LC_ALL=fr_FR", "GIT_TERMINAL_PROMPT=1"}
 	got := interactiveEnv(in)
 	if slices.Contains(got, "GIT_TERMINAL_PROMPT=0") {
@@ -38,6 +40,7 @@ func TestInteractiveEnvAllowsTerminalPrompts(t *testing.T) {
 }
 
 func TestStripRepoEnv(t *testing.T) {
+	t.Parallel()
 	in := []string{"PATH=/bin", "GIT_DIR=/x", "GIT_WORK_TREE=/y", "GIT_INDEX_FILE=/z", "LC_ALL=fr_FR", "GIT_TERMINAL_PROMPT=1", "GIT_CONFIG_COUNT=1"}
 	got := StripRepoEnv(in)
 	want := []string{"PATH=/bin", "LC_ALL=fr_FR", "GIT_TERMINAL_PROMPT=1", "GIT_CONFIG_COUNT=1"}

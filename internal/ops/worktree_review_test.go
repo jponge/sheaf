@@ -16,6 +16,7 @@ import (
 // B1: a name that is the branch of one worktree and the directory of another
 // is ambiguous; --dir/--branch select explicitly.
 func TestWorktreeTargetAmbiguity(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	dirA := filepath.Join(f.w.Root, "a")
@@ -59,6 +60,7 @@ func TestWorktreeTargetAmbiguity(t *testing.T) {
 
 // B2: a branch whose upstream is itself is not "merged into its upstream".
 func TestDeleteBranchIgnoresSelfUpstream(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	p := f.mustAddWT(t, "a", "work").Path
@@ -78,6 +80,7 @@ func TestDeleteBranchIgnoresSelfUpstream(t *testing.T) {
 // S1: git requires --force for a worktree with an initialized submodule;
 // a clean, pushed submodule is vetted by sheaf, so no --force is needed.
 func TestRemoveWorktreeWithCleanSubmodule(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
 	sub := testutil.NewOrigin(t, testutil.OriginOpts{})
@@ -127,6 +130,7 @@ func TestAddWorktreeConcurrentCollision(t *testing.T) {
 }
 
 func TestRemoveWorktreeChangedDuringConfirm(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
 	p := f.mustAddWT(t, "a", "x").Path
@@ -181,6 +185,7 @@ func TestRemoveWorktreeKeepsBranchCheckedOutElsewhere(t *testing.T) {
 }
 
 func TestRemoveWorktreePrunableRefused(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	p := f.mustAddWT(t, "a", "gone").Path
@@ -198,6 +203,7 @@ func TestRemoveWorktreePrunableRefused(t *testing.T) {
 }
 
 func TestResolveRepoSymlinkedCwd(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	links := t.TempDir()
@@ -218,6 +224,7 @@ func TestResolveRepoSymlinkedCwd(t *testing.T) {
 }
 
 func TestParseRepoArgs(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	f.clonedRepo(t, "b")
@@ -256,6 +263,7 @@ func TestParseRepoArgs(t *testing.T) {
 }
 
 func TestPrimaryOffDefaultBranch(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	testutil.Git(t, primary, "switch", "-q", "-c", "dev")
@@ -272,6 +280,7 @@ func TestPrimaryOffDefaultBranch(t *testing.T) {
 // path with one argument inside a checkout of a: a worktree of a first,
 // else a repository; both is ambiguous. --repo selects explicitly.
 func TestResolvePathSingleArgumentInsideCheckout(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	f.clonedRepo(t, "b")
@@ -317,6 +326,7 @@ func TestResolvePathSingleArgumentInsideCheckout(t *testing.T) {
 // -d deletes a branch none of whose commits would be lost, even if it is
 // not merged into its upstream or the default branch.
 func TestDeleteBranchContainedElsewhere(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	p := f.mustAddWT(t, "a", "work").Path
@@ -333,6 +343,7 @@ func TestDeleteBranchContainedElsewhere(t *testing.T) {
 
 // Commits reachable from tags are not lost; they are reported separately.
 func TestDeleteBranchLostCommitsExcludeTags(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	p := f.mustAddWT(t, "a", "work").Path
@@ -361,6 +372,7 @@ func TestDeleteBranchLostCommitsExcludeTags(t *testing.T) {
 // A branch checked out in another worktree (git worktree add -f) is
 // reported in the plan and kept.
 func TestDeleteBranchCheckedOutElsewhereReportedInPlan(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	p := f.mustAddWT(t, "a", "x").Path

@@ -9,6 +9,7 @@ import (
 )
 
 func TestRemoteRepoGoneMatcher(t *testing.T) {
+	t.Parallel()
 	for stderr, want := range map[string]bool{
 		"remote: Repository not found.\nfatal: repository 'https://github.com/o/a.git/' not found":                         true,
 		"ERROR: Repository not found.\nfatal: Could not read from remote repository.\n\nPlease make sure ...":              true,
@@ -30,6 +31,7 @@ func TestRemoteRepoGoneMatcher(t *testing.T) {
 // hint (--offline) leads to deleting the last copy: it is a data risk that
 // only --force overrides.
 func TestRemoveDeletedRemoteIsADataRisk(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, o := f.clonedRepo(t, "a")
 	if err := os.RemoveAll(o.Path); err != nil {

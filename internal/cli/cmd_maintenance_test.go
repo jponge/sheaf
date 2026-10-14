@@ -33,6 +33,7 @@ func pruneBundle(t *testing.T) (*env, string, testutil.Origin) {
 }
 
 func TestPruneIsADryRunWithoutYes(t *testing.T) {
+	t.Parallel()
 	e, root, _ := pruneBundle(t)
 	wt := filepath.Join(root, "a", "feat")
 	out, errs, code := e.run(t, "prune")
@@ -105,6 +106,7 @@ func TestPruneJSON(t *testing.T) {
 }
 
 func TestPruneReportsFetchFailures(t *testing.T) {
+	t.Parallel()
 	e, root, o := pruneBundle(t)
 	if err := os.RemoveAll(o.Path); err != nil {
 		t.Fatal(err)
@@ -163,6 +165,7 @@ func TestDoctor(t *testing.T) {
 }
 
 func TestDoctorOutsideABundle(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	out, _, code := runDeps(t, probeDeps(e, nil), "doctor")
 	if code != 1 || !strings.Contains(out, "OK    git ") || !strings.Contains(out, "FAIL  ") || !strings.Contains(out, "sheaf.yaml") {
@@ -191,6 +194,7 @@ func prBundle(t *testing.T) (*env, string) {
 }
 
 func TestWorktreePR(t *testing.T) {
+	t.Parallel()
 	e, root := prBundle(t)
 	out, errs, code := e.run(t, "wt", "pr", "a", "7")
 	if code != 0 || out != filepath.Join(root, "a", "pr-7")+"\n" || !strings.Contains(errs, "refs/pull/7/head") {

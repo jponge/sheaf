@@ -22,6 +22,7 @@ func (f *fixture) removeOpts(t *testing.T, name string, opts RemoveOptions) ([]E
 // B2: a repository nested in an ignored directory is only "ignored files"
 // for git status; remove must refuse to delete it without --force.
 func TestRemoveRefusesNestedCloneInIgnoredDir(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	writeFile(t, filepath.Join(primary, ".git", "info", "exclude"), "vendor/\n")
@@ -40,6 +41,7 @@ func TestRemoveRefusesNestedCloneInIgnoredDir(t *testing.T) {
 
 // A clean, fully pushed nested repository is shown but does not block.
 func TestRemoveCleanNestedRepoIsInformational(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	writeFile(t, filepath.Join(primary, ".git", "info", "exclude"), "vendor/\n")
@@ -54,6 +56,7 @@ func TestRemoveCleanNestedRepoIsInformational(t *testing.T) {
 }
 
 func TestRemoveRefusesNestedWorktreeOfAnotherRepo(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	other := filepath.Join(t.TempDir(), "other")
@@ -72,6 +75,7 @@ func TestRemoveRefusesNestedWorktreeOfAnotherRepo(t *testing.T) {
 
 // S2: no or several primary checkouts are hard problems, even with --force.
 func TestRemoveAmbiguousOrMissingPrimaryIsHard(t *testing.T) {
+	t.Parallel()
 	t.Run("several primaries", func(t *testing.T) {
 		f := newFixture(t)
 		primary, o := f.clonedRepo(t, "a")
@@ -122,6 +126,7 @@ func TestRemoveAmbiguousOrMissingPrimaryIsHard(t *testing.T) {
 
 // S3: anything done while Confirm is pending is checked again.
 func TestRemoveRechecksAfterConfirm(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	_, err := f.remove(t, "a", false, func(RemovePlan) bool {
@@ -139,6 +144,7 @@ func TestRemoveRechecksAfterConfirm(t *testing.T) {
 
 // S6: OS junk is not an unknown entry.
 func TestRemoveIgnoresOSJunk(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
 	for _, n := range []string{".DS_Store", "Thumbs.db", "desktop.ini"} {
@@ -153,6 +159,7 @@ func TestRemoveIgnoresOSJunk(t *testing.T) {
 // does not replace; --offline skips the fetch with a warning, but still
 // checks local data.
 func TestRemoveOffline(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	// An unreachable remote whose state is unknown (no transport for the

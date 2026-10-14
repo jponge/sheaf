@@ -36,6 +36,7 @@ func TestR10DoctorUsesDepsProbe(t *testing.T) {
 
 // NIT: the help names the minimum git version from gitx.
 func TestR10DoctorHelpNamesMinGitVersion(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	out := e.mustRun(t, "doctor", "--help")
 	if !strings.Contains(out, gitx.MinGitVersion.String()) {
@@ -45,6 +46,7 @@ func TestR10DoctorHelpNamesMinGitVersion(t *testing.T) {
 
 // NIT: pull request numbers are plain positive decimals.
 func TestR10WorktreePRNumberParsing(t *testing.T) {
+	t.Parallel()
 	e, _ := prBundle(t)
 	for _, n := range []string{"+7", "007", "#07", "0", "7x", "#"} {
 		if _, errs, code := e.run(t, "wt", "pr", "a", n); code == 0 || !strings.Contains(errs, "invalid pull request number") {
@@ -55,6 +57,7 @@ func TestR10WorktreePRNumberParsing(t *testing.T) {
 
 // S5: the dry run and JSON list non-blocking risks per candidate.
 func TestR10PruneListsNotes(t *testing.T) {
+	t.Parallel()
 	e, root, _ := pruneBundle(t)
 	primary := filepath.Join(root, "a", "main")
 	common := testutil.Git(t, primary, "rev-parse", "--path-format=absolute", "--git-common-dir")

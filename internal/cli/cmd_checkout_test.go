@@ -57,6 +57,7 @@ func coSeam[T any](t *testing.T, v *T, val T) {
 }
 
 func TestGitInteractiveDecision(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		tui      bool
 		jobs     int
@@ -77,6 +78,7 @@ func TestGitInteractiveDecision(t *testing.T) {
 
 // https://no-color.org: NO_COLOR disables color when set to a non-empty value.
 func TestUseColor(t *testing.T) {
+	t.Parallel()
 	if !useColor(true, "") {
 		t.Error("TTY without NO_COLOR: no color")
 	}
@@ -88,6 +90,7 @@ func TestUseColor(t *testing.T) {
 var coAnsi = regexp.MustCompile("\x1b\\[")
 
 func TestStatusTable(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	_, alpha := e.coAddRepo(t, "alpha", "feat")
 	e.coAddRepo(t, "beta")
@@ -155,6 +158,7 @@ func TestStatusColor(t *testing.T) {
 }
 
 func TestStatusDetachedAndNoUpstream(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	_, alpha := e.coAddRepo(t, "alpha")
 	testutil.Git(t, alpha, "worktree", "add", "-q", "--detach", filepath.Join(filepath.Dir(alpha), "det"), "HEAD")
@@ -240,6 +244,7 @@ func TestStatusJSON(t *testing.T) {
 }
 
 func TestStatusProblemsListedAndNonZero(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	_, alpha := e.coAddRepo(t, "alpha", "feat")
 	wt := coWorktree(t, alpha, "feat", "feat")
@@ -253,6 +258,7 @@ func TestStatusProblemsListedAndNonZero(t *testing.T) {
 }
 
 func TestFetchCommand(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	o, alpha := e.coAddRepo(t, "alpha")
 	e.coAddRepo(t, "beta")
@@ -267,6 +273,7 @@ func TestFetchCommand(t *testing.T) {
 }
 
 func TestUpdateCommand(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	o, alpha := e.coAddRepo(t, "alpha", "dirty")
 	dirty := coWorktree(t, alpha, "dirty", "dirty")
@@ -303,6 +310,7 @@ func TestUpdateCommand(t *testing.T) {
 }
 
 func TestUpdateCommandFailureExitsNonZero(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	_, alpha := e.coAddRepo(t, "alpha")
 	testutil.Git(t, alpha, "remote", "set-url", "origin", "file://"+filepath.Join(t.TempDir(), "missing.git"))
@@ -313,6 +321,7 @@ func TestUpdateCommandFailureExitsNonZero(t *testing.T) {
 }
 
 func TestRunCommandBlocksAndSummary(t *testing.T) {
+	t.Parallel()
 	e := coBundle(t)
 	_, alpha := e.coAddRepo(t, "alpha", "feat")
 	e.coAddRepo(t, "beta")
