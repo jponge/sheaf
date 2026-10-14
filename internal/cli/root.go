@@ -61,6 +61,7 @@ func NewRootCmdWithDeps(s Streams, d Deps) *cobra.Command {
 
 	root.AddCommand(newVersionCmd())
 	addBundleCommands(root, d)
+	installCompletions(root, d)
 	return root
 }
 

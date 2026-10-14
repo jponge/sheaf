@@ -114,3 +114,4 @@ The orchestrator appends one line per completed step: commit, review rounds, not
 - Step 10 review: B1 prune/wt rm -d deleted a branch being rebased (detached HEAD) — branches in use now include rebase/bisect state across worktrees. Orchestrator decision: prune lists but does not block on ignored files.
 - Decision 2026-10-14 (user): prune removes worktrees with ignored files (listed, not blocking) — 'when we prune, we prune'.
 - Step 7 — sync. Opus impl, Opus review x2: round 1 blocking (deleted remote + --offline hint → last copy deleted), mass-gone, alias-host duplicates; round 2: token-scope contradiction refusal, alias-only host matching. Verified in isolation.
+- Step 9 — completion + shell-init/scd. Sonnet impl, Opus review: no blocking; fixed bash escaping (pty-tested), --bundle forms, directives. zsh/fish not executable in sandbox (unverified). Verified in isolation.
