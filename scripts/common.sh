@@ -2,6 +2,10 @@
 # Shared helpers, sourced by the other scripts.
 
 IMAGE="${SHEAF_IMAGE:-sheaf-claude}"
+# Named volume holding the container's Claude Code state (login credentials, settings, history).
+# On macOS the host credentials live in the Keychain and cannot be mounted, so log in once with
+# /login inside the container; the login then persists in this volume across runs.
+STATE_VOLUME="${SHEAF_STATE_VOLUME:-sheaf-claude-home}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # Must match USER_UID/USER_GID in container/Containerfile.
@@ -34,10 +38,11 @@ build_run_args() {
     -v "${PROJECT_ROOT}:/workspace"
     -w /workspace
     -e TERM
+    # Keep .claude.json inside the persisted volume (by default it sits next to ~/.claude).
+    -e CLAUDE_CONFIG_DIR=/home/dev/.claude
+    -v "${STATE_VOLUME}:/home/dev/.claude"
   )
-  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-    PODMAN_RUN_ARGS+=(-e ANTHROPIC_API_KEY)
-  fi
+  # ANTHROPIC_API_KEY is deliberately not forwarded: it would override the subscription login.
   if [[ "${WITH_GLOBAL_INSTRUCTIONS:-1}" == "1" && -f "${HOME}/.claude/CLAUDE.md" ]]; then
     PODMAN_RUN_ARGS+=(-v "${HOME}/.claude/CLAUDE.md:/home/dev/.claude/CLAUDE.md:ro")
   fi
