@@ -2,6 +2,8 @@ package gitx
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jponge/sheaf/internal/testutil"
@@ -150,10 +152,105 @@ func TestRiskKindString(t *testing.T) {
 		RiskDetachedCommits:       "commits only on detached HEAD",
 		RiskTagOnlyCommits:        "commits only reachable from local tags",
 		RiskIgnoredFiles:          "ignored files",
+		RiskHiddenModifications:   "hidden modifications (skip-worktree or assume-unchanged files)",
 		RiskKind(0):               "RiskKind(0)",
 	} {
 		if got := k.String(); got != want {
 			t.Errorf("String(%d) = %q, want %q", int(k), got, want)
+		}
+	}
+}
+
+// Review 2, item 5: tags are normally fetched from origin; a commit reachable
+// only from such a tag must not make a fresh clone unsafe to delete.
+func TestDeletionRisksFetchedTagOnlyCommitIsInformational(t *testing.T) {
+	o := testutil.NewOrigin(t, testutil.OriginOpts{})
+	w := filepath.Join(t.TempDir(), "w")
+	testutil.Git(t, filepath.Dir(w), "clone", "-q", o.Path, w)
+	testutil.Git(t, w, "checkout", "-q", "--detach")
+	testutil.CommitFile(t, w, "v.txt", "1.0\n", "release 1.0")
+	testutil.Git(t, w, "tag", "v1.0")
+	testutil.Git(t, w, "push", "-q", "origin", "v1.0")
+	dir := filepath.Join(t.TempDir(), "c")
+	if err := Clone(context.Background(), o.URL, dir, ""); err != nil {
+		t.Fatal(err)
+	}
+	r := mustRisks(t, dir)
+	wantRisks(t, r, map[RiskKind]int{RiskTagOnlyCommits: 1})
+	if !r[0].Informational() || !SafeToDelete(r) || !SafeToRemoveWorktree(r) {
+		t.Fatalf("tag-only commits must be informational: %v", r)
+	}
+}
+
+// Review 2, item 6: modifications of files flagged skip-worktree or
+// assume-unchanged are hidden from status but lost on deletion.
+func TestDeletionRisksHiddenModifications(t *testing.T) {
+	_, dir := cloneOrigin(t, testutil.OriginOpts{Commits: 3})
+	// A tracked symlink and a file in a subdirectory, pushed.
+	if err := os.Symlink("file-1.txt", filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	testutil.CommitFile(t, dir, "sub/s.txt", "s\n", "sub + link")
+	testutil.Git(t, dir, "add", "link")
+	testutil.Git(t, dir, "commit", "-q", "-m", "link")
+	testutil.Git(t, dir, "push", "-q", "origin", "main")
+
+	// Flagged but unmodified, or absent (sparse checkout): no risk.
+	testutil.Git(t, dir, "update-index", "--skip-worktree", "file-1.txt", "file-3.txt")
+	testutil.Git(t, dir, "update-index", "--assume-unchanged", "file-2.txt", "link", "sub/s.txt")
+	if err := os.Remove(filepath.Join(dir, "file-3.txt")); err != nil {
+		t.Fatal(err)
+	}
+	r := mustRisks(t, dir)
+	wantRisks(t, r, nil)
+
+	writeFile(t, dir, "file-1.txt", "precious local config\n")   // skip-worktree
+	writeFile(t, dir, "file-2.txt", "precious local config 2\n") // assume-unchanged
+	if st := mustStatus(t, dir); st.Dirty() {
+		t.Fatal("precondition: status sees the flagged modifications")
+	}
+	wantRisks(t, mustRisks(t, dir), map[RiskKind]int{RiskHiddenModifications: 2})
+
+	if err := os.Remove(filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("file-2.txt", filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "sub"), "s.txt", "changed\n")
+	// Seen from a subdirectory, the whole work tree is checked.
+	r = mustRisks(t, filepath.Join(dir, "sub"))
+	wantRisks(t, r, map[RiskKind]int{RiskHiddenModifications: 4})
+	if SafeToDelete(r) || SafeToRemoveWorktree(r) {
+		t.Fatalf("hidden modifications must block: %v", r)
+	}
+}
+
+// Review 2, item 8: risk scope.
+func TestRiskScopeAndSafeToRemoveWorktree(t *testing.T) {
+	repoWide := map[RiskKind]bool{
+		RiskStaged: false, RiskUnstaged: false, RiskConflicted: false, RiskUntracked: false,
+		RiskStash: true, RiskUnpushedBranchCommits: true, RiskDetachedCommits: false,
+		RiskTagOnlyCommits: true, RiskIgnoredFiles: false, RiskHiddenModifications: false,
+	}
+	for k, want := range repoWide {
+		if got := k.RepositoryWide(); got != want {
+			t.Errorf("%v.RepositoryWide() = %v, want %v", k, got, want)
+		}
+	}
+	repoOnly := []Risk{{RiskStash, 1}, {RiskUnpushedBranchCommits, 2}, {RiskTagOnlyCommits, 1}, {RiskIgnoredFiles, 3}}
+	if !SafeToRemoveWorktree(repoOnly) {
+		t.Errorf("SafeToRemoveWorktree(%v) = false", repoOnly)
+	}
+	if SafeToDelete(repoOnly) {
+		t.Errorf("SafeToDelete(%v) = true", repoOnly)
+	}
+	if !SafeToRemoveWorktree(nil) {
+		t.Error("SafeToRemoveWorktree(nil) = false")
+	}
+	for _, k := range []RiskKind{RiskStaged, RiskUnstaged, RiskConflicted, RiskUntracked, RiskDetachedCommits, RiskHiddenModifications} {
+		if rs := append([]Risk{{k, 1}}, repoOnly...); SafeToRemoveWorktree(rs) {
+			t.Errorf("SafeToRemoveWorktree(%v) = true", rs)
 		}
 	}
 }

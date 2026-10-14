@@ -331,3 +331,50 @@ func TestWorktreeAddReportsUpstream(t *testing.T) {
 		t.Errorf("new branch upstream = %q", res.Upstream)
 	}
 }
+
+// Review 2, item 4: the cleanup after a failed `worktree add -b` deletes the
+// branch only if this call created it and it still points at the start point.
+func TestCleanupCreatedBranchSparesBranchesItDidNotCreate(t *testing.T) {
+	_, repo, primary := layout(t, testutil.OriginOpts{})
+	ctx := context.Background()
+	start := testutil.Git(t, primary, "rev-parse", "origin/main")
+	testutil.CommitFile(t, primary, "w.txt", "w\n", "precious work")
+	other := head(t, primary)
+	testutil.Git(t, primary, "reset", "-q", "--hard", start)
+	refOf := func(b string) string {
+		return testutil.Git(t, primary, "for-each-ref", "--format=%(objectname)", "refs/heads/"+b)
+	}
+
+	// The branch already existed (created by someone else between WorktreeAdd's
+	// check and the add): git refuses, the branch must survive, wherever it points.
+	for _, at := range []string{other, start} {
+		testutil.Git(t, primary, "branch", "-f", "foreign", at)
+		_, addErr := Run(ctx, primary, "worktree", "add", "--quiet", "--no-track", "-b", "foreign", "--", filepath.Join(repo, "f"), start)
+		if addErr == nil {
+			t.Fatal("precondition: worktree add -b on an existing branch succeeded")
+		}
+		cleanupCreatedBranch(ctx, primary, "foreign", start, addErr)
+		if got := refOf("foreign"); got != at {
+			t.Errorf("existing branch at %s: after cleanup it is %q", at[:7], got)
+		}
+	}
+
+	genericErr := &GitError{Args: []string{"worktree", "add"}, Dir: primary, ExitCode: 128,
+		Stderr: "fatal: could not create directory of '/x': Permission denied", Err: errors.New("exit status 128")}
+	// Created by this call but moved since: not ours to delete any more.
+	testutil.Git(t, primary, "branch", "moved", other)
+	cleanupCreatedBranch(ctx, primary, "moved", start, genericErr)
+	if got := refOf("moved"); got != other {
+		t.Errorf("moved branch: after cleanup it is %q", got)
+	}
+	// Created by this call, untouched: deleted.
+	testutil.Git(t, primary, "branch", "ours", start)
+	cleanupCreatedBranch(ctx, primary, "ours", start, genericErr)
+	wantNoBranch(t, primary, "ours")
+	// At the start point but checked out in a worktree: never deleted.
+	mustAdd(t, primary, filepath.Join(repo, "busy"), "busy", WorktreeAddOpts{Base: start}, WorktreeNewBranch)
+	cleanupCreatedBranch(ctx, primary, "busy", start, genericErr)
+	if got := refOf("busy"); got != start {
+		t.Errorf("checked-out branch: after cleanup it is %q", got)
+	}
+}

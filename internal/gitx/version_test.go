@@ -68,3 +68,12 @@ func TestVersionAndCheckVersionWithInstalledGit(t *testing.T) {
 		t.Fatalf("CheckVersion = %v, %v (installed git %v must satisfy the minimum for this test suite)", got, err, v)
 	}
 }
+
+// Review 2, NIT: CheckVersion must not depend on TMPDIR pointing to an
+// existing directory.
+func TestCheckVersionWithMissingTMPDIR(t *testing.T) {
+	t.Setenv("TMPDIR", "/nonexistent-sheaf-test-dir")
+	if _, err := CheckVersion(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}

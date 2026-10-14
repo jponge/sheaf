@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -40,9 +42,17 @@ func (e *GitError) Unwrap() error { return e.Err }
 // waitDelay bounds how long Run waits after cancellation before escalating
 // to SIGKILL (see Run), and how long it waits for I/O after git was killed (a
 // grandchild may keep the output pipes open).
-const waitDelay = 5 * time.Second
+//
+// It is a variable only so that tests can shorten it; it must not be changed
+// while git commands are running.
+var waitDelay = 5 * time.Second
 
 // Run executes git with args in dir and returns its raw standard output.
+//
+// If git exits 0 but a process it spawned keeps standard output or error
+// open (e.g. a hook that starts `sleep 60 &`), Run stops waiting for the
+// output waitDelay after git exited and reports success with the output read
+// so far, unless ctx is done.
 //
 // dir must not be empty. The child environment is os.Environ() minus the
 // variables that redirect git to another repository (see strippedEnv), with
@@ -73,12 +83,20 @@ func Run(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = childEnv(os.Environ())
-	cmd.WaitDelay = waitDelay
+	delay := waitDelay
+	cmd.WaitDelay = delay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	pg := startGroup(cmd)
+	pg := startGroup(cmd, delay)
 	err := cmd.Run()
 	pg.finish()
+	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() && ctx.Err() == nil {
+		// git exited 0, but a process it spawned (typically a hook running
+		// something in the background) kept stdout or stderr open past
+		// waitDelay. The git operation itself succeeded; the output captured
+		// until the pipes were closed is kept.
+		err = nil
+	}
 	if err != nil {
 		ge := &GitError{Args: args, Dir: dir, ExitCode: -1, Stderr: strings.TrimSpace(stderr.String()), Err: err}
 		var ee *exec.ExitError
@@ -132,4 +150,32 @@ func childEnv(environ []string) []string {
 		out = append(out, kv)
 	}
 	return append(out, forcedEnv...)
+}
+
+// staleLockRE matches git's message for a lock file that already exists, e.g.
+// "fatal: Unable to create '/r/.git/index.lock': File exists." or "error:
+// cannot lock ref 'refs/remotes/origin/main': Unable to create
+// '/r/.git/refs/remotes/origin/main.lock': File exists.".
+var staleLockRE = regexp.MustCompile(`(?m)Unable to create '(.+\.lock)': File exists\.`)
+
+// StaleLockPath reports whether err (or an error it wraps) is a *GitError
+// caused by a lock file that already existed, and returns that file's path.
+// Such a lock is either held by a concurrent git process or left behind by
+// one that was killed (git removes its locks on SIGTERM, but not on SIGKILL
+// or a crash); gitx cannot tell which, so callers should report the path
+// rather than delete it. A relative path is resolved against GitError.Dir.
+func StaleLockPath(err error) (string, bool) {
+	var ge *GitError
+	if !errors.As(err, &ge) {
+		return "", false
+	}
+	m := staleLockRE.FindStringSubmatch(ge.Stderr)
+	if m == nil {
+		return "", false
+	}
+	p := m[1]
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(ge.Dir, p)
+	}
+	return p, true
 }

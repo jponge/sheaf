@@ -3,6 +3,8 @@ package gitx
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -133,6 +135,41 @@ func TestStrippedEnvCoversGitLocalEnvVars(t *testing.T) {
 	for v := range strings.FieldsSeq(out) {
 		if !keep[v] && !strippedEnv[v] {
 			t.Errorf("%s is listed by git rev-parse --local-env-vars but not stripped", v)
+		}
+	}
+}
+
+// Review 2, item 7: a stale lock file (e.g. left by a killed fetch) is
+// recognized and its path exposed.
+func TestStaleLockPath(t *testing.T) {
+	o, dir := cloneOrigin(t, testutil.OriginOpts{})
+	ctx := context.Background()
+
+	refLock := filepath.Join(dir, ".git", "refs", "remotes", "origin", "main.lock")
+	writeFile(t, filepath.Dir(refLock), "main.lock", "")
+	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
+	err := Fetch(ctx, dir)
+	if err == nil {
+		t.Fatal("precondition: Fetch succeeded despite a ref lock")
+	}
+	if p, ok := StaleLockPath(fmt.Errorf("wrapped: %w", err)); !ok || p != refLock {
+		t.Errorf("StaleLockPath(fetch error) = %q, %v; want %q (err: %v)", p, ok, refLock, err)
+	}
+	if err := os.Remove(refLock); err != nil {
+		t.Fatal(err)
+	}
+
+	indexLock := filepath.Join(dir, ".git", "index.lock")
+	writeFile(t, filepath.Dir(indexLock), "index.lock", "")
+	_, err = Run(ctx, dir, "commit", "--allow-empty", "-q", "-m", "x")
+	if p, ok := StaleLockPath(err); !ok || p != indexLock {
+		t.Errorf("StaleLockPath(commit error) = %q, %v; want %q (err: %v)", p, ok, indexLock, err)
+	}
+
+	_, other := Run(ctx, dir, "rev-parse", "--verify", "no-such-ref")
+	for _, e := range []error{nil, errors.New("Unable to create '/x.lock': File exists."), other} {
+		if p, ok := StaleLockPath(e); ok {
+			t.Errorf("StaleLockPath(%v) = %q, true", e, p)
 		}
 	}
 }

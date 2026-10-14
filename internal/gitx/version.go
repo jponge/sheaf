@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -69,9 +70,15 @@ func ParseVersion(out string) (GitVersion, error) {
 	return GitVersion{nums[0], nums[1], nums[2]}, nil
 }
 
-// Version returns the version of the git found on PATH.
+// Version returns the version of the git found on PATH. git runs in
+// os.TempDir() when that is an existing directory, else in the root
+// directory, so a stale TMPDIR does not make it fail.
 func Version(ctx context.Context) (GitVersion, error) {
-	out, err := Run(ctx, os.TempDir(), "version")
+	dir := os.TempDir()
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		dir = string(filepath.Separator)
+	}
+	out, err := Run(ctx, dir, "version")
 	if err != nil {
 		return GitVersion{}, err
 	}

@@ -150,8 +150,9 @@ var ErrWorktreePathOccupied = errors.New("gitx: worktree path exists and is not 
 //     (--no-track), so a later pull never merges the base into it.
 //
 // If git fails after this call created the branch, the branch is deleted
-// again (best effort, with a fresh short-lived context if ctx is done). The
-// result is only meaningful when err is nil.
+// again if it still points at its start point and is not checked out (see
+// cleanupCreatedBranch); a branch that appeared concurrently is never
+// deleted. The result is only meaningful when err is nil.
 func WorktreeAdd(ctx context.Context, repoDir, path, branch string, opts WorktreeAddOpts) (WorktreeAddResult, error) {
 	if branch == "" {
 		return WorktreeAddResult{}, errors.New("gitx: worktree add: empty branch name")
@@ -170,9 +171,19 @@ func WorktreeAdd(ctx context.Context, repoDir, path, branch string, opts Worktre
 	if err != nil {
 		return WorktreeAddResult{}, err
 	}
+	startOID := ""
+	if !local {
+		// The start point is the last argument; resolve it now so that the
+		// cleanup below only removes a branch still pointing at it.
+		out, err := Run(ctx, repoDir, "rev-parse", "--verify", "--end-of-options", args[len(args)-1]+"^{commit}")
+		if err != nil {
+			return WorktreeAddResult{}, err
+		}
+		startOID = strings.TrimSpace(out)
+	}
 	if _, err := Run(ctx, repoDir, append([]string{"worktree", "add", "--quiet"}, args...)...); err != nil {
 		if !local {
-			deleteCreatedBranch(ctx, repoDir, branch)
+			cleanupCreatedBranch(ctx, repoDir, branch, startOID, err)
 		}
 		return WorktreeAddResult{}, err
 	}
@@ -235,15 +246,37 @@ func checkWorktreeTarget(repoDir, path string) error {
 	return nil
 }
 
-// deleteCreatedBranch removes a branch that a failed `git worktree add -b`
-// created. git branch -D refuses a branch checked out in some worktree, so a
-// branch that is in use is never removed.
-func deleteCreatedBranch(ctx context.Context, repoDir, branch string) {
+// cleanupCreatedBranch removes the branch that a failed `git worktree add -b`
+// created from startOID (best effort, with a fresh short-lived context if ctx
+// is done). It removes nothing when:
+//
+//   - addErr says the branch already existed (it was created by someone else
+//     after WorktreeAdd checked for it);
+//   - the branch is checked out in some worktree;
+//   - the branch no longer points at startOID (it was moved since, so it may
+//     hold someone's commits); the deletion is a compare-and-swap
+//     (`git update-ref -d <ref> <startOID>`), so this holds even against a
+//     concurrent update.
+func cleanupCreatedBranch(ctx context.Context, repoDir, branch, startOID string, addErr error) {
+	if startOID == "" {
+		return
+	}
+	var ge *GitError
+	if errors.As(addErr, &ge) && strings.Contains(ge.Stderr, "a branch named '"+branch+"' already exists") {
+		return
+	}
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rereadTimeout)
 	defer cancel()
-	if ok, err := refExists(cctx, repoDir, "refs/heads/"+branch); err == nil && ok {
-		_, _ = Run(cctx, repoDir, "branch", "--quiet", "-D", "--", branch)
+	wts, err := WorktreeList(cctx, repoDir)
+	if err != nil {
+		return
 	}
+	for _, wt := range wts {
+		if wt.Branch == branch {
+			return
+		}
+	}
+	_, _ = Run(cctx, repoDir, "update-ref", "-d", "refs/heads/"+branch, startOID)
 }
 
 // refExists reports whether the fully qualified ref exists.

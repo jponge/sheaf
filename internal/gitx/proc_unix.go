@@ -13,7 +13,8 @@ import (
 
 // procGroup tracks the process group of one git invocation (see Run).
 type procGroup struct {
-	cmd *exec.Cmd
+	cmd   *exec.Cmd
+	delay time.Duration // waitDelay at start
 
 	mu       sync.Mutex
 	pgid     int       // set when Cancel sent SIGTERM
@@ -21,9 +22,10 @@ type procGroup struct {
 }
 
 // startGroup makes cmd start in a new session and replaces its Cancel
-// function so that cancellation signals the whole process group.
-func startGroup(cmd *exec.Cmd) *procGroup {
-	pg := &procGroup{cmd: cmd}
+// function so that cancellation signals the whole process group. delay is the
+// grace period between SIGTERM and SIGKILL (see finish).
+func startGroup(cmd *exec.Cmd, delay time.Duration) *procGroup {
+	pg := &procGroup{cmd: cmd, delay: delay}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Cancel = func() error {
 		pid := cmd.Process.Pid // session leader: pgid == pid
@@ -43,7 +45,7 @@ func startGroup(cmd *exec.Cmd) *procGroup {
 
 // finish runs after cmd.Wait returned. If the group was cancelled and some
 // member outlived the leader (e.g. ssh or a filter ignoring SIGTERM), it
-// waits until waitDelay has elapsed since SIGTERM, then sends SIGKILL to the
+// waits until pg.delay has elapsed since SIGTERM, then sends SIGKILL to the
 // group.
 //
 // While a group has members its id cannot be reused, so probing it with
@@ -56,7 +58,7 @@ func (pg *procGroup) finish() {
 	if pgid == 0 {
 		return
 	}
-	deadline := signaled.Add(waitDelay)
+	deadline := signaled.Add(pg.delay)
 	for syscall.Kill(-pgid, 0) == nil {
 		if time.Now().After(deadline) {
 			_ = syscall.Kill(-pgid, syscall.SIGKILL)
