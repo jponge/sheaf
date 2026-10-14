@@ -11,7 +11,7 @@ import (
 // process on cancellation.
 type procGroup struct{ cmd *exec.Cmd }
 
-func startGroup(cmd *exec.Cmd, _ time.Duration) *procGroup { return &procGroup{cmd: cmd} }
+func startGroup(cmd *exec.Cmd, _ time.Duration, _ bool) *procGroup { return &procGroup{cmd: cmd} }
 
 // kill kills the git process (only) and reports whether it succeeded.
 func (pg *procGroup) kill() bool { return pg.cmd.Process.Kill() == nil }

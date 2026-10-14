@@ -21,9 +21,10 @@ import (
 // CommonDir) and fetch once per repository, then call FastForward on each
 // worktree, which may run in parallel. Fetch is cancellable at any point
 // through ctx; a fetch killed with SIGKILL may leave a ref lock behind (see
-// StaleLockPath).
+// StaleLockPath). Under a context made by WithInteractive, git keeps the
+// caller's controlling terminal.
 func Fetch(ctx context.Context, dir string) error {
-	_, err := Run(ctx, dir, "fetch", "--quiet", "--prune", "origin")
+	_, err := run(ctx, netOpts(ctx), dir, "fetch", "--quiet", "--prune", "origin")
 	return err
 }
 
@@ -98,6 +99,11 @@ type FastForwardOptions struct {
 	// behind (see StaleLockPath), and the work tree may be half-written.
 	// Closing Force after the merge has finished has no effect.
 	Force <-chan struct{}
+	// OnMergeStart, when non-nil, is called (synchronously, in the calling
+	// goroutine) right before the merge starts, i.e. once the pre-checks
+	// passed and the work tree is about to be updated; it is not called when
+	// FastForward returns without merging.
+	OnMergeStart func()
 }
 
 // DefaultMergeTimeout is the bound on the merge of FastForward and
@@ -150,7 +156,8 @@ func PullFFOnlyWithOptions(ctx context.Context, dir string, opts FastForwardOpti
 // PullFailed with the files untouched.
 //
 // Cancellation: ctx is honoured only before the merge starts (the Status
-// pre-check). Once started, the merge runs to completion on a context
+// pre-check, and a last check right before the merge, which then returns
+// PullFailed with Err matching ctx.Err() and HEAD untouched). Once started, the merge runs to completion on a context
 // detached from ctx's cancellation and bounded by DefaultMergeTimeout (10
 // minutes) instead, because interrupting the checkout of a fast-forward
 // leaves the work tree and index half-updated, which then looks like local
@@ -188,13 +195,23 @@ func FastForwardWithOptions(ctx context.Context, dir string, opts FastForwardOpt
 	if !ok {
 		return r
 	}
+	if afterPreCheckHook != nil {
+		afterPreCheckHook()
+	}
 	old := r.Old
+	if err := ctx.Err(); err != nil {
+		// Cancelled after the pre-checks: the merge is not started.
+		return PullResult{Outcome: PullFailed, Old: old, New: old, Err: err}
+	}
 	timeout := opts.MergeTimeout
 	if timeout <= 0 {
 		timeout = mergeTimeout
 	}
 	mctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
+	if opts.OnMergeStart != nil {
+		opts.OnMergeStart()
+	}
 	_, mergeErr := run(mctx, runOpts{force: opts.Force}, dir, "merge", "--quiet", "--ff-only", "--no-autostash", "@{upstream}")
 	// From here on, ctx's cancellation is ignored (see above).
 	rctx, rcancel := context.WithTimeout(context.WithoutCancel(ctx), rereadTimeout)
@@ -265,6 +282,10 @@ func preCheck(ctx context.Context, dir string, withAheadBehind bool) (PullResult
 	return PullResult{Old: old}, true
 }
 
+// afterPreCheckHook, when set by a test, runs in FastForward right after the
+// pre-checks passed.
+var afterPreCheckHook func()
+
 // afterMergeHook, when set by a test, runs right after a successful merge in
 // FastForward, before HEAD is re-read.
 var afterMergeHook func()
@@ -274,6 +295,6 @@ var afterMergeHook func()
 // whose remote branch no longer exists. Like Fetch, callers serialize it per
 // repository. It is cancellable through ctx.
 func FetchAll(ctx context.Context, dir string) error {
-	_, err := Run(ctx, dir, "fetch", "--quiet", "--prune", "--all")
+	_, err := run(ctx, netOpts(ctx), dir, "fetch", "--quiet", "--prune", "--all")
 	return err
 }

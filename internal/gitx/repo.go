@@ -27,7 +27,7 @@ func Clone(ctx context.Context, url, dest, branch string) error {
 		args = append(args, "--branch", branch)
 	}
 	args = append(args, "--", url, abs)
-	_, err = Run(ctx, parent, args...)
+	_, err = run(ctx, netOpts(ctx), parent, args...)
 	return err
 }
 
@@ -46,7 +46,7 @@ func DefaultBranch(ctx context.Context, repoDir string) (string, error) {
 	if b, err := localDefaultBranch(ctx, repoDir); err == nil {
 		return b, nil
 	}
-	out, err := Run(ctx, repoDir, "ls-remote", "--symref", "origin", "HEAD")
+	out, err := run(ctx, netOpts(ctx), repoDir, "ls-remote", "--symref", "origin", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrNoDefaultBranch, err)
 	}

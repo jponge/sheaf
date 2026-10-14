@@ -185,6 +185,7 @@ func sshFakeClone(t *testing.T, body string) string {
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
 	fake := filepath.Join(t.TempDir(), "fake-ssh")
 	writeScript(t, fake, body)
+	checkNoSurvivors(t, fake)
 	testutil.Git(t, dir, "config", "remote.origin.url", "ssh://sheaf-test.invalid/repo.git")
 	testutil.Git(t, dir, "config", "ssh.variant", "ssh")
 	t.Setenv("GIT_SSH_COMMAND", fake)

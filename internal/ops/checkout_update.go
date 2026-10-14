@@ -1,0 +1,285 @@
+package ops
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/jponge/sheaf/internal/gitx"
+)
+
+// UpdateOptions configures Update.
+type UpdateOptions struct {
+	Filter CheckoutFilter
+	// Jobs bounds the repositories updated in parallel; the checkouts of one
+	// repository are updated one after the other, after its single fetch.
+	Jobs int
+	// Force, when closed, kills the fast-forward merges in progress at once
+	// (see gitx.FastForwardOptions.Force); the CLI closes it on a second
+	// Ctrl-C.
+	Force <-chan struct{}
+	// MergeTimeout bounds each merge (zero: gitx.DefaultMergeTimeout).
+	MergeTimeout time.Duration
+}
+
+// CheckoutUpdate is the outcome of Update for one checkout.
+type CheckoutUpdate struct {
+	Checkout
+	Outcome  gitx.PullOutcome
+	Old, New string // HEAD before and after (see gitx.PullResult)
+	// Reason explains skips and failures for humans: the dirty counts, a
+	// missing or gone upstream, divergence, a failed fetch, an interruption.
+	Reason string
+	Err    error // set iff Outcome is gitx.PullFailed
+	// UntrackedInTheWay lists the untracked files that git refused to
+	// overwrite; the checkout then counts as skipped (Outcome stays
+	// gitx.PullFailed, Err holds git's full message).
+	UntrackedInTheWay []string
+}
+
+// UpdateReport is the result of Update.
+type UpdateReport struct {
+	Checkouts []CheckoutUpdate // sorted like ListCheckouts
+	Problems  []Problem
+}
+
+// coInflight tracks the checkouts whose fast-forward is running, to report
+// PhaseWaitFastForward when the context is cancelled.
+type coInflight struct {
+	mu        sync.Mutex
+	cancelled bool
+	running   map[Checkout]bool
+	report    func(Event)
+}
+
+// start registers c, whose merge is starting (it runs to completion even if
+// the context is cancelled); if the cancellation was already reported, the
+// waiting event for c is reported at once.
+func (f *coInflight) start(c Checkout) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.running[c] = true
+	if f.cancelled {
+		f.reportWait(c)
+	}
+}
+
+func (f *coInflight) reportWait(c Checkout) {
+	f.report(Event{Repo: c.Repo, Worktree: c.Dir, Phase: PhaseWaitFastForward, Kind: KindProgress,
+		Message: "waiting for the in-progress fast-forward to finish"})
+}
+
+func (f *coInflight) end(c Checkout) {
+	f.mu.Lock()
+	delete(f.running, c)
+	f.mu.Unlock()
+}
+
+func (f *coInflight) onCancel() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancelled = true
+	for c := range f.running {
+		f.reportWait(c)
+	}
+}
+
+// Update fetches origin once per selected repository, then fast-forwards
+// each of its checkouts (primary, then worktrees) to its upstream with
+// gitx.FastForwardWithOptions: checkouts that are dirty (staged, unstaged or
+// conflicted changes; untracked files do not count), detached, without
+// upstream or whose upstream is gone, or diverged are skipped with a Reason.
+// Up to Jobs repositories are processed in parallel.
+//
+// Cancellation of ctx stops fetches and prevents any further checkout from
+// starting (they are reported as failed with ctx's error, "not started"),
+// but a fast-forward merge already running completes (see gitx.FastForward);
+// a PhaseWaitFastForward event is reported for each. Closing opts.Force
+// kills those merges.
+//
+// Events: fetch start/done/failed per repository, and one KindDone,
+// KindSkipped or KindFailed PhaseUpdate event per checkout (Worktree set to
+// its directory name). The error is only set for an invalid filter.
+func Update(ctx context.Context, w *Workspace, opts UpdateOptions, rep Reporter) (UpdateReport, error) {
+	sets, probs, err := coEnumerate(ctx, w, opts.Filter, opts.Jobs)
+	if err != nil {
+		return UpdateReport{}, err
+	}
+	report := coSerialize(rep)
+	fl := &coInflight{running: map[Checkout]bool{}, report: report}
+	stop := context.AfterFunc(ctx, fl.onCancel)
+	defer stop()
+	results := make([][]CheckoutUpdate, len(sets))
+	coForEach(opts.Jobs, len(sets), func(i int) {
+		results[i] = coUpdateRepo(ctx, sets[i], opts, report, fl)
+	})
+	var out []CheckoutUpdate
+	for _, r := range results {
+		out = append(out, r...)
+	}
+	coSortProblems(probs)
+	return UpdateReport{Checkouts: out, Problems: probs}, nil
+}
+
+func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, report func(Event), fl *coInflight) []CheckoutUpdate {
+	out := make([]CheckoutUpdate, 0, len(s.checkouts))
+	emit := func(u CheckoutUpdate) {
+		e := Event{Repo: u.Repo, Worktree: u.Dir, Phase: PhaseUpdate, Message: u.Reason}
+		switch {
+		case u.Outcome == gitx.PullFailed:
+			e.Kind, e.Err = KindFailed, u.Err
+		case u.Skipped():
+			e.Kind = KindSkipped
+		default:
+			e.Kind = KindDone
+			if e.Message == "" {
+				e.Message = u.Outcome.String()
+			}
+		}
+		report(e)
+		out = append(out, u)
+	}
+	notStarted := func(c Checkout, err error) CheckoutUpdate {
+		return CheckoutUpdate{Checkout: c, Outcome: gitx.PullFailed, Reason: "not started (interrupted)", Err: err}
+	}
+	if err := ctx.Err(); err != nil {
+		for _, c := range s.checkouts {
+			emit(notStarted(c, err))
+		}
+		return out
+	}
+	report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindStart})
+	if err := coFetchRepo(ctx, s.primary); err != nil {
+		report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindFailed, Err: err})
+		reason := "fetch failed"
+		if ctx.Err() != nil {
+			reason = "fetch interrupted"
+		}
+		for _, c := range s.checkouts {
+			emit(CheckoutUpdate{Checkout: c, Outcome: gitx.PullFailed, Reason: reason, Err: err})
+		}
+		return out
+	}
+	report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindDone, Message: "fetched origin"})
+	ffo := gitx.FastForwardOptions{MergeTimeout: opts.MergeTimeout, Force: opts.Force}
+	for _, c := range s.checkouts {
+		if err := ctx.Err(); err != nil {
+			emit(notStarted(c, err))
+			continue
+		}
+		o := ffo
+		started := false
+		o.OnMergeStart = func() { started = true; fl.start(c) }
+		r := gitx.FastForwardWithOptions(ctx, c.Path, o)
+		fl.end(c)
+		u := coClassifyUpdate(ctx, c, r)
+		if !started && u.Outcome == gitx.PullFailed && ctx.Err() != nil && errors.Is(r.Err, ctx.Err()) {
+			u.Reason = "not started (interrupted)"
+		}
+		emit(u)
+	}
+	return out
+}
+
+// Skipped reports whether the checkout was left alone on purpose (dirty,
+// detached, no or gone upstream, diverged, untracked files in the way).
+func (u CheckoutUpdate) Skipped() bool {
+	if len(u.UntrackedInTheWay) > 0 {
+		return true
+	}
+	switch u.Outcome {
+	case gitx.PullSkippedDirty, gitx.PullSkippedNoUpstream, gitx.PullSkippedDiverged, gitx.PullSkippedDetached:
+		return true
+	}
+	return false
+}
+
+// coUntrackedInTheWay extracts the files of git's "untracked working tree
+// files would be overwritten by merge" error (one tab-indented path per
+// line), or returns nil.
+func coUntrackedInTheWay(err error) []string {
+	var ge *gitx.GitError
+	if !errors.As(err, &ge) {
+		return nil
+	}
+	_, rest, ok := strings.Cut(ge.Stderr, "untracked working tree files would be overwritten by merge:")
+	if !ok {
+		return nil
+	}
+	var files []string
+	for _, l := range strings.Split(rest, "\n") {
+		if strings.HasPrefix(l, "\t") {
+			files = append(files, strings.TrimSpace(l))
+		} else if len(files) > 0 {
+			break
+		}
+	}
+	return files
+}
+
+func coShortID(id string) string {
+	if len(id) > 10 {
+		return id[:10]
+	}
+	return id
+}
+
+// coClassifyUpdate turns a pull result into a CheckoutUpdate with a Reason. For
+// skips it re-reads the status (ignoring ctx's cancellation, bounded) to give
+// the counts and the upstream.
+func coClassifyUpdate(ctx context.Context, c Checkout, r gitx.PullResult) CheckoutUpdate {
+	u := CheckoutUpdate{Checkout: c, Outcome: r.Outcome, Old: r.Old, New: r.New, Err: r.Err}
+	st := func() *gitx.RepoStatus {
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		s, err := gitx.Status(sctx, c.Path)
+		if err != nil {
+			return nil
+		}
+		return s
+	}
+	switch r.Outcome {
+	case gitx.PullFastForwarded:
+		u.Reason = coShortID(r.Old) + ".." + coShortID(r.New)
+	case gitx.PullUpToDate:
+		u.Reason = "up to date"
+	case gitx.PullSkippedDetached:
+		u.Reason = "detached HEAD"
+	case gitx.PullSkippedDirty:
+		u.Reason = "uncommitted changes"
+		if s := st(); s != nil {
+			u.Reason = fmt.Sprintf("uncommitted changes (%d staged, %d unstaged", s.Staged, s.Unstaged)
+			if s.Conflicted > 0 {
+				u.Reason += fmt.Sprintf(", %d conflicted", s.Conflicted)
+			}
+			u.Reason += ")"
+		}
+		u.Reason += ": commit or stash them, then update again"
+	case gitx.PullSkippedNoUpstream:
+		u.Reason = "no upstream branch configured"
+		if s := st(); s != nil && s.Upstream != "" && s.UpstreamGone {
+			u.Reason = "upstream " + s.Upstream + " is gone (deleted on the remote)"
+		}
+	case gitx.PullSkippedDiverged:
+		u.Reason = "diverged from its upstream: merge or rebase manually"
+		if s := st(); s != nil && s.Upstream != "" {
+			u.Reason = fmt.Sprintf("diverged from %s (%d ahead, %d behind): merge or rebase manually", s.Upstream, s.Ahead, s.Behind)
+		}
+	case gitx.PullFailed:
+		if files := coUntrackedInTheWay(r.Err); len(files) > 0 {
+			u.UntrackedInTheWay = files
+			u.Reason = "untracked files in the way: " + strings.Join(files, ", ") + " (move or remove them, then update again)"
+			break
+		}
+		switch {
+		case errors.Is(r.Err, gitx.ErrForceKilled):
+			u.Reason = "fast-forward killed on request; check the work tree (a .git/index.lock may be left behind)"
+		case ctx.Err() != nil && errors.Is(r.Err, ctx.Err()):
+			u.Reason = "interrupted"
+		}
+	}
+	return u
+}

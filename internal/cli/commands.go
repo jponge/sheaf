@@ -111,7 +111,7 @@ func newInitCmd(d Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			s := ops.AdoptAll(c.Context(), w, paths, ops.AdoptOptions{}, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
+			s := ops.AdoptAll(checkoutContext(c), w, paths, ops.AdoptOptions{}, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
 			return printSummary(out, s)
 		},
 	}
@@ -138,7 +138,7 @@ func newAddCmd(d Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			s, err := ops.Add(c.Context(), w, d.hosting(), req, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
+			s, err := ops.Add(checkoutContext(c), w, d.hosting(), req, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
 			if err != nil {
 				return err
 			}
@@ -179,7 +179,7 @@ func newAdoptCmd(d Deps) *cobra.Command {
 				}
 				dirs = append(dirs, p)
 			}
-			s := ops.AdoptAll(c.Context(), w, dirs, opts, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
+			s := ops.AdoptAll(checkoutContext(c), w, dirs, opts, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
 			return printSummary(c.OutOrStdout(), s)
 		},
 	}
@@ -234,7 +234,7 @@ func newRemoveCmd(d Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			msg, err := ops.Remove(c.Context(), w, name, ops.RemoveOptions{Force: force, Offline: offline, Confirm: confirm, WorkingDir: wd}, emit)
+			msg, err := ops.Remove(checkoutContext(c), w, name, ops.RemoveOptions{Force: force, Offline: offline, Confirm: confirm, WorkingDir: wd}, emit)
 			if errors.Is(err, ops.ErrNotConfirmed) {
 				return fmt.Errorf("removing %s needs confirmation: pass --yes (sheaf never prompts in CLI mode)", name)
 			}

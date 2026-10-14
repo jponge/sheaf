@@ -99,6 +99,9 @@ type runOpts struct {
 	// process group immediately (no SIGTERM grace period, so git cannot remove
 	// its lock files); the error then wraps ErrForceKilled.
 	force <-chan struct{}
+	// interactive keeps the caller's session and controlling terminal (see
+	// WithInteractive).
+	interactive bool
 }
 
 func run(ctx context.Context, o runOpts, dir string, args ...string) (string, error) {
@@ -107,12 +110,16 @@ func run(ctx context.Context, o runOpts, dir string, args ...string) (string, er
 	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
-	cmd.Env = childEnv(os.Environ())
+	if o.interactive {
+		cmd.Env = interactiveEnv(os.Environ())
+	} else {
+		cmd.Env = childEnv(os.Environ())
+	}
 	delay := waitDelay
 	cmd.WaitDelay = delay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = o.stdin, &stdout, &stderr
-	pg := startGroup(cmd, delay)
+	pg := startGroup(cmd, delay, !o.interactive)
 	var forced atomic.Bool
 	// Start under the read side of the gate: KillAll (write side) then sees
 	// every started process registered, and no process starts after it.
