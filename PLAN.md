@@ -6,7 +6,7 @@ Status: approved 2026-10-14. Source of requirements: `goals.md`.
 
 | Topic | Decision |
 |---|---|
-| Dependencies | `spf13/cobra`, `charmbracelet/bubbletea`, `bubbles`, `lipgloss`, `gopkg.in/yaml.v3`. Tests: stdlib `testing` only. Nothing else without asking. |
+| Dependencies | `spf13/cobra`, `charmbracelet/bubbletea`, `bubbles`, `lipgloss`, `go.yaml.in/yaml/v3` (maintained successor of gopkg.in/yaml.v3, approved 2026-10-14). Tests: stdlib `testing` only. Nothing else without asking. |
 | Module / Go | `github.com/jponge/sheaf`, Go 1.27 |
 | Repo directory | `<bundle>/<repo>/`; a name clash across owners is an error unless `--as <dir>` is given |
 | Primary checkout | `<bundle>/<repo>/<default-branch-normalized>/` |
@@ -84,3 +84,4 @@ Model per step: **O** = Opus, **S** = Sonnet. Every step goes through implement 
 The orchestrator appends one line per completed step: commit, review rounds, notable findings.
 
 - Step 0 — scaffold. Sonnet impl, Opus review: 1 blocking (inherited GIT_* env leaked into fixtures, proven by writing into a victim repo), fixed with regression test; -j validation, locale pinning, AdvanceOrigin added. Note for step 2: gitx must also strip GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE etc. from child env.
+- Step 1 — bundle. Sonnet impl, Opus review: 0 blocking, 6 should-fix fixed (case-insensitive collisions, trailing YAML docs rejected, default_branch/url required, strict repo-name charset + reserved sheaf.yaml, slug-before-name duplicate check, O_EXCL Create). Switched to go.yaml.in/yaml/v3. Open: RemoveSource still case-sensitive (revisit in step 7).
