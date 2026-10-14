@@ -1,0 +1,12 @@
+# Go build outputs
+/sheaf
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store

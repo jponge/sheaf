@@ -1,0 +1,38 @@
+FROM docker.io/library/golang:1.27.2-trixie
+
+ARG GOLANGCI_LINT_VERSION=v2.14.0
+ARG GOPLS_VERSION=v0.23.0
+ARG DELVE_VERSION=v1.27.2
+ARG GORELEASER_VERSION=v2.18.3
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      bash ca-certificates curl gh git jq less make openssh-client procps ripgrep unzip \
+ && rm -rf /var/lib/apt/lists/*
+
+# Go tooling, installed system-wide so it does not depend on the user's GOPATH.
+RUN curl -fsSL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
+      | sh -s -- -b /usr/local/bin "${GOLANGCI_LINT_VERSION}" \
+ && GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@${GOPLS_VERSION} \
+ && GOBIN=/usr/local/bin go install github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION} \
+ && GOBIN=/usr/local/bin go install github.com/goreleaser/goreleaser/v2@${GORELEASER_VERSION} \
+ && go clean -cache -modcache
+
+RUN groupadd --gid "${USER_GID}" dev \
+ && useradd --uid "${USER_UID}" --gid "${USER_GID}" --create-home --shell /bin/bash dev \
+ && mkdir -p /workspace /home/dev/.claude /home/dev/go \
+ && chown -R dev:dev /workspace /home/dev
+
+USER dev
+ENV HOME=/home/dev \
+    PATH=/home/dev/.local/bin:/home/dev/go/bin:/usr/local/go/bin:/go/bin:${PATH} \
+    GOPATH=/home/dev/go \
+    DISABLE_AUTOUPDATER=1
+
+# Claude Code native installer (the method recommended by the Claude Code docs).
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+WORKDIR /workspace
+CMD ["bash"]
