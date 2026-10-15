@@ -159,7 +159,7 @@ func TestRemoveRetriesRegistrationAfterCancel(t *testing.T) {
 		if strings.HasPrefix(e.Message, "deleting ") {
 			deleted = true
 		}
-		if deleted && strings.Contains(e.Message, "waiting for sheaf.yaml.lock") {
+		if deleted && strings.Contains(e.Message, "waiting for .sheaf.lock") {
 			cancel()
 			go release()
 		}

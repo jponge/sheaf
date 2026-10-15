@@ -60,7 +60,7 @@ func TestUpdateWaitsForLockAndReports(t *testing.T) {
 		done <- f.w.updateCtx(context.Background(), log.emit, func(b *bundle.Bundle) error { return b.AddSource("o") })
 	}()
 	deadline := time.Now().Add(5 * time.Second)
-	for !log.has("waiting for sheaf.yaml.lock") {
+	for !log.has("waiting for .sheaf.lock") {
 		if time.Now().After(deadline) {
 			t.Fatal("no waiting event")
 		}
@@ -106,7 +106,7 @@ func TestAdoptRollsBackWhenRegistrationCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	_, err := Adopt(ctx, f.w, dir, AdoptOptions{}, func(e Event) {
-		if strings.Contains(e.Message, "waiting for sheaf.yaml.lock") {
+		if strings.Contains(e.Message, "waiting for .sheaf.lock") {
 			cancel()
 		}
 	})
@@ -120,4 +120,18 @@ func TestAdoptRollsBackWhenRegistrationCancelled(t *testing.T) {
 		t.Fatal("x/main left behind")
 	}
 	noLeftovers(t, f.w.Root)
+}
+
+func TestUpdateUsesHiddenLockFile(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	if err := f.w.updateCtx(context.Background(), func(Event) {}, func(b *bundle.Bundle) error { return b.AddSource("o") }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(f.w.Root, ".sheaf.lock")); err != nil {
+		t.Fatalf("lock file .sheaf.lock: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(f.w.Root, "sheaf.yaml.lock")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy lock file sheaf.yaml.lock must not be created (stat err = %v)", err)
+	}
 }

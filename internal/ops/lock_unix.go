@@ -13,7 +13,7 @@ import (
 
 // lockFileName is the lock file serializing sheaf.yaml updates between
 // processes.
-const lockFileName = "sheaf.yaml.lock"
+const lockFileName = ".sheaf.lock" // kept on disk: deleting it on unlock would race with waiting processes
 
 // Lock polling: interval between attempts, and delay before waiting is
 // reported.
@@ -22,7 +22,7 @@ const (
 	lockNotify = 500 * time.Millisecond
 )
 
-// lockBundle takes an exclusive flock(2) on <root>/sheaf.yaml.lock and
+// lockBundle takes an exclusive flock(2) on <root>/.sheaf.lock and
 // returns the function releasing it. While another process holds it, it
 // retries every lockPoll, calls waiting once after lockNotify, and gives up
 // with ctx.Err() when ctx is done. The file is left in place (removing it

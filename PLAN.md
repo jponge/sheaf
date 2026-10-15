@@ -163,3 +163,4 @@ What to do differently
 - gh verified 2026-10-15 (user): `gh api user --jq .login` → login; `gh repo list <me> --fork --json name,owner,parent,url,sshUrl,isFork` gives parent {name, owner.login} (no URL); non-fork parent=null. Fixtures saved for step 12.
 - Decision 2026-10-15 (user): rename the bundle lock file sheaf.yaml.lock → .sheaf.lock (kept on disk by design: flock; deleting on unlock is racy). To do right after step 11 (avoids editing ops concurrently with the step 11 agent).
 - Step 11 — tag worktrees + clearer --base errors. Opus impl (restarted after an accidental stop; inherited tests mutation-checked), Opus review: no blocking; fixed moved-tag display, fetch-output tolerance, ref-like --tag, footgun for unfetched tags, local-branch suggestions.
+- Lock file renamed to .sheaf.lock (test-first).

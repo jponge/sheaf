@@ -11,4 +11,4 @@ func lockBundle(context.Context, string, func()) (func(), error) { return func()
 
 // lockFileName is the name of the Unix lock file; it only appears in
 // messages here, since no lock is taken.
-const lockFileName = "sheaf.yaml.lock"
+const lockFileName = ".sheaf.lock"
