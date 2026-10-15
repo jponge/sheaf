@@ -153,3 +153,10 @@ What to do differently
 - macOS: 15 failures were test expectations using unresolved temp paths (no product bug); force-kill delay attributed to a fork racing the group SIGKILL (macOS reasoning unverified), fixed with straggler re-kill; added make test-symlinked-tmp. Takeaway: a step-0 portability finding (N5) was dropped and no non-Linux check existed.
 - Test speed-up: package-level isolation (testutil.Main), t.Parallel where safe (ops 186/210, gitx 113/148, cli 96/142), cached NewOrigin fixtures, sheaf binary built once per cli test process. Full suite ~27 s → ~11 s plain, ~28 s → ~14 s -race (Linux, 5 CPUs). Floors: gitx cancel/deadline tests (~8 s), cli pty completion driver with fixed windows (~6 s).
 - macOS (user, git 2.56.0): full suite green plain and -race at 4b00fa1. Timings plain: ops 31.4 s (was 72.9), gitx 27.3 s, cli 11.7 s; -race: ops 35.5, gitx 32.3, cli 15.7. macOS ~3x slower than the Linux sandbox.
+
+## Follow-up features (decided 2026-10-15)
+
+| # | Feature | Decisions |
+|---|---|---|
+| 11 | Tag worktrees | `sheaf wt add [<repo>] --tag <tag>`: fetch tags, detached worktree at the tag in `<repo>/<normalized tag>/` (same namespace as branch dirs, collision-checked). update reports it as pinned and never moves it; prune never removes it; status/list/path/completion know the tag. `wt add <name>` where `<name>` is a tag but not a branch is refused with a hint to use `--tag` (fixes today's footgun of silently creating a branch named like the tag). |
+| 12 | Fork-aware repositories | origin = your fork, upstream = reference repository. sheaf.yaml keeps the reference slug (sync/org/wt pr use it) and records the fork. update fetches both remotes; the default branch tracks upstream/<default>; new worktrees start from upstream/<default>; merged/gone/unpushed/remote-gone checks consider both remotes. Auto-detected on `add` (single and --org, one gh listing of your forks; `--no-fork` opts out) and recognised on `adopt` (existing origin+upstream remotes). sheaf never creates forks. Repos without a fork keep today's single-origin behaviour. |
