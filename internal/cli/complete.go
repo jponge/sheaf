@@ -76,6 +76,9 @@ func installCompletionsReport(root *cobra.Command, d Deps) []string {
 	argsOf([]string{"remove"}, k.positional(k.repoOnly))
 	argsOf([]string{"worktree", "list"}, k.positional(k.repoOnly))
 	argsOf([]string{"worktree", "add"}, k.positional(func(c *cobra.Command, args []string) []string {
+		if c.Flags().Changed("tag") { // the only positional argument is the repository
+			return k.repoOnly(c, args)
+		}
 		switch len(args) {
 		case 0:
 			return append(k.repos(c), k.branchesToAdd(c, "")...)
@@ -124,6 +127,13 @@ func installCompletionsReport(root *cobra.Command, d Deps) []string {
 	flagOf([]string{"path"}, "dir", selector(kindDir, false))
 	flagOf([]string{"worktree", "remove"}, "branch", selector(kindBranch, true))
 	flagOf([]string{"worktree", "remove"}, "dir", selector(kindDir, true))
+	flagOf([]string{"worktree", "add"}, "tag", k.flag(func(c *cobra.Command, args []string) []string {
+		repo := ""
+		if len(args) > 0 {
+			repo = args[0]
+		}
+		return k.tagsToAdd(c, repo)
+	}))
 	for _, p := range [][]string{{"add"}, {"sync"}} {
 		flagOf(p, "org", k.flag(func(c *cobra.Command, _ []string) []string { return k.orgs(c) }))
 	}
@@ -249,6 +259,9 @@ func (k completer) worktrees(c *cobra.Command, repoArg string, excludePrimary bo
 		if kind != kindDir && in.Branch != "" {
 			names = append(names, in.Branch)
 		}
+		if kind == kindAny && in.Tag != "" {
+			names = append(names, in.Tag)
+		}
 	}
 	slices.Sort(names)
 	return names
@@ -289,6 +302,35 @@ func (k completer) branchesToAdd(c *cobra.Command, repoArg string) []string {
 		}
 		if b != "" && b != "HEAD" && !taken[b] {
 			names = append(names, b)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// tagsToAdd returns the local tags of the repository (see listing; no
+// fetch) that no worktree is pinned to, for `worktree add --tag`.
+func (k completer) tagsToAdd(c *cobra.Command, repoArg string) []string {
+	w, _, infos := k.listing(c, repoArg)
+	if w == nil || len(infos) == 0 || !infos[0].Primary {
+		return nil
+	}
+	taken := map[string]bool{}
+	for _, in := range infos {
+		if in.Tag != "" {
+			taken[in.Tag] = true
+		}
+	}
+	ctx, cancel := completionContext(c)
+	defer cancel()
+	out, err := gitx.Run(ctx, infos[0].Path, "for-each-ref", "--format=%(refname)", "refs/tags")
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, ref := range strings.Split(out, "\n") {
+		if t, ok := strings.CutPrefix(ref, "refs/tags/"); ok && t != "" && !taken[t] {
+			names = append(names, t)
 		}
 	}
 	slices.Sort(names)

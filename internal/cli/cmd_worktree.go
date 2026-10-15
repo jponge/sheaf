@@ -87,19 +87,50 @@ func selectorFlags(cmd *cobra.Command) func() (*ops.WorktreeTarget, error) {
 
 func newWorktreeAddCmd(d Deps) *cobra.Command {
 	var opts ops.WorktreeAddOptions
+	var tag string
 	cmd := &cobra.Command{
-		Use:   "add [<repo>] <branch>",
-		Short: "Create a worktree for a branch and print its path",
+		Use:   "add [<repo>] <branch> | add [<repo>] --tag <tag>",
+		Short: "Create a worktree for a branch or a tag and print its path",
 		Long: "Create <bundle>/<repo>/<normalized branch>/ for branch: the local branch if it\n" +
 			"exists, else a local branch tracking origin/<branch>, else a new branch from --base\n" +
 			"(default origin/<default branch>). origin is fetched first unless --no-fetch.\n" +
+			"A base that does not exist is reported with the closest remote branches and tags.\n" +
+			"A name that is only a tag (no local or origin branch; origin's tags are fetched\n" +
+			"for this check unless --no-fetch) is refused: use --tag. So a new branch named\n" +
+			"exactly like an existing tag cannot be created with wt add (use git directly).\n\n" +
+			"With --tag, create <bundle>/<repo>/<normalized tag>/ with a detached HEAD at the\n" +
+			"tag's commit, pinned to the tag: update never moves it, prune never removes it.\n" +
+			"origin's tags are fetched first unless --no-fetch. Local tags are never deleted\n" +
+			"nor overwritten: a local tag that differs from origin's is kept, with a warning\n" +
+			"(and used, if it is the requested one). The only positional argument is then\n" +
+			"the repository.\n\n" +
 			"The path is printed on stdout (cd \"$(sheaf wt add feat/x)\"); progress goes to stderr.\n\n" +
 			singleArgHelp,
-		Args: cobra.RangeArgs(1, 2),
+		Args: func(c *cobra.Command, args []string) error {
+			if c.Flags().Changed("tag") {
+				if len(args) > 1 {
+					return fmt.Errorf("with --tag, expected at most 1 argument (the repository), got %d", len(args))
+				}
+				return nil
+			}
+			return cobra.RangeArgs(1, 2)(c, args)
+		},
 		RunE: func(c *cobra.Command, args []string) error {
 			w, err := openWorkspace(c, d)
 			if err != nil {
 				return err
+			}
+			if c.Flags().Changed("tag") {
+				repo, target, err := repoAndTarget(d, w, args, &ops.WorktreeTarget{Name: tag}, "--tag")
+				if err != nil {
+					return err
+				}
+				res, err := ops.AddTagWorktree(c.Context(), w, repo, target.Name, opts, eventSink(c, repo, ops.PhaseWorktree))
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(c.OutOrStdout(), res.Path)
+				return nil
 			}
 			repo, branch, err := repoAndTarget(d, w, args, nil, "<branch>")
 			if err != nil {
@@ -115,6 +146,7 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.Base, "base", "", "start point of a new branch (default: origin/<default branch>)")
 	cmd.Flags().BoolVar(&opts.NoFetch, "no-fetch", false, "do not fetch origin first")
+	cmd.Flags().StringVar(&tag, "tag", "", "create a detached worktree pinned at this tag instead of a branch worktree")
 	return cmd
 }
 
@@ -136,8 +168,10 @@ func newWorktreeListCmd(d Deps) *cobra.Command {
 		Use:     "list [<repo>]",
 		Aliases: []string{"ls"},
 		Short:   "List the checkouts and worktrees of the bundle (or of one repository)",
-		Long: "List every checkout of the bundle, or of <repo>: repository, directory, branch,\n" +
-			"flags (primary, off-default, detached, locked, prunable, outside) and path. Ordered\n" +
+		Long: "List every checkout of the bundle, or of <repo>: repository, directory, branch\n" +
+			"(\"(tag <tag>)\" for a worktree pinned at a tag, \"(tag <tag>, moved to <commit>)\"\n" +
+			"once its HEAD left the tag's commit), flags (primary, off-default,\n" +
+			"detached, tag, locked, prunable, outside) and path. Ordered\n" +
 			"by repository, primary first, then by directory. --porcelain prints the paths only\n" +
 			"(-z: NUL-terminated); --json prints {\"version\": 1, \"worktrees\": [...], \"errors\": [...]}.\n" +
 			"Repositories that cannot be listed are reported and make the exit status 1.",
@@ -192,7 +226,14 @@ func newWorktreeListCmd(d Deps) *cobra.Command {
 					if dir == "" {
 						dir = "-"
 					}
-					if branch == "" {
+					switch {
+					case branch == "" && in.Tag != "":
+						moved := ""
+						if in.TagMoved {
+							moved = in.Head
+						}
+						branch = tagLabel(in.Tag, moved)
+					case branch == "":
 						branch = "(detached " + shortHead(in.Head) + ")"
 					}
 					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", in.Repo, dir, branch, worktreeFlags(in), in.Path)
@@ -235,6 +276,9 @@ func worktreeFlags(in ops.WorktreeInfo) string {
 	if in.Detached {
 		f = append(f, "detached")
 	}
+	if in.Tag != "" {
+		f = append(f, "tag")
+	}
 	if in.Locked {
 		f = append(f, "locked")
 	}
@@ -257,12 +301,14 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 		Use:     "remove [<repo>] [<branch-or-dir>]",
 		Aliases: []string{"rm"},
 		Short:   "Remove a worktree (and optionally its branch)",
-		Long: "Remove a linked worktree, named by its branch or its directory (--branch or --dir\n" +
-			"select explicitly when a name is both). origin is fetched first (unless --offline);\n" +
+		Long: "Remove a linked worktree, named by its branch (or tag, for a worktree pinned at a\n" +
+			"tag) or its directory (--branch or --dir select explicitly when a name is both).\n" +
+			"origin is fetched first (unless --offline);\n" +
 			"uncommitted changes, untracked files or commits only on a detached HEAD refuse the\n" +
 			"removal unless --force (like git worktree remove --force). -d deletes the local\n" +
 			"branch too, only if merged into its upstream or origin/<default branch>; -D deletes\n" +
-			"it even if unmerged (like git branch -d/-D). The primary checkout cannot be removed\n" +
+			"it even if unmerged (like git branch -d/-D); neither applies to a tag worktree (the\n" +
+			"tag is always kept). The primary checkout cannot be removed\n" +
 			"(use `sheaf remove`). In CLI mode the removal must be confirmed with --yes; in TUI\n" +
 			"mode a dialog shows the plan and asks for confirmation, unless --yes is given.\n\n" +
 			singleArgHelp,
@@ -345,6 +391,9 @@ func worktreeRemovePlanLines(p ops.WorktreeRemovePlan, force bool) []string {
 }
 
 func branchLabel(in ops.WorktreeInfo) string {
+	if in.Branch == "" && in.Tag != "" {
+		return "tag " + in.Tag
+	}
 	if in.Branch == "" {
 		return "detached"
 	}
@@ -363,7 +412,8 @@ func newPathCmd(d Deps) *cobra.Command {
 		Use:   "path [<repo>] [<branch-or-dir>]",
 		Short: "Print the path of the bundle, a repository's primary checkout or a worktree",
 		Long: "Without arguments print the bundle root; with <repo> (or --repo) its primary\n" +
-			"checkout; with <repo> <branch-or-dir> (or --dir/--branch) that worktree.\n\n" +
+			"checkout; with <repo> <branch-or-dir> (or --dir/--branch) that worktree. A worktree\n" +
+			"pinned at a tag is also named by its tag.\n\n" +
 			"With one argument inside a checkout of a repository, it names a worktree of that\n" +
 			"repository if there is one, else a repository; when it names both, use --dir or\n" +
 			"--branch for the worktree, or --repo for the repository. Outside any checkout it\n" +
@@ -455,4 +505,13 @@ func parsePRNumber(arg string) (int, error) {
 		return 0, fmt.Errorf("invalid pull request number %q", arg)
 	}
 	return n, nil
+}
+
+// tagLabel is the branch column of a worktree pinned at tag: "(tag X)", or
+// "(tag X, moved to <short>)" when its HEAD movedTo another commit.
+func tagLabel(tag, movedTo string) string {
+	if movedTo != "" {
+		return "(tag " + tag + ", moved to " + shortHead(movedTo) + ")"
+	}
+	return "(tag " + tag + ")"
 }

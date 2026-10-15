@@ -38,6 +38,10 @@ type CheckoutUpdate struct {
 	// overwrite; the checkout then counts as skipped (Outcome stays
 	// gitx.PullFailed, Err holds git's full message).
 	UntrackedInTheWay []string
+	// Pinned is set for a worktree pinned at a tag (Checkout.Tag): it is never
+	// moved, Reason says "pinned at tag <tag>", and it is neither a failure
+	// nor a skip (Skipped returns false).
+	Pinned bool
 }
 
 // UpdateReport is the result of Update.
@@ -92,6 +96,8 @@ func (f *coInflight) onCancel() {
 // gitx.FastForwardWithOptions: checkouts that are dirty (staged, unstaged or
 // conflicted changes; untracked files do not count), detached, without
 // upstream or whose upstream is gone, or diverged are skipped with a Reason.
+// Worktrees pinned at a tag are never touched: they are reported as Pinned
+// (KindSkipped event, "pinned at tag <tag>"), which Skipped does not count.
 // Up to Jobs repositories are processed in parallel.
 //
 // Cancellation of ctx stops fetches and prevents any further checkout from
@@ -131,7 +137,7 @@ func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, r
 		switch {
 		case u.Outcome == gitx.PullFailed:
 			e.Kind, e.Err = KindFailed, u.Err
-		case u.Skipped():
+		case u.Skipped() || u.Pinned:
 			e.Kind = KindSkipped
 		default:
 			e.Kind = KindDone
@@ -145,9 +151,26 @@ func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, r
 	notStarted := func(c Checkout, err error) CheckoutUpdate {
 		return CheckoutUpdate{Checkout: c, Outcome: gitx.PullFailed, Reason: "not started (interrupted)", Err: err}
 	}
+	// A worktree pinned at a tag is never moved, so neither a failed fetch
+	// nor an interruption concerns it. Once its HEAD moved away from the
+	// tag's commit, it is reported like any detached worktree (skipped).
+	pinned := func(c Checkout) bool {
+		switch {
+		case c.Tag == "":
+			return false
+		case c.TagMovedTo != "":
+			emit(CheckoutUpdate{Checkout: c, Outcome: gitx.PullSkippedDetached,
+				Reason: "detached (was pinned at tag " + c.Tag + "; moved to " + coShortID(c.TagMovedTo) + ")"})
+		default:
+			emit(CheckoutUpdate{Checkout: c, Outcome: gitx.PullSkippedDetached, Pinned: true, Reason: "pinned at tag " + c.Tag})
+		}
+		return true
+	}
 	if err := ctx.Err(); err != nil {
 		for _, c := range s.checkouts {
-			emit(notStarted(c, err))
+			if !pinned(c) {
+				emit(notStarted(c, err))
+			}
 		}
 		return out
 	}
@@ -159,13 +182,18 @@ func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, r
 			reason = "fetch interrupted"
 		}
 		for _, c := range s.checkouts {
-			emit(CheckoutUpdate{Checkout: c, Outcome: gitx.PullFailed, Reason: reason, Err: err})
+			if !pinned(c) {
+				emit(CheckoutUpdate{Checkout: c, Outcome: gitx.PullFailed, Reason: reason, Err: err})
+			}
 		}
 		return out
 	}
 	report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindDone, Message: "fetched origin"})
 	ffo := gitx.FastForwardOptions{MergeTimeout: opts.MergeTimeout, Force: opts.Force}
 	for _, c := range s.checkouts {
+		if pinned(c) {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			emit(notStarted(c, err))
 			continue
@@ -187,6 +215,9 @@ func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, r
 // Skipped reports whether the checkout was left alone on purpose (dirty,
 // detached, no or gone upstream, diverged, untracked files in the way).
 func (u CheckoutUpdate) Skipped() bool {
+	if u.Pinned {
+		return false
+	}
 	if len(u.UntrackedInTheWay) > 0 {
 		return true
 	}

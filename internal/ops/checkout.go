@@ -42,6 +42,12 @@ type Checkout struct {
 	// Outside is true for a linked worktree that is not a sibling of the
 	// primary (not directly in <bundle>/<repo>/); it is processed anyway.
 	Outside bool
+	// Tag is the tag a worktree created by `wt add --tag` is pinned to
+	// (Detached is then true); see WorktreeInfo.Tag.
+	Tag string
+	// TagMovedTo is HEAD when a worktree pinned at Tag is no longer at the
+	// commit it was created at (see gitx.Worktree.TagMoved); empty otherwise.
+	TagMovedTo string
 }
 
 // Name returns "<repo>/<dir>", the way checkouts are shown to users.
@@ -229,7 +235,7 @@ func coListRepo(ctx context.Context, root string, r bundle.Repository, primaryOn
 			continue
 		}
 		linked = append(linked, Checkout{Repo: r.Name, Dir: filepath.Base(wt.Path), Path: wt.Path, Branch: wt.Branch, Detached: wt.Detached,
-			Outside: !coSameFile(filepath.Dir(wt.Path), repoDir)})
+			Outside: !coSameFile(filepath.Dir(wt.Path), repoDir), Tag: wt.Tag, TagMovedTo: tagMovedTo(wt)})
 	}
 	slices.SortFunc(linked, func(a, b Checkout) int {
 		return cmp.Or(strings.Compare(a.Dir, b.Dir), strings.Compare(a.Path, b.Path))
@@ -360,4 +366,13 @@ func FetchRepos(ctx context.Context, w *Workspace, opts FetchOptions, rep Report
 		}})
 	}
 	return Execute(ctx, opts.Jobs, tasks, rep), nil
+}
+
+// tagMovedTo returns HEAD of a worktree pinned at a tag whose HEAD moved,
+// "" otherwise.
+func tagMovedTo(wt gitx.Worktree) string {
+	if wt.Tag != "" && wt.TagMoved {
+		return wt.Head
+	}
+	return ""
 }

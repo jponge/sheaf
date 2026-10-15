@@ -59,6 +59,9 @@ type PruneCandidate struct {
 type PruneSkip struct {
 	Repo   string `json:"repo"`
 	Branch string `json:"branch"`
+	// Tag is set (and Branch empty) for a worktree pinned at a tag, which is
+	// never pruned.
+	Tag    string `json:"tag,omitempty"`
 	Path   string `json:"path,omitempty"`
 	Reason string `json:"reason"`
 }
@@ -98,8 +101,9 @@ type PrunePlan struct {
 // (whatever it is), detached worktrees, worktrees outside the repository
 // directory, locked or missing ones, and pull request branches set up by
 // AddPRWorktree (upstream refs/pull/<n>/head); gone or merged ones are listed
-// in PrunePlan.Skipped with the reason. The error is only set for an invalid
-// repository filter.
+// in PrunePlan.Skipped with the reason. Worktrees pinned at a tag
+// (AddTagWorktree) are never proposed and always listed in Skipped
+// (PruneSkip.Tag). The error is only set for an invalid repository filter.
 func PlanPrune(ctx context.Context, w *Workspace, opts PruneOptions, rep Reporter) (PrunePlan, error) {
 	repos, err := coSelectRepos(w.Bundle(), opts.Repos)
 	if err != nil {
@@ -244,6 +248,12 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 			cands = append(cands, c)
 		default:
 			skip("", "it has no worktree (pass --include-branches to delete such branches)")
+		}
+	}
+	for _, in := range infos {
+		if in.Tag != "" {
+			skips = append(skips, PruneSkip{Repo: r.Name, Tag: in.Tag, Path: in.Path,
+				Reason: "pinned at tag " + in.Tag + " (tag worktrees are never pruned; remove it with `sheaf wt rm`)"})
 		}
 	}
 	return cands, skips, probs

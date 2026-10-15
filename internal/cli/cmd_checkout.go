@@ -146,6 +146,8 @@ problems after the table, and the exit code is then 1.
             "dir": "main", "path": "/abs/path/repo/main", "primary": true,
             "outside": false,        // linked worktree not in <bundle>/<repo>/
             "branch": "main",        // "" when detached
+            "tag": "",               // the tag a worktree made by wt add --tag is pinned to
+            "tag_moved": false,      // its HEAD is no longer the tag's commit
             "detached": false, "unborn": false,
             "head": "<commit id>",   // "" when unborn
             "upstream": "origin/main", "upstream_gone": false,
@@ -224,6 +226,9 @@ func coWriteStatusTable(out io.Writer, r ops.StatusReport, color bool) {
 		if c.Detached {
 			branch = "(detached)"
 		}
+		if c.Tag != "" {
+			branch = tagLabel(c.Tag, c.TagMovedTo)
+		}
 		stashes := ""
 		if c.Err != nil {
 			// The state (last column) carries the error; the colored part is
@@ -233,7 +238,9 @@ func coWriteStatusTable(out io.Writer, r ops.StatusReport, color bool) {
 			continue
 		}
 		s := c.Status
-		if c.Detached {
+		if c.Tag != "" {
+			branch = tagLabel(c.Tag, c.TagMovedTo)
+		} else if c.Detached {
 			branch = "(detached " + coShortHead(s.Head) + ")"
 		} else if s.Unborn {
 			branch += " (unborn)"
@@ -272,6 +279,8 @@ type coJsonCheckout struct {
 	Outside      bool   `json:"outside"`
 	Branch       string `json:"branch"`
 	Detached     bool   `json:"detached"`
+	Tag          string `json:"tag"`
+	TagMoved     bool   `json:"tag_moved"`
 	Unborn       bool   `json:"unborn"`
 	Head         string `json:"head"`
 	Upstream     string `json:"upstream"`
@@ -314,7 +323,7 @@ func coWriteStatusJSON(out io.Writer, root string, r ops.StatusReport) error {
 			stashKnown = false
 		}
 		repo := &doc.Repositories[len(doc.Repositories)-1]
-		jc := coJsonCheckout{Dir: c.Dir, Path: c.Path, Primary: c.Primary, Outside: c.Outside, Branch: c.Branch, Detached: c.Detached}
+		jc := coJsonCheckout{Dir: c.Dir, Path: c.Path, Primary: c.Primary, Outside: c.Outside, Branch: c.Branch, Detached: c.Detached, Tag: c.Tag, TagMoved: c.TagMovedTo != ""}
 		if c.Err != nil {
 			jc.Error = c.Err.Error()
 		} else {
@@ -387,6 +396,9 @@ func newUpdateCmd(d Deps) *cobra.Command {
 			"then worktrees) to its upstream with `git merge --ff-only`. Checkouts are skipped,\n" +
 			"with the reason, when they have staged or unstaged changes (untracked files do not\n" +
 			"count), are detached, have no upstream or a deleted one, or have diverged.\n" +
+			"Worktrees pinned at a tag (wt add --tag) are never moved: they are reported as\n" +
+			"pinned, which is not a skip; once their HEAD left the tag's commit, they are\n" +
+			"skipped as detached.\n" +
 			"\n" +
 			"Exit code: 1 if any checkout failed or could not be inspected; skips are not failures\n" +
 			"unless --strict is given.\n" +
@@ -428,7 +440,7 @@ func newUpdateCmd(d Deps) *cobra.Command {
 
 func coPrintUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	var ff, upToDate, skipped, failed int
+	var ff, upToDate, pinned, skipped, failed int
 	var details []string
 	for _, u := range r.Checkouts {
 		var label string
@@ -440,6 +452,9 @@ func coPrintUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error 
 		case u.Outcome == gitx.PullUpToDate:
 			label, detail = "up to date", ""
 			upToDate++
+		case u.Pinned:
+			label = "pinned"
+			pinned++
 		case u.Skipped():
 			label = "skipped"
 			skipped++
@@ -463,7 +478,11 @@ func coPrintUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error 
 		fmt.Fprintln(out, d)
 	}
 	coWriteProblems(out, r.Problems, false)
-	fmt.Fprintf(out, "%d fast-forwarded, %d up to date, %d skipped, %d failed", ff, upToDate, skipped, failed)
+	fmt.Fprintf(out, "%d fast-forwarded, %d up to date, ", ff, upToDate)
+	if pinned > 0 {
+		fmt.Fprintf(out, "%d pinned, ", pinned)
+	}
+	fmt.Fprintf(out, "%d skipped, %d failed", skipped, failed)
 	if n := len(r.Problems); n > 0 {
 		fmt.Fprintf(out, ", %s", coPlural(n, "problem"))
 	}

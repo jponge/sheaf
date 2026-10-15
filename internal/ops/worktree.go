@@ -105,6 +105,13 @@ type WorktreeInfo struct {
 	Outside bool `json:"outside"`
 	// OffDefault is true for a primary checkout not on the default branch.
 	OffDefault bool `json:"off_default"`
+	// Tag is the tag a worktree created by `wt add --tag` is pinned to (see
+	// gitx.TagMarkerFile); empty for other checkouts. Such a worktree is
+	// Detached.
+	Tag string `json:"tag"`
+	// TagMoved is set when the worktree pinned at Tag has HEAD elsewhere than
+	// the commit it was created at (see gitx.Worktree.TagMoved).
+	TagMoved bool `json:"tag_moved"`
 }
 
 // ListWorktrees lists the checkouts of repo (resolved like ResolveRepo with
@@ -176,7 +183,7 @@ func listRepo(ctx context.Context, root string, r bundle.Repository) (infos []Wo
 		info := WorktreeInfo{
 			Repo: r.Name, Branch: wt.Branch, Path: p, Head: wt.Head, Primary: i == 0,
 			Detached: wt.Detached, Locked: wt.Locked, LockReason: wt.LockReason,
-			Prunable: wt.Prunable, PrunableReason: wt.PrunableReason,
+			Prunable: wt.Prunable, PrunableReason: wt.PrunableReason, Tag: wt.Tag, TagMoved: wt.TagMoved,
 		}
 		info.OffDefault = info.Primary && info.Branch != r.DefaultBranch
 		if rp := resolveExisting(p); filepath.Dir(rp) == repoDir && filepath.Dir(p) == repoDir {
@@ -220,8 +227,16 @@ func findWorktree(infos []WorktreeInfo, repo string, tgt WorktreeTarget) (Worktr
 	name := tgt.Name
 	useBranch, useDir := tgt.Kind != TargetDir, tgt.Kind != TargetBranch
 	byBranch, byDir := -1, -1
+	// A tag worktree is named by its tag like a branch worktree by its
+	// branch (TargetAny only; a checkout has a branch or a tag, not both).
+	refName := func(in WorktreeInfo) string {
+		if in.Branch == "" && tgt.Kind == TargetAny {
+			return in.Tag
+		}
+		return in.Branch
+	}
 	for i, in := range infos {
-		if useBranch && byBranch < 0 && in.Branch != "" && in.Branch == name {
+		if useBranch && byBranch < 0 && refName(in) != "" && refName(in) == name {
 			byBranch = i
 		}
 		if useDir && byDir < 0 && !in.Outside && in.Dir == name {
@@ -239,7 +254,7 @@ func findWorktree(infos []WorktreeInfo, repo string, tgt WorktreeTarget) (Worktr
 	}
 	found := -1
 	for i, in := range infos {
-		if useBranch && in.Branch != "" && strings.EqualFold(in.Branch, name) || useDir && !in.Outside && strings.EqualFold(in.Dir, name) {
+		if useBranch && refName(in) != "" && strings.EqualFold(refName(in), name) || useDir && !in.Outside && strings.EqualFold(in.Dir, name) {
 			if found >= 0 {
 				return WorktreeInfo{}, fmt.Errorf("%q is ambiguous in %s: it matches %s and %s; select one with --branch or --dir", name, repo, describe(infos[found]), describe(in))
 			}
@@ -271,6 +286,9 @@ func describe(in WorktreeInfo) string {
 	}
 	if in.Branch != "" {
 		return name + " [" + in.Branch + "]"
+	}
+	if in.Tag != "" {
+		return name + " [tag " + in.Tag + "]"
 	}
 	return name + " [detached]"
 }
@@ -329,6 +347,10 @@ type WorktreeAddResult struct {
 	Upstream string
 	// Base is the start point used, set for gitx.WorktreeNewBranch only.
 	Base string
+	// Tag is the tag of a worktree created by AddTagWorktree (Branch, Mode,
+	// Upstream and Base are then empty), and Head its commit.
+	Tag  string
+	Head string
 	// Warnings are also emitted as events.
 	Warnings []string
 }
@@ -391,6 +413,21 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 			}
 			return WorktreeAddResult{}, fmt.Errorf("fetching %s failed: %w\npass --no-fetch to create the worktree from the local state of the repository", r.Name, err)
 		}
+		// A new branch would be created: fetch origin's tags too (safely, see
+		// gitx.FetchTags), so that checkNotOnlyATag also sees tags that git's
+		// automatic tag following did not bring. Kept local tags do not matter
+		// here: the check only needs the names.
+		if newBranch, err := wouldCreateBranch(ctx, primary, branch); err != nil {
+			return WorktreeAddResult{}, err
+		} else if newBranch {
+			report(PhaseFetch, "fetching origin's tags")
+			if _, err := gitx.FetchTags(ctx, primary); err != nil {
+				if ctx.Err() != nil {
+					return WorktreeAddResult{}, ctx.Err()
+				}
+				return WorktreeAddResult{}, fmt.Errorf("fetching the tags of %s failed: %w\npass --no-fetch to create the worktree from the local state of the repository", r.Name, err)
+			}
+		}
 	}
 	// Serialize the check and the creation with other sheaf processes and
 	// tasks, so two adds whose directories collide cannot both succeed.
@@ -410,6 +447,9 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 	if err := checkAddTarget(infos, repoDir, branch, dir); err != nil {
 		return WorktreeAddResult{}, err
 	}
+	if err := checkNotOnlyATag(ctx, primary, branch); err != nil {
+		return WorktreeAddResult{}, err
+	}
 	if testHookAfterAddCheck != nil {
 		testHookAfterAddCheck()
 	}
@@ -426,6 +466,9 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 	if err != nil {
 		if ctx.Err() != nil {
 			return WorktreeAddResult{}, ctx.Err()
+		}
+		if errors.Is(err, gitx.ErrBaseNotFound) {
+			return WorktreeAddResult{}, baseNotFoundError(ctx, primary, r.Name, base, opts.NoFetch)
 		}
 		return WorktreeAddResult{}, fmt.Errorf("creating worktree %s: %w", path, err)
 	}
@@ -542,6 +585,9 @@ func checkAddTarget(infos []WorktreeInfo, repoDir, branch, dir string) error {
 		}
 		known[in.Dir] = true
 		if in.Branch == "" {
+			if strings.EqualFold(in.Dir, dir) && in.Tag != "" {
+				return fmt.Errorf("directory %s is used by the worktree pinned at tag %s", filepath.Join(repoDir, in.Dir), in.Tag)
+			}
 			if strings.EqualFold(in.Dir, dir) {
 				return fmt.Errorf("directory %s is used by a worktree with a detached HEAD", filepath.Join(repoDir, in.Dir))
 			}
@@ -726,6 +772,9 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 		return "", fmt.Errorf("%s (%s) is the primary checkout of %s and cannot be removed as a worktree; use `sheaf remove %s` to remove the repository", describe(wt), wt.Path, r.Name, r.Name)
 	}
 	deleteBr := opts.DeleteBranch || opts.ForceDeleteBranch
+	if deleteBr && wt.Tag != "" {
+		return "", fmt.Errorf("%s is pinned at tag %s: -d/-D do not apply (a tag worktree has no branch to delete, and the tag is kept)", describe(wt), wt.Tag)
+	}
 	wd := opts.WorkingDir
 	if wd == "" {
 		wd, _ = os.Getwd()

@@ -30,6 +30,13 @@ type Worktree struct {
 	// directory was moved or deleted); PrunableReason says why.
 	Prunable       bool
 	PrunableReason string
+	// Tag is the tag a detached worktree created by WorktreeAddTag is pinned
+	// to (read from its TagMarkerFile), empty otherwise.
+	Tag string
+	// TagMoved is set when HEAD is no longer the commit recorded when the
+	// worktree was pinned at Tag (a commit on the detached HEAD, or a checkout
+	// of another commit); Tag is kept.
+	TagMoved bool
 }
 
 // WorktreeList lists the worktrees of the repository containing repoDir; the
@@ -43,6 +50,7 @@ func WorktreeList(ctx context.Context, repoDir string) ([]Worktree, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gitx: worktree list in %s: %w", repoDir, err)
 	}
+	fillWorktreeTags(wts)
 	return wts, nil
 }
 
@@ -135,6 +143,10 @@ type WorktreeAddResult struct {
 // exists and is not an empty directory.
 var ErrWorktreePathOccupied = errors.New("gitx: worktree path exists and is not an empty directory")
 
+// ErrBaseNotFound is returned by WorktreeAdd when the start point of a new
+// branch (WorktreeAddOpts.Base) does not resolve to an object.
+var ErrBaseNotFound = errors.New("gitx: base not found")
+
 // WorktreeAdd creates a worktree at path for branch, from the repository
 // containing repoDir. A relative path is relative to repoDir. path must not
 // exist or must be an empty directory (ErrWorktreePathOccupied otherwise,
@@ -177,6 +189,16 @@ func WorktreeAdd(ctx context.Context, repoDir, path, branch string, opts Worktre
 		return WorktreeAddResult{}, err
 	}
 	startOID := ""
+	if mode == WorktreeNewBranch {
+		start := args[len(args)-1]
+		if _, err := Run(ctx, repoDir, "rev-parse", "--verify", "--quiet", "--end-of-options", start); err != nil {
+			var ge *GitError
+			if errors.As(err, &ge) && ge.ExitCode == 1 && ctx.Err() == nil {
+				return WorktreeAddResult{}, fmt.Errorf("%w: %s", ErrBaseNotFound, start)
+			}
+			return WorktreeAddResult{}, err
+		}
+	}
 	if !local {
 		// The start point is the last argument; resolve it now so that the
 		// cleanup below only removes a branch still pointing at it.

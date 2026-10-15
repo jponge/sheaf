@@ -186,6 +186,10 @@ func pruneErr(ctx context.Context, plan ops.PrunePlan, results []ops.PruneResult
 
 func printPrune(out io.Writer, plan ops.PrunePlan, results []ops.PruneResult, dryRun bool) {
 	for _, s := range plan.Skipped {
+		if s.Tag != "" {
+			fmt.Fprintf(out, "skipped %s (tag %s): %s\n", s.Repo, s.Tag, s.Reason)
+			continue
+		}
 		fmt.Fprintf(out, "skipped %s/%s: %s\n", s.Repo, s.Branch, s.Reason)
 	}
 	if len(plan.Candidates) == 0 {

@@ -240,6 +240,9 @@ func doctorRepo(ctx context.Context, root string, r bundle.Repository, now time.
 }
 
 func branchOrDetached(in WorktreeInfo) string {
+	if in.Branch == "" && in.Tag != "" {
+		return "tag " + in.Tag
+	}
 	if in.Branch == "" {
 		return "detached"
 	}

@@ -236,3 +236,28 @@ func AdvanceOrigin(t *testing.T, o Origin, branch, path, content, msg string) {
 	CommitFile(t, dir, path, content, msg)
 	Git(t, dir, "push", "-q", "origin", "HEAD:refs/heads/"+branch)
 }
+
+// TagOrigin creates the tag name at rev (any revision of the bare origin,
+// e.g. "main" or "feat") directly in the bare origin; annotated tags carry a
+// message. Use it to give an origin tags before or after clones of it exist.
+func TagOrigin(t *testing.T, o Origin, name, rev string, annotated bool) {
+	t.Helper()
+	IsolateGit(t)
+	if annotated {
+		Git(t, o.Path, "tag", "-a", "-m", "tag "+name, name, rev)
+		return
+	}
+	Git(t, o.Path, "tag", name, rev)
+}
+
+// TagOriginDangling creates the annotated tag name in the bare origin on a
+// new commit whose parent is rev and that no branch contains, so that only
+// fetching tags explicitly (not git's automatic tag following) brings it.
+// It returns that commit.
+func TagOriginDangling(t *testing.T, o Origin, name, rev string) string {
+	t.Helper()
+	IsolateGit(t)
+	oid := Git(t, o.Path, "commit-tree", "-p", rev, "-m", "dangling "+name, rev+"^{tree}")
+	Git(t, o.Path, "tag", "-a", "-m", "tag "+name, name, oid)
+	return oid
+}
