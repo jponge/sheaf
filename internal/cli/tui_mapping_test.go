@@ -54,15 +54,6 @@ func TestProposalItems(t *testing.T) {
 	}
 }
 
-func TestExcludeItems(t *testing.T) {
-	t.Parallel()
-	ps := []ops.Proposal{{Key: "new:o/c", Kind: ops.ProposalNew, Org: "o", Name: "c", Slug: "o/c"}}
-	want := []tui.Item{{Key: "new:o/c", Label: "c", Detail: "o/c"}}
-	if got := excludeItems(ps); !reflect.DeepEqual(got, want) {
-		t.Fatalf("excludeItems = %+v, want %+v", got, want)
-	}
-}
-
 func TestCandidateItems(t *testing.T) {
 	t.Parallel()
 	cs := []ops.Candidate{

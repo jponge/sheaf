@@ -298,11 +298,12 @@ are compared. Without action flags nothing changes. Actions, applied in this
 order: `--exclude [org/]name` records declined repositories in `sheaf.yaml`,
 `--add-new` clones the remaining new ones, `--remove-gone --yes` removes the
 gone ones with the checks of `sheaf remove` (`--force`,
-`--allow-mass-removal`). In TUI mode without action flags, menus offer the
-new and gone repositories (nothing preselected) and which new ones to
-exclude, then ask to confirm removals; the TUI never applies `--force` or
-`--allow-mass-removal`. `--json` prints the proposals without changing
-anything. Exit status 1 when gone candidates could not be looked up.
+`--allow-mass-removal`). In TUI mode without action flags, a menu offers the
+new and gone repositories (nothing preselected), then asks to confirm
+removals; the TUI never applies `--force` or `--allow-mass-removal`. New
+repositories left unselected are not excluded: the next sync proposes them
+again (decline them for good with `--exclude`). `--json` prints the
+proposals without changing anything. Exit status 1 when gone candidates could not be looked up.
 
 ### Checkouts and worktrees
 

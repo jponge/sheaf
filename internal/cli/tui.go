@@ -71,16 +71,6 @@ func proposalItems(ps []ops.Proposal) []tui.Item {
 	return items
 }
 
-// excludeItems maps the new proposals left unselected to the items of the
-// "exclude from future syncs" menu (nothing preselected).
-func excludeItems(ps []ops.Proposal) []tui.Item {
-	items := make([]tui.Item, 0, len(ps))
-	for _, p := range ps {
-		items = append(items, tui.Item{Key: p.Key, Label: p.Name, Detail: p.Slug})
-	}
-	return items
-}
-
 // candidateItems maps the checkouts found by init to menu items keyed by
 // path, all preselected.
 func candidateItems(cs []ops.Candidate) []tui.Item {

@@ -248,10 +248,11 @@ func tuiPrune(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.PruneOptions,
 }
 
 // tuiSync offers the proposals of sync in a menu (new and gone ones
-// selectable, nothing preselected), then which unselected new repositories
-// to exclude from future syncs, confirms removals, and applies the choices
-// like --exclude, --add-new and --remove-gone --yes (never --force nor
-// --allow-mass-removal: such refusals are displayed as failures).
+// selectable, nothing preselected), confirms removals, and applies the
+// choices like --add-new and --remove-gone --yes (never --force nor
+// --allow-mass-removal: such refusals are displayed as failures). New
+// repositories left unselected are neither added nor excluded: the next
+// sync proposes them again (--exclude declines them for good).
 func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noFork bool) error {
 	s := newTUISession(c, d)
 	out := c.OutOrStdout()
@@ -263,28 +264,14 @@ func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noF
 	if err != nil {
 		return err
 	}
-	var add, gone, unselected []ops.Proposal
+	var add, gone []ops.Proposal
 	for _, p := range rep.Proposals {
 		chosen := slices.Contains(keys, p.Key)
 		switch {
 		case p.Kind == ops.ProposalNew && chosen:
 			add = append(add, p)
-		case p.Kind == ops.ProposalNew:
-			unselected = append(unselected, p)
 		case p.Kind == ops.ProposalGone && chosen:
 			gone = append(gone, p)
-		}
-	}
-	var excluded []ops.Proposal
-	if len(unselected) > 0 {
-		ekeys, err := s.multiSelect("Exclude the unselected new repositories from future syncs?", excludeItems(unselected))
-		if err != nil {
-			return err
-		}
-		for _, p := range unselected {
-			if slices.Contains(ekeys, p.Key) {
-				excluded = append(excluded, p)
-			}
 		}
 	}
 	if len(gone) > 0 {
@@ -300,22 +287,11 @@ func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noF
 			return err
 		}
 	}
-	if len(add) == 0 && len(gone) == 0 && len(excluded) == 0 {
+	if len(add) == 0 && len(gone) == 0 {
 		fmt.Fprintln(out, "nothing selected; nothing changed")
 		return rep.Err()
 	}
 	errs := []error{rep.Err()}
-	if len(excluded) > 0 {
-		if err := ops.SyncExclude(s.ctx, w, excluded); err != nil {
-			return errors.Join(append(errs, err)...)
-		}
-		for _, p := range excluded {
-			fmt.Fprintf(out, "excluded %s (recorded in sheaf.yaml, no longer proposed)\n", p.Slug)
-		}
-	}
-	if len(add) == 0 && len(gone) == 0 {
-		return errors.Join(errs...)
-	}
 	wd, err := d.getwd()
 	if err != nil {
 		return err

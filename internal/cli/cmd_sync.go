@@ -70,9 +70,9 @@ func newSyncCmd(d Deps) *cobra.Command {
 			"data would be lost, unless --force; a remote that no longer exists counts as data at risk).\n" +
 			"Actions run in that order.\n\n" +
 			"In TUI mode, without action flags (and without --json), a menu offers the new and gone\n" +
-			"repositories (nothing preselected), then which unselected new ones to exclude, asks to\n" +
-			"confirm removals, and applies the choices as above (never with --force or\n" +
-			"--allow-mass-removal).\n\n" +
+			"repositories (nothing preselected), asks to confirm removals, and applies the choices as\n" +
+			"above (never with --force or --allow-mass-removal). New repositories left unselected are\n" +
+			"not excluded: the next sync proposes them again (use --exclude to decline them for good).\n\n" +
 			"--json prints {version, bundle, orgs: [{org, listed, truncated, mass_removal, error?,\n" +
 			"warnings?, notes?, unconfirmed?}], proposals: [{key, kind, org, name (directory name for gone,\n" +
 			"moved and archived), slug (as recorded for gone and moved), url, default_branch?, fork?,\n" +

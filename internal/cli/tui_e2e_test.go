@@ -263,12 +263,27 @@ func TestTUIAddOrgMenuShowsPresentAndCancelChangesNothing(t *testing.T) {
 	}
 }
 
-func TestTUISyncAddsSelectedAndDeclinesExclusion(t *testing.T) {
+// After the menu there is no further question about the new repositories
+// left unselected (B19): the next program is the progress view, and
+// nothing is recorded as excluded.
+func TestTUISyncAddsSelectedWithoutExclusionStep(t *testing.T) {
 	t.Parallel()
 	e, root := syncBundle(t)
 	var out syncBuffer
-	// Proposals: new b, new c. Select b; then decline excluding c.
-	in := newScript(t, true, keys(" ", "\r"), keys("\r"))
+	// Proposals: new b, new c. Select b; then the progress view, which
+	// quits by itself once done. The second segment, read by the progress
+	// view, waits for its final header; it only makes a second menu, if
+	// one reads it, fail fast instead of blocking.
+	in := newScript(t, true, keys(" ", "\r"), []key{{wait: func() {
+		deadline := time.Now().Add(20 * time.Second)
+		for o := out.String(); !strings.Contains(o, "1 done, 0 skipped, 0 failed in"); o = out.String() {
+			if strings.Contains(o, "Exclude") || time.Now().After(deadline) {
+				t.Errorf("no progress summary after the menu:\n%s", o)
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}}})
 	errs, code := e.runTUI(t, in, &out, "sync")
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -277,32 +292,42 @@ func TestTUISyncAddsSelectedAndDeclinesExclusion(t *testing.T) {
 		t.Fatalf("b not cloned or c cloned:\n%s", out.String())
 	}
 	if y := readYAML(t, root); strings.Contains(y, "exclude") {
-		t.Fatalf("c excluded although declined:\n%s", y)
+		t.Fatalf("c excluded although never asked:\n%s", y)
 	}
 	o := out.String()
-	for _, want := range []string{"Exclude", "done     b", "1 done, 0 skipped, 0 failed"} {
+	if strings.Contains(o, "Exclude") {
+		t.Errorf("an exclusion step was shown:\n%s", o)
+	}
+	for _, want := range []string{"done     b", "1 done, 0 skipped, 0 failed"} {
 		if !strings.Contains(o, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, o)
 		}
 	}
 }
 
-func TestTUISyncExcludesChosenNewRepository(t *testing.T) {
+// Selecting nothing changes nothing: the unselected new repositories are
+// not excluded and sync proposes them again.
+func TestTUISyncNothingSelectedExcludesNothing(t *testing.T) {
 	t.Parallel()
 	e, root := syncBundle(t)
+	before := readYAML(t, root)
 	var out syncBuffer
-	// Select nothing; exclude c (second item of the exclusion menu).
-	in := newScript(t, true, keys("\r"), keys("j", " ", "\r"))
+	in := newScript(t, false, keys("\r"))
 	errs, code := e.runTUI(t, in, &out, "sync")
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
-	y := readYAML(t, root)
-	if !strings.Contains(y, "exclude") || !strings.Contains(y, "- c") || strings.Contains(y, "- b") {
-		t.Fatalf("sheaf.yaml:\n%s", y)
+	if readYAML(t, root) != before {
+		t.Fatalf("sheaf.yaml changed:\n%s", readYAML(t, root))
 	}
-	if !strings.Contains(out.String(), "excluded o/c") {
-		t.Errorf("stdout lacks the exclusion:\n%s", out.String())
+	if o := out.String(); strings.Contains(o, "Exclude") || !strings.Contains(o, "nothing selected; nothing changed") {
+		t.Errorf("stdout:\n%s", o)
+	}
+	again := e.mustRun(t, "sync", "--json")
+	for _, k := range []string{`"new:o/b"`, `"new:o/c"`} {
+		if !strings.Contains(again, k) {
+			t.Errorf("next sync does not propose %s:\n%s", k, again)
+		}
 	}
 }
 
@@ -324,9 +349,8 @@ func goneB(t *testing.T) (*env, string) {
 func TestTUISyncGoneRemovalRefusalIsDisplayed(t *testing.T) {
 	e, root := goneB(t)
 	var out syncBuffer
-	// Proposals: new c, gone b. Select b (second), no exclusion of c,
-	// confirm the removal.
-	in := newScript(t, true, keys("j", " ", "\r"), keys("\r"), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}})
+	// Proposals: new c, gone b. Select b (second), confirm the removal.
+	in := newScript(t, true, keys("j", " ", "\r"), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}})
 	errs, code := e.runTUI(t, in, &out, "sync")
 	if code != 1 {
 		t.Fatalf("exit %d, want 1\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -349,7 +373,7 @@ func TestTUISyncDeclinedRemovalChangesNothing(t *testing.T) {
 	e, root := goneB(t)
 	before := readYAML(t, root)
 	var out syncBuffer
-	// Select c and b, no exclusion, decline the removal.
+	// Select c and b, decline the removal.
 	in := newScript(t, false, keys(" ", "j", " ", "\r"), []key{{keys: "n", wait: waitOutput(t, &out, "[y/N]")}})
 	errs, code := e.runTUI(t, in, &out, "sync")
 	if code != 1 || !strings.Contains(errs, "cancelled") {
