@@ -1,0 +1,1 @@
+✓ Set smallrye/smallrye-mutiny as the default repository for the current directory

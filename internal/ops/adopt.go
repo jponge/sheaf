@@ -12,6 +12,7 @@ import (
 
 	"github.com/jponge/sheaf/internal/bundle"
 	"github.com/jponge/sheaf/internal/gitx"
+	"github.com/jponge/sheaf/internal/hosting"
 )
 
 // rollbackTimeout bounds the git calls of a rollback, which run even when
@@ -33,6 +34,14 @@ type AdoptOptions struct {
 	Recheck bool
 	// Interactive asks remotes in interactive git mode (see gitx.Net).
 	Interactive bool
+	// Hosting sets the gh default repository of the primary checkout of
+	// each repository adopted or re-examined (GitHub only; see
+	// ghDefaults); nil skips that. Adopt never needs it otherwise.
+	Hosting hosting.Hosting
+
+	// gh is shared by the repositories of one AdoptAll (one warning per
+	// command when gh is unusable); nil makes Adopt use its own.
+	gh *ghDefaults
 
 	// afterMove, when set by a test, runs after the primary checkout was
 	// relocated and its worktrees repaired; an error (or a panic) triggers
@@ -69,6 +78,10 @@ type AdoptOptions struct {
 //
 // A directory already registered under its name is skipped (Skip error),
 // unless opts.Recheck is set: see Recheck.
+//
+// Once registered (or re-examined), a GitHub repository gets its slug as the
+// gh default repository of the primary checkout through opts.Hosting, if
+// set (see ghDefaults); this never makes Adopt fail.
 func Adopt(ctx context.Context, w *Workspace, dir string, opts AdoptOptions, emit func(Event)) (string, error) {
 	if opts.Recheck {
 		// A registered repository is named by its directory: a missing one
@@ -135,15 +148,27 @@ func Adopt(ctx context.Context, w *Workspace, dir string, opts AdoptOptions, emi
 		emit(Event{Message: "warning: " + m})
 	}
 	msg, err := adoptCheckout(ctx, w.Root, layout{plain: plain, dir: dir, checkout: checkout}, entry, register, opts.afterMove, emit)
-	if err != nil || !entry.Forked() {
+	if err != nil {
 		return msg, err
 	}
-	if defDir, nerr := bundle.NormalizeBranch(entry.DefaultBranch); nerr == nil {
-		checkDefaultTracking(ctx, filepath.Join(dir, defDir), entry, gitx.ForkRemotes, func(m, hint string) {
-			emit(Event{Message: "warning: " + m + "; fix: " + hint})
-		})
+	// adoptCheckout succeeded, so the default branch normalizes.
+	defDir, _ := bundle.NormalizeBranch(entry.DefaultBranch)
+	opts.ghDefaults().set(ctx, filepath.Join(dir, defDir), entry, emit)
+	if !entry.Forked() {
+		return msg, nil
 	}
+	checkDefaultTracking(ctx, filepath.Join(dir, defDir), entry, gitx.ForkRemotes, func(m, hint string) {
+		emit(Event{Message: "warning: " + m + "; fix: " + hint})
+	})
 	return msg + fmt.Sprintf("; recorded as a fork of %s (origin = your fork)", entry.Slug), nil
+}
+
+// ghDefaults returns the gh default repository setter of opts.
+func (opts AdoptOptions) ghDefaults() *ghDefaults {
+	if opts.gh != nil {
+		return opts.gh
+	}
+	return newGHDefaults(opts.Hosting)
 }
 
 // laidOutPlausible accepts checkout, the single primary checkout found in
@@ -529,6 +554,7 @@ func moveIntoSubdir(fsys moveFS, root, dir, sub string) (func() error, error) {
 // Directories given more than once (after making them absolute and clean)
 // are adopted once. Results are named after the directory base names.
 func AdoptAll(ctx context.Context, w *Workspace, dirs []string, opts AdoptOptions, jobs int, rep Reporter) Summary {
+	opts.gh = opts.ghDefaults()
 	var tasks []Task
 	seen := map[string]bool{}
 	for _, d := range dirs {
@@ -554,6 +580,7 @@ func AdoptAll(ctx context.Context, w *Workspace, dirs []string, opts AdoptOption
 // fix). The default branch is the entry's (the primary checkout is named after
 // it, and no remote is asked). An entry that already has a fork is never
 // changed, even when its remotes no longer qualify: that is warned about.
+// The gh default repository is set to the resulting slug (see ghDefaults).
 func recheckEntry(ctx context.Context, w *Workspace, name string, opts AdoptOptions, emit func(Event)) (string, error) {
 	b := w.Bundle()
 	cur, ok := lookupRepo(b, name)
@@ -604,6 +631,7 @@ func recheckEntry(ctx context.Context, w *Workspace, name string, opts AdoptOpti
 			return "", err
 		}
 	}
+	opts.ghDefaults().set(ctx, primary, final, emit)
 	if final.Forked() {
 		checkDefaultTracking(ctx, primary, final, gitx.ForkRemotes, func(m, hint string) {
 			emit(Event{Message: "warning: " + m + "; fix: " + hint})

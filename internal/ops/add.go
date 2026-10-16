@@ -163,7 +163,7 @@ func Add(ctx context.Context, w *Workspace, h hosting.Hosting, req AddRequest, j
 	if !req.NoFork {
 		forks = detectForks(ctx, h, clonable(w.Bundle(), specs), rep)
 	}
-	sum := Execute(ctx, jobs, planClones(w, gitx.Net{Interactive: req.Interactive}, specs, req.As, origin, source, forks), rep)
+	sum := Execute(ctx, jobs, planClones(w, gitx.Net{Interactive: req.Interactive}, specs, req.As, origin, source, forks, newGHDefaults(h)), rep)
 	// Successful clones recorded the source with their entry. Nothing was
 	// cloned: track the organization anyway when nothing failed either (an
 	// empty organization selected with All, or everything already present).
@@ -256,8 +256,9 @@ func skippedTask(repo, reason string) Task {
 }
 
 // planClones turns lookups into tasks, checking names against the bundle and
-// against each other (case-insensitively, like the bundle does).
-func planClones(w *Workspace, net gitx.Net, specs []lookup, as, origin, source string, forks forkIndex) []Task {
+// against each other (case-insensitively, like the bundle does). gd sets the
+// gh default repository of each clone.
+func planClones(w *Workspace, net gitx.Net, specs []lookup, as, origin, source string, forks forkIndex, gd *ghDefaults) []Task {
 	b := w.Bundle()
 	taken := map[string]bool{}
 	for _, r := range b.Repositories {
@@ -305,7 +306,7 @@ func planClones(w *Workspace, net gitx.Net, specs []lookup, as, origin, source s
 			entry.Fork = bundle.Fork{Slug: fk.Slug(), URL: fk.CloneURL}
 		}
 		tasks = append(tasks, Task{Repo: name, Phase: PhaseClone, Run: func(ctx context.Context, emit func(Event)) (string, error) {
-			return cloneRepo(ctx, w, net, entry, branchDir, source, emit)
+			return cloneRepo(ctx, w, net, entry, branchDir, source, gd, emit)
 		}})
 	}
 	return tasks
@@ -351,8 +352,9 @@ func looksLikeGitHubAlias(host string) bool {
 }
 
 // cloneRepo creates <root>/<name> (which must not exist), clones into it and
-// records the entry. On any failure the repository directory is removed.
-func cloneRepo(ctx context.Context, w *Workspace, net gitx.Net, entry bundle.Repository, branchDir, source string, emit func(Event)) (string, error) {
+// records the entry, then sets the gh default repository through gd. On any
+// failure of the clone or the record the repository directory is removed.
+func cloneRepo(ctx context.Context, w *Workspace, net gitx.Net, entry bundle.Repository, branchDir, source string, gd *ghDefaults, emit func(Event)) (string, error) {
 	repoDir := bundle.RepoDir(w.Root, entry.Name)
 	if err := os.Mkdir(repoDir, 0o755); err != nil {
 		if errors.Is(err, fs.ErrExist) {
@@ -388,6 +390,7 @@ func cloneRepo(ctx context.Context, w *Workspace, net gitx.Net, entry bundle.Rep
 		}
 		return "", err
 	}
+	gd.set(ctx, dest, entry, emit)
 	if entry.Forked() {
 		return fmt.Sprintf("cloned into %s (origin: your fork %s, upstream: %s)", dest, entry.Fork.Slug, entry.Slug), nil
 	}

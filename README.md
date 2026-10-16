@@ -40,7 +40,9 @@ Requirements:
   gh, including for single repositories), `add --org`, fork detection, `sync`
   and `wt pr`. Commands working on local state (`adopt`, `init`, `status`,
   `fetch`, `update`, `run`, `wt add/list/rm`, `path`, `prune`, `remove`) do
-  not need gh.
+  not need gh; `add`, `sync`, `adopt` and `init` use it, when available, to
+  set the gh default repository of new checkouts (see
+  [gh default repository](#gh-default-repository)).
 
 With Go installed:
 
@@ -156,6 +158,40 @@ the repository was registered (e.g. after `git fetch upstream`). sheaf never
 creates forks. Fetch, update, merged/gone and unpushed checks consider both
 remotes.
 
+### gh default repository
+
+In a clone with two GitHub remotes, gh has no default repository and `gh pr
+list`, `gh issue list` etc. fail or ask which one to use. So for every GitHub
+repository it adds (`add`, `add --org`, `sync`) or adopts (`adopt`, `init
+--adopt-all`, `adopt --recheck`), sheaf runs `gh repo set-default <slug>` in
+the primary checkout, where `<slug>` is the reference repository: `upstream`
+for a fork, `origin` otherwise. gh stores it in the repository's git
+configuration (`remote.<name>.gh-resolved`), which the worktrees share.
+Repositories of other hosts are left alone.
+
+An existing default is kept. sheaf reads it from the git configuration (no gh
+call): when it already is the reference repository nothing happens; when it
+is another repository, or several are configured, sheaf leaves it alone and
+prints a note (`note: gh default repository of x is me/x (reference: up/x);
+kept`). To switch it, run `gh repo set-default <slug>` in the checkout.
+
+This never makes a command fail. The gh calls of a command run one at a
+time, even with `-j`. When gh is missing, not logged in or does not answer
+within 30 s, sheaf prints one warning for the command and does not run gh for
+its other repositories; a failure specific to one repository (for instance no
+remote that gh recognises) is a warning for that repository, with the command
+to run (`cd <checkout> && gh repo set-default <slug>`).
+
+To set it for repositories already in a bundle (registered by an earlier
+sheaf, or while gh was not logged in), run `sheaf adopt --recheck --all`, or
+`sheaf adopt --recheck <repo>...` for some of them. Like any recheck, it
+also records forks that have become visible, and it keeps existing defaults.
+
+`sheaf doctor` reports, for each GitHub repository, a missing default
+(warning, with the command to run), several configured defaults (warning,
+with the `git config --unset` commands that leave one) and a default naming
+another repository than the reference one (information only).
+
 ## Quick start
 
 ```sh
@@ -261,8 +297,9 @@ mode a menu lets you pick, and the checkouts left out are listed with the
 
 **`sheaf doctor`**: check git (2.36 or later), gh installation and
 authentication for github.com, `sheaf.yaml`, and for each repository its
-directory, primary checkout, remote URLs (and fork setup), missing or
-outside worktrees, and lock files left in its git directory. Directories of
+directory, primary checkout, remote URLs (and fork setup), the
+[gh default repository](#gh-default-repository) (GitHub repositories),
+missing or outside worktrees, and lock files left in its git directory. Directories of
 the bundle that are not registered are listed. Nothing is fetched or
 changed. One line per check (OK, INFO, WARN, FAIL); exit status 1 when a
 check fails. `--json`.
@@ -281,7 +318,8 @@ present); archived repositories need `--include-archived`; without
 the bundle are shown, not selectable, and counted apart) and plain mode
 lists the candidates and fails.
 `--as <dir>` names the directory (single repository). `--no-fork` disables
-fork detection.
+fork detection. Each clone gets its
+[gh default repository](#gh-default-repository).
 
 **`sheaf adopt <dir>...`**: register existing checkouts located directly in
 the bundle. A plain clone `<dir>/` is moved to `<dir>/<default-branch>/`; a
@@ -289,7 +327,9 @@ single checkout `<dir>/<child>/` is renamed to it if needed. Owner, name and
 host come from the `origin` URL. `--default-branch` when it cannot be
 determined, `--host` to record a host instead of an SSH alias, `--recheck`
 to re-examine the remotes of already registered repositories and record a
-fork (nothing is moved; a recorded fork is never dropped or changed).
+fork (nothing is moved; a recorded fork is never dropped or changed);
+`--recheck --all` re-examines every registered repository. Adopting and
+rechecking also set the [gh default repository](#gh-default-repository).
 
 **`sheaf remove <repo>`**: fetch, check every checkout and worktree for data
 that would be lost, then delete the worktrees, the repository directory and

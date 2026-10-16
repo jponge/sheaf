@@ -28,6 +28,7 @@ type resp struct {
 	stderr  string
 	code    int
 	sleep   bool // sleep 30s (as a child process, so killing the shell leaves an orphan holding the pipes)
+	cwd     bool // also record "cwd=<physical working directory> GIT_DIR=<value or <unset>>"
 }
 
 func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
@@ -49,6 +50,9 @@ func stubGH(t *testing.T, rules map[string]resp) (string, func() []string) {
 		sb.WriteString("\"" + key + "\")\n")
 		if r.sleep {
 			sb.WriteString("  sleep 30\n")
+		}
+		if r.cwd {
+			sb.WriteString("  echo \"cwd=$(pwd -P) GIT_DIR=${GIT_DIR-<unset>}\" >> " + shq(log) + "\n")
 		}
 		if r.fixture != "" {
 			sb.WriteString("  cat " + shq(filepath.Join(td, r.fixture)) + "\n")

@@ -309,8 +309,9 @@ func newDoctorCmd(d Deps) *cobra.Command {
 			"authenticated for github.com, that sheaf.yaml is valid, and for each repository: its\n" +
 			"directory and primary checkout (<repo>/<default branch>/, a work tree of its own),\n" +
 			"origin's URL against sheaf.yaml (for a clone of your fork: origin, upstream, and the\n" +
-			"default branch tracking upstream), missing worktrees or worktrees outside the\n" +
-			"repository directory, and lock files left in its git directory. Directories of the\n" +
+			"default branch tracking upstream), the gh default repository of GitHub repositories\n" +
+			"(missing or several: WARN; another repository: INFO), missing worktrees or worktrees\n" +
+			"outside the repository directory, and lock files left in its git directory. Directories of the\n" +
 			"bundle that are not repositories of it are listed (with `sheaf adopt` when they hold\n" +
 			"a checkout). Nothing is fetched or changed. One line per check: OK, INFO, WARN or\n" +
 			"FAIL, with hints; the exit status is 1 when a check FAILs. --json prints\n" +

@@ -3,6 +3,7 @@ package hostingtest
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/jponge/sheaf/internal/hosting"
@@ -185,5 +186,28 @@ func TestFakeForks(t *testing.T) {
 	}
 	if f.ForkCalls() != 4 {
 		t.Fatalf("ForkCalls = %d", f.ForkCalls())
+	}
+}
+
+func TestFakeSetDefaultRepoRecordsCalls(t *testing.T) {
+	t.Parallel()
+	f := NewFake()
+	ctx := context.Background()
+	if err := f.SetDefaultRepo(ctx, "/b/x/main", "Up", "x"); err != nil {
+		t.Fatal(err)
+	}
+	boom := errors.New("boom")
+	f.DefaultRepoErr = boom
+	if err := f.SetDefaultRepo(ctx, "/b/y/main", "o", "y"); !errors.Is(err, boom) {
+		t.Fatalf("err = %v", err)
+	}
+	for _, c := range []struct{ dir, owner, name string }{{"", "o", "r"}, {"rel", "o", "r"}, {"/b/z", "-o", "r"}, {"/b/z", "o", ".."}} {
+		if err := f.SetDefaultRepo(ctx, c.dir, c.owner, c.name); !errors.Is(err, hosting.ErrInvalidInput) {
+			t.Errorf("SetDefaultRepo(%q, %q, %q) = %v, want ErrInvalidInput", c.dir, c.owner, c.name, err)
+		}
+	}
+	want := []DefaultRepoCall{{Dir: "/b/x/main", Slug: "Up/x"}, {Dir: "/b/y/main", Slug: "o/y"}}
+	if got := f.DefaultRepoCalls(); !slices.Equal(got, want) {
+		t.Fatalf("calls = %+v\nwant    %+v", got, want)
 	}
 }

@@ -79,6 +79,9 @@ func TestDoctorHealthyBundle(t *testing.T) {
 	f.mustAddWT(t, "a", "feat")
 	// A url.insteadOf rewrite is not a mismatch: the configured URL counts.
 	testutil.Git(t, filepath.Join(f.w.Root, "a", "main"), "config", "url.file:///rewritten.insteadOf", "file://")
+	// The gh default repository, as gh repo set-default would have set it
+	// (the fake only records the call).
+	ghResolved(t, filepath.Join(f.w.Root, "a", "main"), "origin", "o/a")
 	cs := f.doctor(t, DoctorOptions{})
 	if DoctorFailed(cs) {
 		t.Fatalf("failed:\n%s", dump(cs))

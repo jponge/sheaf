@@ -10,10 +10,13 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jponge/sheaf/internal/gitx"
 )
 
 // DefaultLimit is the default maximum number of repositories requested from
@@ -23,6 +26,9 @@ const DefaultLimit = 1000
 var (
 	// ErrGHNotFound means the gh executable could not be located.
 	ErrGHNotFound = errors.New("gh executable not found")
+	// ErrGHNotAuthenticated means gh has no credentials (exit code 4, see
+	// `gh help exit-codes`) or the service rejected them.
+	ErrGHNotAuthenticated = errors.New("gh is not authenticated")
 	// ErrPossiblyTruncated is returned by ListRepos, together with the result
 	// trimmed to Limit, when gh returned more than Limit repositories (Limit+1 is
 	// requested to make this exact).
@@ -104,9 +110,44 @@ func isNotFound(stderr string) bool {
 	return false
 }
 
+// ghExitAuth is gh's exit code for authentication issues (`gh help exit-codes`).
+const ghExitAuth = 4
+
+// badCredentialsMarker is a substring of gh's stderr when the service
+// rejects the token (exit code 1). Verified with gh 2.46.0 on 2026-10-16:
+//
+//	HTTP 401: Bad credentials (https://api.github.com/graphql)
+//	Try authenticating with:  gh auth login
+const badCredentialsMarker = "HTTP 401: Bad credentials"
+
+func isUnauthenticated(err error, stderr string) bool {
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok && ee.ExitCode() == ghExitAuth {
+		return true
+	}
+	return strings.Contains(stderr, badCredentialsMarker)
+}
+
+// isChdirError reports whether err is the failure to enter the working
+// directory of the command (os.StartProcess reports it as a *fs.PathError
+// with Op "chdir"), not a missing executable.
+func isChdirError(err error) bool {
+	pe, ok := errors.AsType[*fs.PathError](err)
+	return ok && pe.Op == "chdir"
+}
+
 func (g *GH) run(ctx context.Context, args ...string) ([]byte, error) {
+	return g.runIn(ctx, "", args...)
+}
+
+// runIn runs gh in dir (empty: the current directory), without the
+// variables that redirect git to another repository when dir is set.
+func (g *GH) runIn(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, g.opts.Path, args...)
 	cmd.Env = childEnv()
+	if dir != "" {
+		cmd.Dir = dir
+		cmd.Env = gitx.StripRepoEnv(cmd.Env)
+	}
 	// Bound the wait for orphaned grandchildren holding the output pipes after a kill.
 	cmd.WaitDelay = 2 * time.Second
 	var stdout, stderr bytes.Buffer
@@ -116,7 +157,7 @@ func (g *GH) run(ctx context.Context, args ...string) ([]byte, error) {
 		return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), cerr)
 	}
 	if err != nil {
-		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
+		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) && !isChdirError(err) {
 			return nil, fmt.Errorf("%w (%s): install the GitHub CLI from https://cli.github.com/ and run `gh auth login`: %w",
 				ErrGHNotFound, g.opts.Path, err)
 		}
@@ -124,6 +165,8 @@ func (g *GH) run(ctx context.Context, args ...string) ([]byte, error) {
 		wrapped := err
 		if isNotFound(msg) {
 			wrapped = fmt.Errorf("%w: %w", ErrNotFound, err)
+		} else if isUnauthenticated(err, msg) {
+			wrapped = fmt.Errorf("%w: %w", ErrGHNotAuthenticated, err)
 		}
 		if msg == "" {
 			return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), wrapped)
@@ -346,4 +389,21 @@ func (g *GH) ListForks(ctx context.Context, owner string) ([]Fork, error) {
 		return forks, fmt.Errorf("%w: %q has more than %d forks", ErrPossiblyTruncated, owner, g.opts.Limit)
 	}
 	return forks, nil
+}
+
+// SetDefaultRepo runs `gh repo set-default <owner>/<name>` in dir, which
+// must be an absolute path: gh resolves the local repository from its
+// working directory and requires owner/name to match one of its remotes
+// (gh stores the choice in the repository's git configuration). Variables
+// that would redirect gh's git calls to another repository (GIT_DIR, ...)
+// are not passed on.
+func (g *GH) SetDefaultRepo(ctx context.Context, dir, owner, name string) error {
+	if err := ValidateRepo(owner, name); err != nil {
+		return err
+	}
+	if !filepath.IsAbs(dir) {
+		return fmt.Errorf("%w: directory %q must be an absolute path", ErrInvalidInput, dir)
+	}
+	_, err := g.runIn(ctx, dir, "repo", "set-default", owner+"/"+name)
+	return err
 }

@@ -4,6 +4,7 @@ package hostingtest
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,10 +29,19 @@ type Fake struct {
 	User     string
 	UserErr  error
 	ForksErr error
+	// DefaultRepoErr, when set, is returned by SetDefaultRepo (the call
+	// is recorded anyway).
+	DefaultRepoErr error
+	// DefaultRepoHook, when set, is called by SetDefaultRepo with its
+	// context after recording the call and before returning (outside the
+	// Fake's lock), e.g. to hold concurrent calls or cancel the context.
+	DefaultRepoHook func(ctx context.Context)
 
 	mu        sync.Mutex
 	forks     []hosting.Fork
 	forkCalls int
+
+	defaultCalls []DefaultRepoCall
 
 	owners map[string][]hosting.Repo
 	prs    map[string]hosting.PR
@@ -177,4 +187,36 @@ func (f *Fake) ListForks(_ context.Context, owner string) ([]hosting.Fork, error
 		}
 	}
 	return out, nil
+}
+
+// DefaultRepoCall is a SetDefaultRepo call recorded by the Fake: the
+// directory and "owner/name" as passed.
+type DefaultRepoCall struct{ Dir, Slug string }
+
+// DefaultRepoCalls returns the valid SetDefaultRepo calls so far, in call
+// order (failed ones included).
+func (f *Fake) DefaultRepoCalls() []DefaultRepoCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]DefaultRepoCall(nil), f.defaultCalls...)
+}
+
+// SetDefaultRepo validates its input like the gh adapter (an absolute dir,
+// a valid owner/name), records the call, runs DefaultRepoHook and returns
+// DefaultRepoErr. It is safe for concurrent use.
+func (f *Fake) SetDefaultRepo(ctx context.Context, dir, owner, name string) error {
+	if err := hosting.ValidateRepo(owner, name); err != nil {
+		return err
+	}
+	if !filepath.IsAbs(dir) {
+		return fmt.Errorf("%w: directory %q must be an absolute path", hosting.ErrInvalidInput, dir)
+	}
+	f.mu.Lock()
+	f.defaultCalls = append(f.defaultCalls, DefaultRepoCall{Dir: dir, Slug: owner + "/" + name})
+	hook, err := f.DefaultRepoHook, f.DefaultRepoErr
+	f.mu.Unlock()
+	if hook != nil {
+		hook(ctx)
+	}
+	return err
 }

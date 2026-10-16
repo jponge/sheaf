@@ -100,7 +100,8 @@ func ValidatePR(owner, name string, number int) error {
 	return nil
 }
 
-// Hosting is the read-only view of a hosting service needed by sheaf.
+// Hosting is the read-only view of a hosting service needed by sheaf, plus
+// the local configuration of its CLI (SetDefaultRepo).
 //
 // Owner and repository names are matched case-insensitively by the service, and
 // repositories can be renamed or transferred (redirects). Callers must use the
@@ -115,4 +116,9 @@ type Hosting interface {
 	// ListForks lists the forks owned by owner, with their parents.
 	// Repositories without a known parent are left out.
 	ListForks(ctx context.Context, owner string) ([]Fork, error)
+	// SetDefaultRepo makes owner/name the default repository of the
+	// service's CLI for the local checkout dir (an absolute path), e.g. the
+	// repository `gh pr list` uses there. It changes local configuration
+	// only (the checkout's), nothing on the service.
+	SetDefaultRepo(ctx context.Context, dir, owner, name string) error
 }

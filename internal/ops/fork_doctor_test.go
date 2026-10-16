@@ -10,7 +10,10 @@ import (
 func TestDoctorForkedRepositoryHealthy(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	f.addForked(t, "x", testutil.OriginOpts{})
+	_, primary := f.addForked(t, "x", testutil.OriginOpts{})
+	// The gh default repository, as gh repo set-default would have set it
+	// (the fake only records the call).
+	ghResolved(t, primary, "upstream", "up/x")
 	cs := f.doctor(t, DoctorOptions{})
 	for _, c := range cs {
 		if c.Repo == "x" && c.Level >= CheckWarn {

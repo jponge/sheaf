@@ -127,7 +127,7 @@ func tuiInitAdopt(c *cobra.Command, d Deps, root string, cands []ops.Candidate, 
 	var sum ops.Summary
 	defer s.ctl.during(noteAdopt)()
 	s.progress("Adopting checkouts", progressOpts{}, func(ctx context.Context, rep ops.Reporter, _ askFunc) {
-		sum = ops.AdoptAll(ctx, w, paths, ops.AdoptOptions{}, jobs, rep)
+		sum = ops.AdoptAll(ctx, w, paths, ops.AdoptOptions{Hosting: d.hosting()}, jobs, rep)
 	})
 	printFailureDetails(c.ErrOrStderr(), sum)
 	err = printSummary(out, sum)

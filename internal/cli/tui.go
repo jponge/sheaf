@@ -449,7 +449,7 @@ func looksLikeCredentialFailure(msg string) bool {
 const credentialHint = "sheaf: hint: git could not ask for credentials or confirm a host key in TUI mode; run with --no-tui -j 1 to let git prompt in the terminal"
 
 // isNotice tells the progress events that CLI mode prints and that matter
-// after the run (warnings, informational risks, stale state, fallbacks):
+// after the run (warnings, notes, informational risks, stale state, fallbacks):
 // the progress view only keeps a row's latest message, so they are printed
 // again on stderr once the view is closed.
 func isNotice(e ops.Event) bool {
@@ -457,7 +457,7 @@ func isNotice(e ops.Event) bool {
 		return false
 	}
 	m := e.Message
-	return strings.HasPrefix(m, "warning: ") || strings.HasPrefix(m, "offline: ") ||
+	return strings.HasPrefix(m, "warning: ") || strings.HasPrefix(m, "note: ") || strings.HasPrefix(m, "offline: ") ||
 		strings.Contains(m, "(informational, not blocking)") || strings.Contains(m, "will be lost (--force)") ||
 		strings.HasPrefix(m, "git worktree remove failed, deleting the directory instead")
 }

@@ -447,8 +447,9 @@ func SyncAddNewWithOptions(ctx context.Context, w *Workspace, props []Proposal, 
 		}
 		forks = detectForks(ctx, opts.Hosting, clonable(w.Bundle(), specs), rep)
 	}
+	gd := newGHDefaults(opts.Hosting)
 	for _, c := range clones {
-		tasks = append(tasks, planClones(w, gitx.Net{Interactive: opts.Interactive}, []lookup{c.spec}, "", bundle.OriginOrgPrefix+c.owner, "", forks)...)
+		tasks = append(tasks, planClones(w, gitx.Net{Interactive: opts.Interactive}, []lookup{c.spec}, "", bundle.OriginOrgPrefix+c.owner, "", forks, gd)...)
 	}
 	return Execute(ctx, jobs, tasks, rep)
 }
@@ -515,7 +516,8 @@ func SyncRemoveGone(ctx context.Context, w *Workspace, props []Proposal, sopts S
 
 // CloneOptions configures the fork detection of SyncAddNewWithOptions.
 type CloneOptions struct {
-	// Hosting lists the user's forks; nil disables fork detection.
+	// Hosting lists the user's forks and sets the gh default repository of
+	// the clones; nil disables both.
 	Hosting hosting.Hosting
 	// NoFork disables fork detection (see AddRequest.NoFork).
 	NoFork bool

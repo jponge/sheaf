@@ -121,7 +121,7 @@ func newInitCmd(d Deps) *cobra.Command {
 				return err
 			}
 			defer d.emergencyNote(noteAdopt)()
-			s := ops.AdoptAll(c.Context(), w, paths, ops.AdoptOptions{Interactive: d.interactiveGit(c)}, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
+			s := ops.AdoptAll(c.Context(), w, paths, ops.AdoptOptions{Interactive: d.interactiveGit(c), Hosting: d.hosting()}, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
 			return printSummary(out, s)
 		},
 	}
@@ -141,7 +141,9 @@ func newAddCmd(d Deps) *cobra.Command {
 			"skipped. Use --as to choose the directory name of a single repository.\n" +
 			"Your forks are looked up (one gh listing): a repository you forked is cloned with\n" +
 			"origin = your fork and upstream = the repository, its default branch tracking\n" +
-			"upstream; --no-fork disables this. sheaf never creates forks.",
+			"upstream; --no-fork disables this. sheaf never creates forks.\n" +
+			"Each clone gets the repository (upstream for a fork) as its gh default repository\n" +
+			"(`gh repo set-default`); without a usable gh this is skipped with a warning.",
 		RunE: func(c *cobra.Command, args []string) error {
 			req.Slugs = args
 			if len(args) == 0 && req.Org == "" && !req.All && len(req.Repos) == 0 {
@@ -178,8 +180,9 @@ func newAddCmd(d Deps) *cobra.Command {
 
 func newAdoptCmd(d Deps) *cobra.Command {
 	var opts ops.AdoptOptions
+	var all bool
 	cmd := &cobra.Command{
-		Use:   "adopt <dir>...",
+		Use:   "adopt (<dir>... | --recheck --all)",
 		Short: "Register existing checkouts located directly in the bundle",
 		Long: "Register existing checkouts. The primary checkout of a repository lives in\n" +
 			"<dir>/<default branch>/ and may have any branch checked out. A plain clone <dir>/ is\n" +
@@ -195,14 +198,43 @@ func newAdoptCmd(d Deps) *cobra.Command {
 			"(for example after `git fetch upstream`) and the fork is recorded when they now\n" +
 			"qualify, using the recorded default branch (--default-branch is ignored). Nothing is\n" +
 			"moved, checked out or re-tracked. A recorded fork is never dropped or changed (a\n" +
-			"warning says so), and the repository slug only changes when no other repository has it.",
-		Args: cobra.MinimumNArgs(1),
+			"warning says so), and the repository slug only changes when no other repository has it.\n" +
+			"--recheck --all re-examines every registered repository.\n\n" +
+			"For GitHub repositories, adopt and --recheck also make the repository (upstream for a\n" +
+			"fork) the gh default repository of the checkout (`gh repo set-default`), so that gh\n" +
+			"commands run there (e.g. `gh pr list`) use it. When gh is missing or not logged in,\n" +
+			"this is skipped with a warning; `sheaf adopt --recheck --all` sets it later.",
+		Args: func(c *cobra.Command, args []string) error {
+			switch {
+			case all && !opts.Recheck:
+				return errors.New("--all is only valid with --recheck")
+			case all && len(args) > 0:
+				return errors.New("--all re-examines every registered repository: give no repository arguments")
+			case all && c.Flags().Changed("host"):
+				return errors.New("--host cannot be combined with --all: it would record that host for every repository whose fork gets recorded; recheck those repositories by name")
+			case all && c.Flags().Changed("default-branch"):
+				return errors.New("--default-branch cannot be combined with --all (a recheck uses each repository's recorded default branch)")
+			case all:
+				return nil
+			}
+			return cobra.MinimumNArgs(1)(c, args)
+		},
 		RunE: func(c *cobra.Command, args []string) error {
 			w, err := openWorkspace(c, d)
 			if err != nil {
 				return err
 			}
+			opts.Hosting = d.hosting()
 			var dirs []string
+			if all {
+				for _, r := range w.Bundle().Repositories {
+					dirs = append(dirs, filepath.Join(w.Root, r.Name)) // a registered repository, by name
+				}
+				if len(dirs) == 0 {
+					fmt.Fprintln(c.OutOrStdout(), "no repositories registered; nothing to re-examine")
+					return nil
+				}
+			}
 			for _, a := range args {
 				if _, ok := w.Bundle().Repository(a); ok && opts.Recheck && a == filepath.Base(a) {
 					dirs = append(dirs, filepath.Join(w.Root, a)) // a registered repository, by name
@@ -228,7 +260,8 @@ func newAdoptCmd(d Deps) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.DefaultBranch, "default-branch", "", "the repository's default branch (upstream's for a clone of your fork), when it cannot be determined (applies to every <dir>)")
-	cmd.Flags().BoolVar(&opts.Recheck, "recheck", false, "re-examine the remotes of repositories already registered (record a fork now visible) instead of adopting")
+	cmd.Flags().BoolVar(&opts.Recheck, "recheck", false, "re-examine the remotes of repositories already registered (record a fork now visible, set the gh default repository) instead of adopting")
+	cmd.Flags().BoolVar(&all, "all", false, "with --recheck: re-examine every registered repository")
 	cmd.Flags().StringVar(&opts.Host, "host", "", "host to record instead of the one in the origin URL, e.g. github.com for an SSH config alias (applies to every <dir>)")
 	return cmd
 }

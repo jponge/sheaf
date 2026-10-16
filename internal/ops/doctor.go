@@ -86,7 +86,8 @@ const DefaultStaleLockAge = 10 * time.Minute
 // checkout is <repo>/<normalized default branch> and a work tree of its own,
 // origin matches the URL of sheaf.yaml (for a repository with a fork: origin
 // matches the fork's URL, upstream the repository's, and the local default
-// branch tracks upstream/<default branch>), its worktrees are present and inside
+// branch tracks upstream/<default branch>), a GitHub repository has one gh
+// default repository, the reference one (see doctorGHDefault), its worktrees are present and inside
 // the repository directory, and no lock file is left in its git directory.
 // Directories of the bundle root that are not repositories of the bundle are
 // reported, with `sheaf adopt` for those holding a checkout. It only reads:
@@ -198,12 +199,16 @@ func doctorRepo(ctx context.Context, root string, r bundle.Repository, now time.
 	}
 	// The configured URL, not `git remote get-url`, which applies
 	// url.<base>.insteadOf rewrites: sheaf.yaml records the URL as cloned.
+	// One read of the remote.* variables serves the remote checks and the
+	// gh default repository check.
+	cfg, cfgErr := remoteConfig(ctx, primary)
 	checkRemote := func(remote, want, what, field string) {
-		u, err := gitx.Run(ctx, primary, "config", "--get", "remote."+remote+".url")
-		u = strings.TrimSpace(u)
+		u := lastValue(cfg, "remote."+remote+".url")
 		switch {
-		case err != nil:
-			add(CheckWarn, remote+"-url", "no "+remote+" remote"+what+": "+firstLineOf(err.Error()), fmt.Sprintf("git -C %s remote add %s %s", primary, remote, want))
+		case cfgErr != nil:
+			add(CheckWarn, remote+"-url", "cannot read the "+remote+" remote"+what+": "+firstLineOf(cfgErr.Error()), "")
+		case u == "":
+			add(CheckWarn, remote+"-url", "no "+remote+" remote"+what, fmt.Sprintf("git -C %s remote add %s %s", primary, remote, want))
 		case u != want:
 			add(CheckWarn, remote+"-url", fmt.Sprintf("%s%s is %s but %s says %s", remote, what, u, bundle.FileName, want),
 				fmt.Sprintf("fix %s with `git -C %s remote set-url %s %s`, or the %s in %s", remote, primary, remote, want, field, bundle.FileName))
@@ -216,6 +221,9 @@ func doctorRepo(ctx context.Context, root string, r bundle.Repository, now time.
 		checkRemote(rs.Fork, r.Fork.URL, " (your fork)", "fork url")
 		checkRemote(rs.Reference, r.URL, " (the repository)", "url")
 		checkDefaultTracking(ctx, primary, r, rs, func(msg, hint string) { add(CheckWarn, "tracking", msg, hint) })
+	}
+	if r.IsGitHub() && cfgErr == nil {
+		doctorGHDefault(primary, r, ghDefaultsIn(cfg), add)
 	}
 	if infos, _, err := listCheckedRepo(ctx, r, primary, common, true); err != nil {
 		add(CheckWarn, "worktree", "cannot list worktrees: "+err.Error(), "")
@@ -326,4 +334,35 @@ func doctorUnregistered(ctx context.Context, root string, b *bundle.Bundle) []Ch
 // DoctorFailed reports whether a check failed.
 func DoctorFailed(checks []Check) bool {
 	return slices.ContainsFunc(checks, func(c Check) bool { return c.Level == CheckFail })
+}
+
+// doctorGHDefault reports the gh default repository of the GitHub
+// repository r (primary checkout primary, settings cur): missing or
+// ambiguous (warnings, with the fix) or another repository (information:
+// sheaf keeps an existing default).
+func doctorGHDefault(primary string, r bundle.Repository, cur []ghDefaultEntry, add func(l CheckLevel, check, msg, hint string)) {
+	set := fmt.Sprintf("cd %s && gh repo set-default %s", shellQuote(primary), shellQuote(r.Slug))
+	switch {
+	case len(cur) == 0:
+		add(CheckWarn, "gh-default", "no gh default repository: gh commands run in the checkouts (e.g. `gh pr list`) may ask which repository to use", set)
+	case len(cur) == 1 && strings.EqualFold(cur[0].Slug, r.Slug):
+		add(CheckOK, "gh-default", "gh default repository "+cur[0].Slug, "")
+	case len(cur) == 1:
+		add(CheckInfo, "gh-default", fmt.Sprintf("gh default repository is %s, not the repository %s (sheaf keeps an existing default)", cur[0].describe(), r.Slug),
+			"to use the repository instead: "+set)
+	default:
+		var unset []string
+		matching := false
+		for _, e := range cur {
+			if strings.EqualFold(e.Slug, r.Slug) && !matching {
+				matching = true // keep the first one naming the repository
+				continue
+			}
+			unset = append(unset, fmt.Sprintf("git -C %s config --unset remote.%s.gh-resolved", shellQuote(primary), shellQuote(e.Remote)))
+		}
+		if !matching {
+			unset = append(unset, set)
+		}
+		add(CheckWarn, "gh-default", "several gh default repositories are configured ("+describeAll(cur)+"): gh may use any of them", strings.Join(unset, " && "))
+	}
 }
