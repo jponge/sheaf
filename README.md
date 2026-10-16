@@ -26,6 +26,7 @@ source of truth, so worktrees created or removed with plain git are picked up.
 - [JSON output](#json-output)
 - [Platform support](#platform-support)
 - [Development](#development)
+- [License](#license)
 
 ## Install
 
@@ -584,3 +585,9 @@ Tests use real git only against temporary local repositories (bare
 configuration; they never use the network, never push anywhere else, and
 never run `gh` (the hosting layer is tested with a fake and recorded JSON
 fixtures).
+
+## License
+
+Copyright 2026 The sheaf Authors.
+
+Licensed under the Apache License, Version 2.0; see [LICENSE](LICENSE).

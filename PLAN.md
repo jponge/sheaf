@@ -207,6 +207,7 @@ What to do differently
 | B13 | `wt pr` on an existing, not checked-out pr/<n> fetches under .sheaf.lock with interactive git: fetch before locking | done (cf624f3) |
 | B14 | Root `--help` does not mention the home screen (kept byte-identical by decision) | done (a4a8745) |
 | B15 | Check that all Go dependencies are on their latest stable versions; upgrade (user: latest stable OK) | done: yaml v3.0.5, x/sys v0.49.0, x/sync v0.24.0, pflag v1.0.10, terminfo v1.2.0, runewidth v0.0.31; Charm, cobra, x/ansi, x/term, colorprofile already latest; ultraviolet at main head (no tags) |
+| B16 | License | done: Apache-2.0, "Copyright 2026 The sheaf Authors" (user, 2026-10-16) |
 
 Order for the high-priority items: B3 → B6 (review sees the merged code) → B2 → B1 (docs describe the final behaviour).
 - Decisions 2026-10-16 (user) for B2: bare `sheaf` in a bundle with a TTY opens an overview (checkouts table from local status, no network at open; multi-select, filter) with actions update/fetch/wt add/wt rm/prune/doctor/sync reusing the per-command TUIs and returning to the overview; enter on a row cds there through the shell-init wrapper (prints the path without it). Outside a bundle: help plus a create/init hint. --no-tui or non-TTY: help, unchanged.
