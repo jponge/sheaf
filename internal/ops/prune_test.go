@@ -38,6 +38,31 @@ func mergeOnOrigin(t *testing.T, o testutil.Origin, branch string) {
 	testutil.Git(t, work, "push", "-q", "origin", "main")
 }
 
+// pushBranches does what pushBranch does for each branch, with a single
+// clone of origin and a single push.
+func pushBranches(t *testing.T, o testutil.Origin, branches ...string) {
+	t.Helper()
+	work := originWork(t, o)
+	push := []string{"push", "-q", "origin"}
+	for _, branch := range branches {
+		testutil.Git(t, work, "switch", "-q", "-c", branch, "origin/main")
+		testutil.CommitFile(t, work, strings.ReplaceAll(branch, "/", "_")+".txt", branch+"\n", "work on "+branch)
+		push = append(push, "refs/heads/"+branch+":refs/heads/"+branch)
+	}
+	testutil.Git(t, work, push...)
+}
+
+// mergeAllOnOrigin does what mergeOnOrigin does for each branch in order,
+// with a single clone of origin and a single push.
+func mergeAllOnOrigin(t *testing.T, o testutil.Origin, branches ...string) {
+	t.Helper()
+	work := originWork(t, o)
+	for _, branch := range branches {
+		testutil.Git(t, work, "merge", "-q", "--no-ff", "-m", "merge "+branch, "origin/"+branch)
+	}
+	testutil.Git(t, work, "push", "-q", "origin", "main")
+}
+
 func (f *fixture) prunePlan(t *testing.T, opts PruneOptions) PrunePlan {
 	t.Helper()
 	if opts.WorkingDir == "" {
@@ -91,18 +116,14 @@ func pruneScenario(t *testing.T) (*fixture, string, testutil.Origin) {
 	t.Helper()
 	f := newFixture(t)
 	primary, o := f.clonedRepo(t, "a")
-	for _, b := range []string{"merged", "done", "wip", "old", "stale"} {
-		pushBranch(t, o, b)
-	}
+	pushBranches(t, o, "merged", "done", "wip", "old", "stale")
 	testutil.Git(t, primary, "fetch", "-q", "origin")
 	for _, b := range []string{"feat", "merged", "done", "fresh", "wip"} {
 		f.mustAddWT(t, "a", b)
 	}
 	testutil.Git(t, primary, "branch", "--track", "old", "origin/old")
 	testutil.Git(t, primary, "branch", "--track", "stale", "origin/stale")
-	mergeOnOrigin(t, o, "merged")
-	mergeOnOrigin(t, o, "done")
-	mergeOnOrigin(t, o, "old")
+	mergeAllOnOrigin(t, o, "merged", "done", "old")
 	for _, b := range []string{"feat", "done", "old", "stale"} {
 		testutil.Git(t, o.Path, "branch", "-q", "-D", b)
 	}

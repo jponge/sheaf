@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -37,6 +38,7 @@ var proc struct {
 
 type cacheEntry struct {
 	once sync.Once
+	n    int // index of the entry's directory, set when it is created
 	path string
 	err  error
 }
@@ -252,39 +254,154 @@ func rootDir() (string, error) {
 	return proc.root, proc.rootErr
 }
 
-// cachedOrigin returns the bare repository built for opts in this process,
-// building it on first use.
-func cachedOrigin(opts OriginOpts) (string, error) {
-	key := fmt.Sprintf("%s\x00%d\x00%s", opts.DefaultBranch, opts.Commits, strings.Join(opts.Branches, "\x00"))
+// originCacheKey is the cache key of the bare repository built for opts.
+func originCacheKey(opts OriginOpts) string {
+	return fmt.Sprintf("origin\x00%s\x00%d\x00%s", opts.DefaultBranch, opts.Commits, strings.Join(opts.Branches, "\x00"))
+}
+
+// forkCacheKey is the cache key of the forked fixture built for opts.
+func forkCacheKey(opts OriginOpts) string {
+	return "fork\x00" + originCacheKey(opts)
+}
+
+// testHookCacheEntry, if set, is called by cached between looking up the
+// entry for key and building it (tests only, never in parallel tests).
+var testHookCacheEntry func(key string)
+
+// cached returns the directory of the cache entry for key, creating it and
+// calling build on it on first use (with the isolated environment of the
+// process, see proc.baseEnv).
+func cached(key string, build func(root string) error) (string, error) {
 	proc.cacheMu.Lock()
 	if proc.cache == nil {
 		proc.cache = map[string]*cacheEntry{}
 	}
 	e := proc.cache[key]
 	if e == nil {
-		e = &cacheEntry{}
-		proc.cache[key] = e
 		proc.cacheN++
+		e = &cacheEntry{n: proc.cacheN}
+		proc.cache[key] = e
 	}
-	n := proc.cacheN
 	proc.cacheMu.Unlock()
+	if testHookCacheEntry != nil {
+		testHookCacheEntry(key)
+	}
 	e.once.Do(func() {
 		base, err := rootDir()
 		if err != nil {
 			e.err = err
 			return
 		}
-		root := filepath.Join(base, "origins", fmt.Sprint(n))
+		root := filepath.Join(base, "origins", fmt.Sprint(e.n))
 		if err := os.MkdirAll(root, 0o755); err != nil {
 			e.err = err
 			return
 		}
-		e.path = filepath.Join(root, "origin.git")
-		if err := buildOrigin(proc.baseEnv, root, opts); err != nil {
-			e.err = fmt.Errorf("building cached origin %+v: %w", opts, err)
+		if err := build(root); err != nil {
+			e.err = err
+			return
 		}
+		e.path = root
 	})
 	return e.path, e.err
+}
+
+// cachedOrigin returns the bare repository built for opts in this process
+// (<root>/origin.git, whose origin remote is <root>/work), building it on
+// first use.
+func cachedOrigin(opts OriginOpts) (string, error) {
+	root, err := cached(originCacheKey(opts), func(root string) error {
+		if err := buildOrigin(proc.baseEnv, root, opts); err != nil {
+			return fmt.Errorf("building cached origin %+v: %w", opts, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "origin.git"), nil
+}
+
+// cachedForkedOrigin returns the directory holding the forked fixture built
+// for opts in this process (<root>/upstream/repo.git, a copy of the cached
+// origin, and <root>/fork/repo.git, a bare clone of it that borrows no
+// objects), building it on first use.
+func cachedForkedOrigin(opts OriginOpts) (string, error) {
+	return cached(forkCacheKey(opts), func(root string) error {
+		src, err := cachedOrigin(opts)
+		if err != nil {
+			return err
+		}
+		up := filepath.Join(root, "upstream", "repo.git")
+		if err := os.MkdirAll(filepath.Dir(up), 0o755); err != nil {
+			return err
+		}
+		if err := copyBare(src, up, filepath.Dir(src), root); err != nil {
+			return err
+		}
+		fork := filepath.Join(root, "fork", "repo.git")
+		if _, err := gitEnv(proc.baseEnv, root, "clone", "-q", "--bare", "--no-local", up, fork); err != nil {
+			return fmt.Errorf("building cached fork %+v: %w", opts, err)
+		}
+		return nil
+	})
+}
+
+// copyBare copies the bare repository src, built under the directory
+// srcRoot, to dst and moves its origin remote from under srcRoot to the same
+// place under dstRoot, so that git run in the copy never reaches srcRoot.
+func copyBare(src, dst, srcRoot, dstRoot string) error {
+	if err := copyTree(src, dst); err != nil {
+		return err
+	}
+	retarget := func(url string) (string, error) {
+		rel, err := filepath.Rel(srcRoot, url)
+		if err != nil || !filepath.IsLocal(rel) {
+			return "", fmt.Errorf("%s: remote URL %q is not under %s", dst, url, srcRoot)
+		}
+		return filepath.Join(dstRoot, rel), nil
+	}
+	// git may quote or escape a value with these characters: let git read
+	// and write it then (two more processes).
+	if strings.ContainsAny(srcRoot+dstRoot, "\"\\;# \t\n") {
+		url, err := gitEnv(proc.baseEnv, dst, "config", "remote.origin.url")
+		if err != nil {
+			return err
+		}
+		newURL, err := retarget(url)
+		if err != nil {
+			return err
+		}
+		_, err = gitEnv(proc.baseEnv, dst, "config", "remote.origin.url", newURL)
+		return err
+	}
+	// Otherwise git wrote the value verbatim: rewrite it without running git.
+	cfg := filepath.Join(dst, "config")
+	b, err := os.ReadFile(cfg)
+	if err != nil {
+		return err
+	}
+	const key = "\n\turl = "
+	i := bytes.Index(b, []byte(key))
+	if i < 0 || bytes.Count(b, []byte(key)) != 1 || !bytes.Contains(b[:i], []byte("\n[remote \"origin\"]")) {
+		return fmt.Errorf("%s: want exactly one remote, origin, with a URL:\n%s", cfg, b)
+	}
+	start := i + len(key)
+	end := bytes.IndexByte(b[start:], '\n')
+	if end < 0 {
+		return fmt.Errorf("%s: unterminated remote URL", cfg)
+	}
+	end += start
+	newURL, err := retarget(string(b[start:end]))
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(cfg)
+	if err != nil {
+		return err
+	}
+	out := append(append(append([]byte(nil), b[:start]...), newURL...), b[end:]...)
+	return os.WriteFile(cfg, out, info.Mode().Perm())
 }
 
 // copyTree copies the directory src to dst (which must not exist), keeping

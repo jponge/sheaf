@@ -161,18 +161,13 @@ func NewOrigin(t *testing.T, opts OriginOpts) Origin {
 	if !cached {
 		isolatePerTest(t)
 	}
-	if opts.DefaultBranch == "" {
-		opts.DefaultBranch = "main"
-	}
-	if opts.Commits <= 0 {
-		opts.Commits = 1
-	}
+	opts = withOriginDefaults(opts)
 	root := t.TempDir()
 	bare := filepath.Join(root, "origin.git")
 	if cached {
 		src, err := cachedOrigin(opts)
 		if err == nil {
-			err = copyTree(src, bare)
+			err = copyBare(src, bare, filepath.Dir(src), root)
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -181,6 +176,17 @@ func NewOrigin(t *testing.T, opts OriginOpts) Origin {
 		t.Fatal(err)
 	}
 	return Origin{Path: bare, URL: "file://" + bare}
+}
+
+// withOriginDefaults returns opts with the defaults of NewOrigin applied.
+func withOriginDefaults(opts OriginOpts) OriginOpts {
+	if opts.DefaultBranch == "" {
+		opts.DefaultBranch = "main"
+	}
+	if opts.Commits <= 0 {
+		opts.Commits = 1
+	}
+	return opts
 }
 
 // buildOrigin creates root/work according to opts and its bare clone
@@ -273,19 +279,44 @@ type ForkedOrigin struct {
 // bare clone of it standing for the user's fork. The repository paths end in
 // upstream/repo.git and fork/repo.git, so the slugs derived from their URLs
 // ("upstream/repo", "fork/repo") differ. Both are independent afterwards
-// (use AdvanceOrigin on either). Safe in parallel tests like NewOrigin.
+// (use AdvanceOrigin on either); the fork borrows no objects from the
+// upstream and its origin remote is the upstream. Like NewOrigin, in a test
+// that did not change the environment the pair is a copy of one built once
+// per test process for the same opts, so it is safe in parallel tests.
 func NewForkedOrigin(t *testing.T, opts OriginOpts) ForkedOrigin {
 	t.Helper()
-	o := NewOrigin(t, opts)
+	requireMain(t, "NewForkedOrigin")
 	root := t.TempDir()
 	up := filepath.Join(root, "upstream", "repo.git")
+	fork := filepath.Join(root, "fork", "repo.git")
+	forked := ForkedOrigin{Upstream: Origin{Path: up, URL: "file://" + up}, Fork: Origin{Path: fork, URL: "file://" + fork}}
+	if isolatedNow() {
+		// A copy of the pair built once per test process for the same opts.
+		src, err := cachedForkedOrigin(withOriginDefaults(opts))
+		if err == nil {
+			err = os.MkdirAll(filepath.Dir(up), 0o755)
+		}
+		if err == nil {
+			err = os.MkdirAll(filepath.Dir(fork), 0o755)
+		}
+		if err == nil {
+			err = copyBare(filepath.Join(src, "upstream", "repo.git"), up, src, root)
+		}
+		if err == nil {
+			err = copyBare(filepath.Join(src, "fork", "repo.git"), fork, src, root)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return forked
+	}
+	o := NewOrigin(t, opts)
 	if err := os.MkdirAll(filepath.Dir(up), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Rename(o.Path, up); err != nil {
 		t.Fatal(err)
 	}
-	fork := filepath.Join(root, "fork", "repo.git")
 	Git(t, root, "clone", "-q", "--bare", "--no-local", up, fork)
-	return ForkedOrigin{Upstream: Origin{Path: up, URL: "file://" + up}, Fork: Origin{Path: fork, URL: "file://" + fork}}
+	return forked
 }
