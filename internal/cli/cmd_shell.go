@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -66,9 +67,39 @@ func newCompletionCmd() *cobra.Command {
 				"  sheaf completion fish | source\n\n"+
 				"or install it for every session:\n\n"+
 				"  sheaf completion fish > ~/.config/fish/completions/sheaf.fish",
-			func(r *cobra.Command, w io.Writer) error { return r.GenFishCompletion(w, true) }),
+			genFishCompletion),
 	)
 	return cmd
+}
+
+// fishCompletionFixes patch the script of cobra's GenFishCompletion (v1.10.2),
+// which evals "$args[1] __complete $args[2..-1] $lastArg": the previous words
+// come unescaped from `commandline -opc`, so eval splits words with spaces and
+// runs a quoted "(cmd)" on TAB, and the current token is escaped as typed, so
+// q\& reaches sheaf as q\&. The fix escapes the expanded words (`commandline
+// -x` expands ~ and variables but not command substitutions, fish >= 3.7; older
+// fish falls back to -o, without expansion) and unquotes the current token.
+var fishCompletionFixes = []struct{ old, new string }{
+	{"    set -l args (commandline -opc)\n",
+		"    set -l args (string escape -- (commandline -xpc 2>/dev/null; or commandline -opc))\n"},
+	{"    set -l lastArg (string escape -- (commandline -ct))\n",
+		"    set -l lastArg (string escape -- (commandline -ct | string unescape --style=script))\n"},
+}
+
+func genFishCompletion(r *cobra.Command, w io.Writer) error {
+	var b strings.Builder
+	if err := r.GenFishCompletion(&b, true); err != nil {
+		return err
+	}
+	script := b.String()
+	for _, f := range fishCompletionFixes {
+		if n := strings.Count(script, f.old); n != 1 {
+			return fmt.Errorf("internal error: cobra's fish completion script changed (%d occurrences of %q)", n, strings.TrimSpace(f.old))
+		}
+		script = strings.Replace(script, f.old, f.new, 1)
+	}
+	_, err := io.WriteString(w, script)
+	return err
 }
 
 func newShellInitCmd() *cobra.Command {
@@ -187,7 +218,11 @@ complete -F _sheaf_scd scd
 _sheaf_scd() {
   local tab=$'\t' v pre last i d=4
   local -a args lines
-  args=("${(@)words[2,CURRENT]}")
+  # words are as typed: unquote them; an opening quote of the current word is
+  # in compstate[quote] (', " or $'), not in PREFIX: close it to unquote
+  args=("${(@Q)words[2,CURRENT-1]}")
+  v=$compstate[quote]$PREFIX$SUFFIX${compstate[quote]#\$}
+  args+=("${(Q)v}")
   for ((i = 1; i <= $#args; i++)); do
     v=$args[i]
     pre=
@@ -230,7 +265,8 @@ end
 function __sheaf_scd_complete
     set -l words (commandline -opc)
     set -e words[1]
-    set -l cur (commandline -ct)
+    # the current token is as typed (unlike -opc): unquote it
+    set -l cur (commandline -ct | string unescape --style=script)
     set -l args
     set -l prev ''
     for a in $words "$cur"

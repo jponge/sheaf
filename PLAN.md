@@ -177,3 +177,4 @@ What to do differently
 - Cached whole-tree fixtures (testutil.CachedTree) for pruneScenario and forkGoneTopic: ops processes −14%, CPU −15%/−18% (-race); the 15 prune-scenario tests −57% processes. Flaky TestFastForwardWithOptionsForceAlreadyClosed fixed (empty pidfile race; not reproduced).
 - macOS (user) at 040cb46, -race slowest ops tests: TestR10BranchMovedAfterPlan 4.02 s (builds the cached scenario), other prune-scenario tests 1.8–2.4 s (were 3.1–3.9 s); TestGitCallsPerCommand 3.35 s (was 5.1).
 - Decision 2026-10-16 (user): test execution time is acceptable; speed work closed.
+- fish 4.0.2 / zsh 5.9 verified in the container (Debian debs unpacked without root): scd + completion work; fixed quoting/escaping in zsh and fish scd completion, and patched cobra's generated fish script (it evaluated quoted (cmd) words on TAB). make test-shells added. Open: same quoting bug in bash scd completion; cobra zsh open-quote issue (upstream).

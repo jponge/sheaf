@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jponge/sheaf/internal/hosting"
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
@@ -79,9 +80,14 @@ func TestGeneratedScriptsParse(t *testing.T) {
 	for _, sh := range []string{"bash", "zsh", "fish"} {
 		for _, gen := range []string{"completion", "shell-init"} {
 			t.Run(gen+"/"+sh, func(t *testing.T) {
-				bin, err := exec.LookPath(sh)
-				if err != nil {
-					t.Skipf("%s is not installed: generated %s script NOT syntax-checked", sh, gen)
+				var bin string
+				if sh == "bash" {
+					var err error
+					if bin, err = exec.LookPath(sh); err != nil {
+						t.Skipf("%s is not installed: generated %s script NOT syntax-checked", sh, gen)
+					}
+				} else {
+					bin = shellBinary(t, sh)
 				}
 				script := filepath.Join(t.TempDir(), "script")
 				if err := os.WriteFile(script, []byte(e.mustRun(t, gen, sh)), 0o644); err != nil {
@@ -248,8 +254,9 @@ func TestScdBashCompletionHidesGlobalFlags(t *testing.T) {
 	}
 }
 
-// ptyDriver runs an interactive bash (rc, then PS1 set to recognise
-// prompts) on a pty and types each argument (backslash escapes decoded),
+// ptyDriver runs an interactive bash or zsh (the binary given as first
+// argument; rc, then PS1 set to recognise prompts) on a pty and types each
+// argument (backslash escapes decoded),
 // waiting for events instead of fixed delays: the first prompt; after keys
 // ending with a newline, the next prompt; after other keys (e.g. ending with
 // a tab), the echo of their printable part, the rest (the completion) being
@@ -258,16 +265,26 @@ func TestScdBashCompletionHidesGlobalFlags(t *testing.T) {
 // driver goes on; the test's assertions report it.
 const ptyDriver = `
 import os, pty, select, shlex, sys, time
-bindir, cwd, rc = sys.argv[1:4]
+shell, bindir, cwd, rc = sys.argv[1:5]
+zsh = os.path.basename(shell).startswith("zsh")
 # The system bashrc may set PS1: set it after rc, to recognise prompts.
 wrapper = rc + "-driver"
+if zsh:  # zsh reads $ZDOTDIR/.zshrc
+    os.mkdir(wrapper)
+    wrapper = os.path.join(wrapper, ".zshrc")
 with open(wrapper, "w") as f:
     f.write(". %s\nPS1='PROMPT$ '\n" % shlex.quote(rc))
 pid, fd = pty.fork()
 if pid == 0:
     os.chdir(cwd)
     env = {"PATH": bindir + ":/usr/bin:/bin", "HOME": cwd, "TERM": "dumb", "PS1": "PROMPT$ ", "LC_ALL": "C"}
-    os.execve("/bin/bash", ["bash", "--noprofile", "--rcfile", wrapper, "-i"], env)
+    if zsh:  # -d: no global rc files; see shellBinary for the passed-through variables
+        env["ZDOTDIR"] = os.path.dirname(wrapper)
+        for k in ("LD_LIBRARY_PATH", "FPATH", "SHEAF_TEST_ZSH_MODULE_PATH"):
+            if k in os.environ:
+                env[k] = os.environ[k]
+        os.execve(shell, ["zsh", "-d", "-i"], env)
+    os.execve(shell, ["bash", "--noprofile", "--rcfile", wrapper, "-i"], env)
 overall = time.time() + 20
 out = b""
 eof = False
@@ -289,7 +306,7 @@ def wait(what, cond, step=10):
             out += b
 prompts = lambda s: s.count("PROMPT$ ")
 wait("the first prompt", lambda s: prompts(s) >= 1)
-for keys in sys.argv[4:]:
+for keys in sys.argv[5:]:
     k = keys.encode().decode("unicode_escape")
     if k.endswith("\n"):
         n = prompts(out.decode(errors="replace"))
@@ -301,7 +318,7 @@ for keys in sys.argv[4:]:
         echo = k.rstrip("".join(map(chr, range(32))))  # without the tab
         wait("the echo of %r" % keys, lambda s, start=start, echo=echo: echo in s[start:])
 os.write(fd, b"exit\n")
-wait("bash to exit", lambda s: eof, step=5)
+wait("the shell to exit", lambda s: eof, step=5)
 if not eof:
     os.kill(pid, 9)
 os.waitpid(pid, 0)
@@ -329,7 +346,7 @@ func TestScdBashCompletionInteractive(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out, err := exec.Command(py, "-I", script, bin, root, rc, "args a w\\\\&\\t", "\\n", "args a x\\\\$\\t", "\\n").CombinedOutput()
+	out, err := exec.Command(py, "-I", script, "/bin/bash", bin, root, rc, "args a w\\\\&\\t", "\\n", "args a x\\\\$\\t", "\\n").CombinedOutput()
 	if err != nil {
 		t.Fatalf("driver: %v\n%s", err, out)
 	}
@@ -337,5 +354,265 @@ func TestScdBashCompletionInteractive(t *testing.T) {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+// shellBinary returns the fish or zsh binary used by the shell tests: the
+// path in SHEAF_TEST_FISH or SHEAF_TEST_ZSH when set, else the shell found on
+// PATH; the test is skipped, saying so, when there is none. A shell unpacked
+// outside its install prefix may need more environment, which the tests pass
+// through to it: LD_LIBRARY_PATH (its libraries), FPATH (zsh: the function
+// directories, for compinit) and SHEAF_TEST_ZSH_MODULE_PATH (zsh: the module
+// directory, prepended to module_path; zsh does not import MODULE_PATH). fish
+// finds its data relative to the binary when <prefix>/share/fish and
+// <prefix>/etc/fish both exist for <prefix>/bin/fish. With
+// SHEAF_TEST_REQUIRE_SHELLS set, a missing shell fails the test instead
+// (`make test-shells` sets it, and sets up shells unpacked from packages).
+func shellBinary(t *testing.T, name string) string {
+	t.Helper()
+	v := "SHEAF_TEST_" + strings.ToUpper(name)
+	if p := os.Getenv(v); p != "" {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("%s: %v", v, err)
+		}
+		return p
+	}
+	p, err := exec.LookPath(name)
+	if err != nil && os.Getenv("SHEAF_TEST_REQUIRE_SHELLS") != "" {
+		t.Fatalf("%s is not installed (nor %s set) and SHEAF_TEST_REQUIRE_SHELLS is set", name, v)
+	}
+	if err != nil {
+		t.Skipf("%s is not installed (nor %s set): %s integration NOT tested", name, v, name)
+	}
+	return p
+}
+
+// shellEnv is the environment of the shells run by the tests: the sheaf
+// binary first on PATH, a HOME and XDG directories of the test, and the
+// variables documented at shellBinary.
+func shellEnv(t *testing.T, binDir string) []string {
+	home := t.TempDir()
+	env := []string{"PATH=" + binDir + ":" + os.Getenv("PATH"), "HOME=" + home, "LC_ALL=C",
+		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"), "XDG_DATA_HOME=" + filepath.Join(home, ".local", "share"),
+		"XDG_CACHE_HOME=" + filepath.Join(home, ".cache")}
+	for _, k := range []string{"LD_LIBRARY_PATH", "FPATH", "SHEAF_TEST_ZSH_MODULE_PATH"} {
+		if v, ok := os.LookupEnv(k); ok {
+			env = append(env, k+"="+v)
+		}
+	}
+	return env
+}
+
+// runFish runs script in fish (no user configuration) with the sheaf
+// completion and scd loaded, from dir; t prints the candidates of `complete
+// -C <line>` without descriptions, sorted, then "==".
+func runFish(t *testing.T, binDir, dir, script string) string {
+	t.Helper()
+	fish := shellBinary(t, "fish")
+	pre := "sheaf completion fish | source; sheaf shell-init fish | source\n" +
+		"function t; complete -C $argv[1] | string replace -r -- '\\t.*' '' | sort; echo ==; end\n"
+	cmd := exec.Command(fish, "--no-config", "-c", pre+script)
+	cmd.Dir = dir
+	cmd.Env = shellEnv(t, binDir)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fish: %v\n%s", err, out)
+	}
+	return string(out)
+}
+
+// shellBundle, like complBundle, has repositories a and b, in a directory
+// whose path has a space; a has worktrees feat/x, q&r and x$y (shell
+// metacharacters), a tag worktree v1 (tag v2 is free) and branch dev; the
+// organization o is tracked.
+func shellBundle(t *testing.T) (*env, string) {
+	t.Helper()
+	e := newEnv(t)
+	root := filepath.Join(t.TempDir(), "my bundle")
+	e.mustRun(t, "create", root)
+	root, _ = filepath.EvalSymlinks(root)
+	e.cwd = root
+	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x", "dev", "q&r", "x$y"}})
+	e.fake.AddRepo(hosting.Repo{Owner: "o", Name: "a", CloneURL: o.URL, DefaultBranch: "main"})
+	e.origin(t, "o", "b", false)
+	e.mustRun(t, "add", "o/a", "o/b")
+	e.mustRun(t, "add", "--org", "o", "--all") // tracks the organization o
+	primary := filepath.Join(root, "a", "main")
+	testutil.Git(t, primary, "tag", "v1")
+	testutil.Git(t, primary, "tag", "v2")
+	for _, args := range [][]string{{"feat/x"}, {"q&r"}, {"x$y"}, {"--tag", "v1"}} {
+		e.mustRun(t, append(append([]string{"wt", "add", "a"}, args...), "--no-fetch")...)
+	}
+	return e, root
+}
+
+func TestScdEndToEndInFish(t *testing.T) {
+	t.Parallel()
+	shellBinary(t, "fish")
+	bin := sheafBinary(t)
+	_, root := shellBundle(t)
+	got := runFish(t, bin, root, `scd a; pwd; scd a feat/x; pwd; scd a 'q&r'; pwd; scd a 'x$y'; pwd; scd a v1; pwd; scd; pwd
+scd nosuch; echo "status=$status"; pwd
+cd a/main; scd feat-x; pwd; scd b; pwd`)
+	j := func(p ...string) string { return filepath.Join(append([]string{root}, p...)...) }
+	want := strings.Join([]string{j("a", "main"), j("a", "feat-x"), j("a", "q-r"), j("a", "x-y"), j("a", "v1"), root,
+		`sheaf: no repository named "nosuch" in the bundle (repositories: a, b)`, "status=1", root,
+		j("a", "feat-x"), j("b", "main")}, "\n") + "\n"
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestFishCompletion(t *testing.T) {
+	t.Parallel()
+	shellBinary(t, "fish")
+	bin := sheafBinary(t)
+	_, root := shellBundle(t)
+	parent, name := filepath.Dir(root), filepath.Base(root)
+	all := "feat-x\nfeat/x\nmain\nq&r\nq-r\nv1\nx$y\nx-y\n==\n"
+	for _, c := range []struct{ dir, line, want string }{
+		{root, "scd ", "a\nb\n==\n"},
+		{root, "scd a ", all},
+		{root, "scd a f", "feat-x\nfeat/x\n==\n"},
+		{parent, `scd --bundle "` + name + `" a `, all},
+		{parent, `scd --bundle ` + strings.ReplaceAll(name, " ", `\ `) + ` a `, all},
+		{filepath.Join(root, "a", "main"), "scd ", "a\nb\n" + all},
+		{root, "sheaf wt rm a ", "feat-x\nfeat/x\nq&r\nq-r\nv1\nx$y\nx-y\n==\n"},
+		{root, "sheaf wt add a ", "dev\n==\n"},
+		{root, "sheaf wt add a --tag ", "v2\n==\n"},
+		{root, "sheaf add --org ", "o\n==\n"},
+		// the current token as typed, with quotes or escapes
+		{root, `scd a q\&`, "q&r\n==\n"},
+		{root, `scd a 'x$`, "x$y\n==\n"},
+		{parent, `scd --bundle my\ bu`, name + "/\n==\n"},
+		{root, `sheaf path a q\&`, "q&r\n==\n"},
+		{root, `sheaf path a 'x$`, "x$y\n==\n"},
+		// previous words with spaces (fish passes them unescaped)
+		{parent, `sheaf --bundle "` + name + `" path a `, all},
+		{parent, `sheaf --bundle ` + strings.ReplaceAll(name, " ", `\ `) + ` path a `, all},
+	} {
+		line := strings.ReplaceAll(c.line, `\`, `\\`)
+		line = strings.ReplaceAll(line, `'`, `\'`)
+		if got := runFish(t, bin, c.dir, "t '"+line+"'"); got != c.want {
+			t.Errorf("complete -C %q in %s:\ngot:\n%s\nwant:\n%s", c.line, c.dir, got, c.want)
+		}
+	}
+	// ~ in previous words is expanded (HOME is the shell's own)
+	got := runFish(t, bin, parent, `ln -s "`+root+`" ~/b; t 'sheaf --bundle ~/b path a '; t 'scd --bundle ~/b a '`)
+	if got != all+all {
+		t.Errorf("--bundle ~/b:\ngot:\n%s\nwant:\n%s", got, all+all)
+	}
+}
+
+// TestFishCompletionDoesNotEvaluateWords: completing must not run code in
+// the words of the command line (fish does not expand (...) inside quotes).
+func TestFishCompletionDoesNotEvaluateWords(t *testing.T) {
+	t.Parallel()
+	shellBinary(t, "fish")
+	bin := sheafBinary(t)
+	_, root := shellBundle(t)
+	mark := filepath.Join(t.TempDir(), "evaluated")
+	for _, line := range []string{
+		`sheaf path "(touch ` + mark + `)" `,
+		`sheaf path "$(touch ` + mark + `)" `,
+		`scd "(touch ` + mark + `)" `,
+		`scd "$(touch ` + mark + `)" `,
+	} {
+		runFish(t, bin, root, "t '"+line+"'")
+		if _, err := os.Stat(mark); err == nil {
+			t.Fatalf("completing %q ran the command substitution", line)
+		}
+	}
+}
+
+// TestZshCompletionInteractive drives zsh's completion system through a pty:
+// the inserted word must be the candidate, escaped, for the words as typed.
+func TestZshCompletionInteractive(t *testing.T) {
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is not installed: no pty-driven completion test")
+	}
+	zsh := shellBinary(t, "zsh")
+	bin := sheafBinary(t)
+	_, root := shellBundle(t)
+	parent, name := filepath.Dir(root), filepath.Base(root)
+	dir := t.TempDir()
+	rc := filepath.Join(dir, "rc")
+	script := filepath.Join(dir, "drive.py")
+	// args stands for scd and shows the arguments it receives
+	rcText := `[[ -n $SHEAF_TEST_ZSH_MODULE_PATH ]] && module_path=(${(s.:.)SHEAF_TEST_ZSH_MODULE_PATH} $module_path)
+autoload -U compinit && compinit -u -D
+source <(sheaf completion zsh)
+eval "$(sheaf shell-init zsh)"
+args() { printf '<%s>' "$@"; echo; }
+compdef _sheaf_scd args
+`
+	for f, c := range map[string]string{rc: rcText, script: ptyDriver} {
+		if err := os.WriteFile(f, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	esc := strings.ReplaceAll(name, " ", `\\ `) // decoded by the driver: "my\ bundle"
+	cases := []struct{ keys, want string }{
+		{`cd ` + esc + `\n`, ""},
+		{`args a ma\t`, "<a><main>"},
+		{`args a q\\&\t`, "<a><q&r>"},
+		{`args a x\\$\t`, "<a><x$y>"},
+		{`cd ..\n`, ""},
+		{`args --bundle ` + esc + ` a ma\t`, "<--bundle><" + name + "><a><main>"},
+		{`args --bundle '` + name + `' a ma\t`, "<--bundle><" + name + "><a><main>"},
+		{`sheaf path --bundle ` + esc + ` a q\\&\t`, filepath.Join(root, "a", "q-r")},
+		{`args --bundle ` + esc + ` a 'x$\t`, "<--bundle><" + name + "><a><x$y>"}, // last: if the quote is left open, the next lines are a continuation
+	}
+	args := []string{"-I", script, zsh, bin, parent, rc}
+	for _, c := range cases {
+		args = append(args, c.keys, `\n`)
+		if strings.HasSuffix(c.keys, `\n`) {
+			args = args[:len(args)-1]
+		}
+	}
+	out, err := exec.Command(py, args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("driver: %v\n%s", err, out)
+	}
+	// parts[i+1]: from the prompt where case i is typed to the next one
+	parts := strings.Split(string(out), "PROMPT$ ")
+	for i, c := range cases {
+		if i+1 >= len(parts) {
+			t.Errorf("%q: no prompt", c.keys)
+		} else if c.want != "" && !strings.Contains(parts[i+1], c.want+"\r\n") {
+			t.Errorf("%q: missing %q", c.keys, c.want)
+		}
+	}
+	if strings.Contains(string(out), "DRIVER:") {
+		t.Error("the driver timed out")
+	}
+	if t.Failed() {
+		t.Logf("pty output:\n%s", out)
+	}
+}
+
+func TestScdEndToEndInZsh(t *testing.T) {
+	t.Parallel()
+	zsh := shellBinary(t, "zsh")
+	bin := sheafBinary(t)
+	_, root := shellBundle(t)
+	cmd := exec.Command(zsh, "-f", "-c", `[[ -n $SHEAF_TEST_ZSH_MODULE_PATH ]] && module_path=(${(s.:.)SHEAF_TEST_ZSH_MODULE_PATH} $module_path)
+eval "$(sheaf shell-init zsh)"
+scd a; pwd; scd a feat/x; pwd; scd a 'q&r'; pwd; scd a 'x$y'; pwd; scd a v1; pwd; scd; pwd
+scd nosuch; echo "status=$?"; pwd
+cd a/main; scd feat-x; pwd; scd b; pwd`)
+	cmd.Dir = root
+	cmd.Env = shellEnv(t, bin)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("zsh: %v\n%s", err, out)
+	}
+	j := func(p ...string) string { return filepath.Join(append([]string{root}, p...)...) }
+	want := strings.Join([]string{j("a", "main"), j("a", "feat-x"), j("a", "q-r"), j("a", "x-y"), j("a", "v1"), root,
+		`sheaf: no repository named "nosuch" in the bundle (repositories: a, b)`, "status=1", root,
+		j("a", "feat-x"), j("b", "main")}, "\n") + "\n"
+	if string(out) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", out, want)
 	}
 }
