@@ -283,7 +283,7 @@ func TestRemoveDisplaysInformationalRisks(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("remove: exit %d\n%s", code, errs)
 	}
-	if !strings.Contains(errs, "commits only reachable from local tags") || !strings.Contains(errs, filepath.Join("a", "main")) {
+	if !strings.Contains(errs, "1 commit only reachable from local tags") || !strings.Contains(errs, filepath.Join("a", "main")) {
 		t.Fatalf("stderr does not show the informational risk:\n%s", errs)
 	}
 }

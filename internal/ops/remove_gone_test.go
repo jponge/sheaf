@@ -21,8 +21,8 @@ func TestRemoteRepoGoneMatcher(t *testing.T) {
 		"fatal: unable to access 'https://github.com/o/a.git/': Could not resolve host: github.com":             false,
 		"": false,
 	} {
-		if got := remoteRepoGone(stderr); got != want {
-			t.Errorf("remoteRepoGone(%q) = %v, want %v", stderr, got, want)
+		if got := remoteRepoGoneFor(stderr, "origin"); got != want {
+			t.Errorf("remoteRepoGoneFor(%q, origin) = %v, want %v", stderr, got, want)
 		}
 	}
 }

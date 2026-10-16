@@ -65,7 +65,7 @@ func TestTTYHelperProcess(t *testing.T) {
 	} else {
 		_ = os.WriteFile(sanity, []byte("denied: "+err.Error()), 0o644)
 	}
-	_ = Fetch(context.Background(), dir) // the fake ssh always fails
+	_ = FetchRemote(context.Background(), dir, "origin") // the fake ssh always fails
 }
 
 // S1: git (and the ssh it spawns) must not be able to open the controlling

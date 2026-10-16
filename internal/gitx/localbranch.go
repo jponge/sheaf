@@ -57,6 +57,31 @@ func PullRequestRef(ref string) (int, bool) {
 	return n, true
 }
 
+// PullHeadRef is the ref where sheaf records the head of pull request n of
+// a repository whenever it fetches refs/pull/<n>/head from it:
+// refs/sheaf/pull/<n>. The commits reachable from it are published (see
+// DeletionRisksOptions.PublishedRefs) as of that fetch.
+func PullHeadRef(n int) string { return "refs/sheaf/pull/" + strconv.Itoa(n) }
+
+// PullRequestBranches returns, sorted and without duplicates, the numbers of
+// the pull requests whose head a local branch of the repository containing
+// dir tracks from remote (branch.<name>.remote = remote and
+// branch.<name>.merge = refs/pull/<n>/head, as `sheaf wt pr` sets up).
+func PullRequestBranches(ctx context.Context, dir, remote string) ([]int, error) {
+	cfg, err := branchConfig(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	var ns []int
+	for _, c := range cfg {
+		if n, ok := PullRequestRef(c.merge); ok && c.remote == remote && c.merge == "refs/pull/"+strconv.Itoa(n)+"/head" && !slices.Contains(ns, n) {
+			ns = append(ns, n)
+		}
+	}
+	slices.Sort(ns)
+	return ns, nil
+}
+
 // LocalBranches returns the local branches of the repository containing dir,
 // sorted by name, with their upstream configuration.
 func LocalBranches(ctx context.Context, dir string) ([]LocalBranch, error) {
@@ -125,7 +150,7 @@ func branchConfig(ctx context.Context, dir string) (map[string]branchCfg, error)
 // FetchRefspecs runs `git fetch --quiet <remote> <refspecs...>` in dir, for
 // fetches of explicit refs (e.g. refs/pull/<n>/head). It does not prune, and
 // a refspec without a leading '+' never rewrites its destination other than
-// by a fast-forward. Like Fetch, it keeps the caller's terminal under
+// by a fast-forward. Like FetchRemote, it keeps the caller's terminal under
 // WithInteractive and must be serialized with other fetches into the same
 // repository when it updates refs; a refspec without destination only writes
 // FETCH_HEAD, which is per worktree.

@@ -163,7 +163,7 @@ func TestSyncRemoveGone(t *testing.T) {
 	// remote is a data risk (only copy), so nothing goes without --force.
 	out, errs, code := e.run(t, "sync", "--remove-gone", "--yes", "--allow-mass-removal")
 	if code != 1 || !strings.Contains(out, "failed   a") || !strings.Contains(out, "failed   b") ||
-		!strings.Contains(errs, "appears to be gone") || !strings.Contains(errs, "1 untracked files") {
+		!strings.Contains(errs, "appears to be gone") || !strings.Contains(errs, "1 untracked file") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out, errs)
 	}
 	if got := names(load(t, root)); !slices.Equal(got, []string{"a", "b"}) || !exists(filepath.Join(root, "a")) {

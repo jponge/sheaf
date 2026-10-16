@@ -156,7 +156,7 @@ var ErrBaseNotFound = errors.New("gitx: base not found")
 // exist or must be an empty directory (ErrWorktreePathOccupied otherwise,
 // checked before anything is created). It never accesses the network:
 // remote-tracking refs are used as they are, so callers wanting a fresh
-// remote state should Fetch first. Cases, in order:
+// remote state should fetch first. Cases, in order:
 //
 //   - refs/heads/<branch> exists: it is checked out (git refuses if it is
 //     already checked out in another worktree), whatever its upstream;

@@ -396,20 +396,16 @@ func diffOrg(b *bundle.Bundle, src bundle.Source, repos []hosting.Repo, complete
 	return out, notes
 }
 
-// SyncAddNew clones the repositories of new proposals like Add does for an
-// organization (origin org:<owner>, canonical owner spelling, sheaf.yaml
-// saved after each clone), at most jobs at a time, and returns the per
-// repository results (named after the directory). Empty repositories are
+// SyncAddNewWithOptions clones the repositories of new proposals like Add
+// does for an organization (origin org:<owner>, canonical owner spelling,
+// sheaf.yaml saved after each clone), at most jobs at a time, and returns the
+// per repository results (named after the directory). Empty repositories are
 // skipped. Proposals of another kind are failed results; so are directory
 // name clashes, also between the proposals of different organizations.
-func SyncAddNew(ctx context.Context, w *Workspace, props []Proposal, jobs int, rep Reporter) Summary {
-	return SyncAddNewWithOptions(ctx, w, props, CloneOptions{}, jobs, rep)
-}
-
-// SyncAddNewWithOptions is SyncAddNew with fork detection like Add's: unless
-// opts.NoFork, the user's forks are listed once through opts.Hosting, and a
-// repository with a fork is cloned with origin = the fork and upstream = the
-// repository.
+//
+// Forks are detected like Add does: unless opts.NoFork, the user's forks are
+// listed once through opts.Hosting, and a repository with a fork is cloned
+// with origin = the fork and upstream = the repository.
 func SyncAddNewWithOptions(ctx context.Context, w *Workspace, props []Proposal, opts CloneOptions, jobs int, rep Reporter) Summary {
 	type planned struct {
 		spec  lookup

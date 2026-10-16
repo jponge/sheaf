@@ -63,12 +63,12 @@ func TestDefaultBranchFromOriginHEAD(t *testing.T) {
 			_, dir := cloneOrigin(t, testutil.OriginOpts{DefaultBranch: b, Branches: []string{"other"}})
 			// Check out another branch so HEAD cannot be mistaken for the default.
 			testutil.Git(t, dir, "checkout", "-q", "other")
-			got, err := DefaultBranch(context.Background(), dir)
+			got, err := DefaultBranchOf(context.Background(), dir, "origin")
 			if err != nil {
 				t.Fatal(err)
 			}
 			if got != b {
-				t.Fatalf("DefaultBranch = %q, want %q", got, b)
+				t.Fatalf("DefaultBranchOf = %q, want %q", got, b)
 			}
 		})
 	}
@@ -81,12 +81,12 @@ func TestDefaultBranchFallsBackToLsRemote(t *testing.T) {
 			_, dir := cloneOrigin(t, testutil.OriginOpts{DefaultBranch: b, Branches: []string{"other"}})
 			testutil.Git(t, dir, "checkout", "-q", "other")
 			testutil.Git(t, dir, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
-			got, err := DefaultBranch(context.Background(), dir)
+			got, err := DefaultBranchOf(context.Background(), dir, "origin")
 			if err != nil {
 				t.Fatal(err)
 			}
 			if got != b {
-				t.Fatalf("DefaultBranch = %q, want %q", got, b)
+				t.Fatalf("DefaultBranchOf = %q, want %q", got, b)
 			}
 		})
 	}
@@ -97,7 +97,7 @@ func TestDefaultBranchNoOrigin(t *testing.T) {
 	testutil.IsolateGit(t)
 	dir := t.TempDir()
 	testutil.Git(t, dir, "init", "-q")
-	if _, err := DefaultBranch(context.Background(), dir); err == nil {
+	if _, err := DefaultBranchOf(context.Background(), dir, "origin"); err == nil {
 		t.Fatal("expected an error without origin")
 	}
 }

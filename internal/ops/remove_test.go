@@ -282,7 +282,7 @@ func TestRemoveRefusesHiddenModifications(t *testing.T) {
 			if ks := riskKinds(re.Plan.Items[idx]); !slices.Contains(ks, gitx.RiskHiddenModifications) {
 				t.Fatalf("%s risks = %v, want hidden modifications", where, ks)
 			}
-			if !strings.Contains(err.Error(), dir) || !strings.Contains(err.Error(), "hidden modifications") {
+			if !strings.Contains(err.Error(), dir) || !strings.Contains(err.Error(), "1 hidden modification") {
 				t.Fatalf("refusal message lacks %s / hidden modifications:\n%v", dir, err)
 			}
 			if !exists(filepath.Join(dir, "file-1.txt")) {

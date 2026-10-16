@@ -52,11 +52,11 @@ func TestInteractiveFetchStaysInCallerSession(t *testing.T) {
 	dir := sshFakeClone(t, recordSessionScript(rec)+"exit 1\n")
 	self := sessionOf(t, "self")
 
-	_ = Fetch(context.Background(), dir)
+	_ = FetchRemote(context.Background(), dir, "origin")
 	if got := readTrimmed(t, rec); got == self {
 		t.Fatalf("non-interactive fetch: ssh in caller session %s, want a new session", got)
 	}
-	_ = Fetch(WithInteractive(context.Background()), dir)
+	_ = FetchRemote(WithInteractive(context.Background()), dir, "origin")
 	if got := readTrimmed(t, rec); got != self {
 		t.Fatalf("interactive fetch: ssh in session %s, want the caller's session %s", got, self)
 	}
@@ -90,7 +90,7 @@ func TestInteractiveDoesNotApplyToMerge(t *testing.T) {
 	testutil.Git(t, dir, "config", "core.hooksPath", hooks)
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	ctx := WithInteractive(context.Background())
-	if err := Fetch(ctx, dir); err != nil {
+	if err := FetchRemote(ctx, dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	if r := FastForward(ctx, dir); r.Outcome != PullFastForwarded {
@@ -110,7 +110,7 @@ func TestInteractiveFetchCancelReturnsPromptly(t *testing.T) {
 	ctx, cancel := context.WithTimeout(WithInteractive(context.Background()), 700*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	err := Fetch(ctx, dir)
+	err := FetchRemote(ctx, dir, "origin")
 	if el := time.Since(start); el > 4*time.Second {
 		t.Errorf("returned after %v", el)
 	}
@@ -126,7 +126,7 @@ func TestKillAllKillsInteractiveFetch(t *testing.T) {
 	dir := sshFakeClone(t, hangingScript(pidfile))
 	killRecorded(t, pidfile)
 	done := make(chan error, 1)
-	go func() { done <- Fetch(WithInteractive(context.Background()), dir) }()
+	go func() { done <- FetchRemote(WithInteractive(context.Background()), dir, "origin") }()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		b, _ := os.ReadFile(pidfile)
@@ -158,7 +158,7 @@ func TestInteractiveTTYHelperProcess(t *testing.T) {
 	if dir == "" {
 		return
 	}
-	_ = Fetch(WithInteractive(context.Background()), dir) // the fake ssh fails
+	_ = FetchRemote(WithInteractive(context.Background()), dir, "origin") // the fake ssh fails
 }
 
 // The point of interactive mode: ssh can open the controlling terminal (to
@@ -205,7 +205,7 @@ func TestInteractiveFetchCancelStopsDescendants(t *testing.T) {
 	ctx, cancel := context.WithCancel(WithInteractive(context.Background()))
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- Fetch(ctx, dir) }()
+	go func() { done <- FetchRemote(ctx, dir, "origin") }()
 	waitPIDCount(t, pidfile, 2)
 	cancel()
 	select {
@@ -220,7 +220,7 @@ func TestKillAllStopsInteractiveFetchDescendants(t *testing.T) {
 	t.Cleanup(resetKillAll)
 	dir, pidfile := slowUploadPackClone(t)
 	done := make(chan error, 1)
-	go func() { done <- Fetch(WithInteractive(context.Background()), dir) }()
+	go func() { done <- FetchRemote(WithInteractive(context.Background()), dir, "origin") }()
 	waitPIDCount(t, pidfile, 2)
 	KillAll()
 	select {

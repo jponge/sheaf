@@ -105,10 +105,11 @@ func newPruneCmd(d Deps) *cobra.Command {
 			"with a merge commit. For a repository cloned from your fork, upstream and origin are\n" +
 			"fetched and merged means merged into upstream/<default branch>; when your fork is gone\n" +
 			"(or with --offline) its remote-tracking refs are not trusted: branches tracking a gone\n" +
-			"fork count as gone, and a branch whose commits are only on its refs is kept. Squash- and rebase-merged branches are only found once their\n" +
-			"remote branch is deleted (gone); a branch without commits of its own is never\n" +
-			"considered merged. The primary checkout, worktrees outside the repository directory,\n" +
-			"locked ones and pull request branches of `sheaf wt pr` are never pruned.\n\n" +
+			"fork count as gone, and a branch whose commits are only on its refs is kept. Squash-\n" +
+			"and rebase-merged branches are only found once their remote branch is deleted (gone);\n" +
+			"a branch without commits of its own is never considered merged. The primary checkout,\n" +
+			"worktrees outside the repository directory, locked ones and pull request branches of\n" +
+			"`sheaf wt pr` are never pruned.\n\n" +
 			"Without --yes nothing is changed (dry run): the candidates are listed. With --yes\n" +
 			"each worktree is removed like `sheaf wt rm` (uncommitted changes or untracked files\n" +
 			"keep it; there is no --force). --delete-branches also deletes the branches of the\n" +
@@ -116,7 +117,11 @@ func newPruneCmd(d Deps) *cobra.Command {
 			"--include-branches also deletes, under the same condition, gone or merged local\n" +
 			"branches that have no worktree. sheaf never prompts in CLI mode. In TUI mode (without\n" +
 			"--dry-run or --json) the candidates are listed in a dialog asking for confirmation,\n" +
-			"unless --yes is given.",
+			"unless --yes is given.\n\n" +
+			"--json prints {\"version\": 1, \"dry_run\": bool, \"candidates\": [...], \"skipped\":\n" +
+			"[...], \"results\": [{..., \"outcome\": \"removed\"|\"kept\"|\"failed\", \"message\"}],\n" +
+			"\"errors\": [{\"repo\", \"error\"}]}. --json never opens the TUI: with --yes it removes\n" +
+			"the candidates in plain mode (no dialog) and reports them in \"results\".",
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			if yes && dryRun {
@@ -277,15 +282,14 @@ func newDoctorCmd(d Deps) *cobra.Command {
 		Use:   "doctor",
 		Short: "Check the environment and the bundle",
 		Long: "Check that git is recent enough (" + gitx.MinGitVersion.String() + " or later), that gh is installed and\n" +
-			"authenticated for github.com,\n" +
-			"that sheaf.yaml is valid, and for each repository: its directory and primary\n" +
-			"checkout (<repo>/<default branch>/, a work tree of its own), origin's URL against\n" +
-			"sheaf.yaml (for a clone of your fork: origin, upstream, and the default branch\n" +
-			"tracking upstream), missing worktrees or worktrees outside the repository directory, and\n" +
-			"lock files left in its git directory. Directories of the bundle that are not\n" +
-			"repositories of it are listed (with `sheaf adopt` when they hold a checkout).\n" +
-			"Nothing is fetched or changed. One line per check: OK, INFO, WARN or FAIL, with\n" +
-			"hints; the exit status is 1 when a check FAILs. --json prints\n" +
+			"authenticated for github.com, that sheaf.yaml is valid, and for each repository: its\n" +
+			"directory and primary checkout (<repo>/<default branch>/, a work tree of its own),\n" +
+			"origin's URL against sheaf.yaml (for a clone of your fork: origin, upstream, and the\n" +
+			"default branch tracking upstream), missing worktrees or worktrees outside the\n" +
+			"repository directory, and lock files left in its git directory. Directories of the\n" +
+			"bundle that are not repositories of it are listed (with `sheaf adopt` when they hold\n" +
+			"a checkout). Nothing is fetched or changed. One line per check: OK, INFO, WARN or\n" +
+			"FAIL, with hints; the exit status is 1 when a check FAILs. --json prints\n" +
 			"{\"version\": 1, \"failed\": bool, \"checks\": [{level, check, repo, message, hint}]}.",
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {

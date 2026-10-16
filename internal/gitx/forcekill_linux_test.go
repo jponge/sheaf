@@ -59,7 +59,7 @@ func pidsIn(pidfile string) []int {
 // must still kill the whole group promptly.
 func TestForceKillCatchesGroupMemberThatMissedTheFirstSignal(t *testing.T) {
 	dir, pidfile := slowSmudgeClone(t)
-	if err := Fetch(context.Background(), dir); err != nil {
+	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	force := make(chan struct{})

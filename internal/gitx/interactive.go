@@ -8,10 +8,10 @@ import (
 type interactiveKey struct{}
 
 // WithInteractive returns a context under which the network operations of
-// gitx (Clone, Fetch, FetchAll, and the ls-remote fallback of DefaultBranch)
-// keep sheaf's controlling terminal, so that ssh can ask for a passphrase or
-// a host key confirmation, and git for HTTPS credentials (interactive git
-// mode). It is meant for the plain CLI processing one repository at a time
+// gitx (Clone, FetchRemote, FetchAll, and the ls-remote fallback of
+// DefaultBranchOf) keep sheaf's controlling terminal, so that ssh can ask for
+// a passphrase or a host key confirmation, and git for HTTPS credentials
+// (interactive git mode). It is meant for the plain CLI processing one repository at a time
 // with standard input on a terminal; with parallel invocations, prompts would
 // interleave.
 //

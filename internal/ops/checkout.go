@@ -102,7 +102,10 @@ func coSelectRepos(b *bundle.Bundle, patterns []string) ([]bundle.Repository, er
 				n++
 			}
 		}
-		if n == 0 {
+		switch {
+		case n == 0 && !strings.ContainsAny(p, `*?[\`):
+			return nil, repoNotFound(b, p) // a plain name
+		case n == 0:
 			return nil, fmt.Errorf("%q matches no repository of the bundle", p)
 		}
 	}
@@ -300,7 +303,7 @@ func coForEach(jobs, n int, fn func(i int)) {
 
 // coFetchLocks serializes fetches per git common directory: worktrees share
 // the remote-tracking refs, and concurrent fetches into one repository fail
-// on ref locks (see gitx.Fetch).
+// on ref locks (see gitx.FetchRemote).
 var coFetchLocks = struct {
 	sync.Mutex
 	m map[string]*sync.Mutex

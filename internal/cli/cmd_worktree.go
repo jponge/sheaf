@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/ops"
 	"github.com/spf13/cobra"
 )
@@ -19,11 +21,25 @@ func addWorktreeCommands(root *cobra.Command, d Deps) {
 		Aliases: []string{"wt"},
 		Short:   "Add, list and remove worktrees (siblings of the primary checkout)",
 		Long: "Manage the worktrees of the bundle's repositories, located at\n" +
-			"<bundle>/<repo>/<normalized branch>/ next to the primary checkout.\n\n" +
+			"<bundle>/<repo>/<normalized branch>/ next to the primary checkout. In plain mode with\n" +
+			"stdin on a terminal, add, remove and pr let git keep the terminal (ssh may prompt for\n" +
+			"a passphrase or a host key), whatever -j.\n\n" +
 			singleArgHelp,
 	}
 	wt.AddCommand(newWorktreeAddCmd(d), newWorktreeListCmd(d), newWorktreeRemoveCmd(d), newWorktreePRCmd(d))
 	root.AddCommand(wt, newPathCmd(d))
+}
+
+// singleRepoContext is checkoutContext for the commands that work on a
+// single repository (remove, wt add, wt rm, wt pr): they run one git process
+// at a time, so interactive git mode does not depend on -j (prompts cannot
+// interleave); it still needs CLI mode and standard input on a terminal.
+func singleRepoContext(c *cobra.Command) context.Context {
+	ctx := c.Context()
+	if gitInteractive(false, 1, stdinIsTerminal(c.InOrStdin())) {
+		ctx = gitx.WithInteractive(ctx)
+	}
+	return ctx
 }
 
 // eventSink returns an emitter filling the defaults of events (repository,
@@ -60,6 +76,9 @@ func repoAndTarget(d Deps, w *ops.Workspace, args []string, sel *ops.WorktreeTar
 	if err != nil {
 		return "", ops.WorktreeTarget{}, err
 	}
+	if target == nil && len(args) == 0 {
+		return "", ops.WorktreeTarget{}, fmt.Errorf("missing %s for repository %s (inferred from the working directory)", what, repo)
+	}
 	if target == nil {
 		return "", ops.WorktreeTarget{}, fmt.Errorf("missing %s for repository %s (outside a checkout, a single argument is a repository name)", what, repo)
 	}
@@ -94,7 +113,7 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 		Long: "Create <bundle>/<repo>/<normalized branch>/ for branch: the local branch if it\n" +
 			"exists, else a local branch tracking origin/<branch>, else a new branch from --base\n" +
 			"(default origin/<default branch>, upstream/<default branch> for a clone of your\n" +
-			"fork). origin is fetched first unless --no-fetch.\n" +
+			"fork). origin is fetched first unless --no-fetch (or its alias --offline).\n" +
 			"A base that does not exist is reported with the closest remote branches and tags.\n" +
 			"A name that is only a tag (no local or origin branch; origin's tags are fetched\n" +
 			"for this check unless --no-fetch) is refused: use --tag. So a new branch named\n" +
@@ -129,7 +148,7 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				res, err := ops.AddTagWorktree(c.Context(), w, repo, target.Name, opts, eventSink(c, repo, ops.PhaseWorktree))
+				res, err := ops.AddTagWorktree(singleRepoContext(c), w, repo, target.Name, opts, eventSink(c, repo, ops.PhaseWorktree))
 				if err != nil {
 					return err
 				}
@@ -140,7 +159,7 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := ops.AddWorktree(c.Context(), w, repo, branch.Name, opts, eventSink(c, repo, ops.PhaseWorktree))
+			res, err := ops.AddWorktree(singleRepoContext(c), w, repo, branch.Name, opts, eventSink(c, repo, ops.PhaseWorktree))
 			if err != nil {
 				return err
 			}
@@ -150,6 +169,7 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.Base, "base", "", "start point of a new branch (default: origin/<default branch>, or upstream/<default branch> for a clone of your fork)")
 	cmd.Flags().BoolVar(&opts.NoFetch, "no-fetch", false, "do not fetch the repository's remotes first")
+	cmd.Flags().BoolVar(&opts.NoFetch, "offline", false, "same as --no-fetch")
 	cmd.Flags().StringVar(&tag, "tag", "", "create a detached worktree pinned at this tag instead of a branch worktree")
 	return cmd
 }
@@ -254,10 +274,23 @@ func newWorktreeListCmd(d Deps) *cobra.Command {
 				return nil
 			}
 			var msgs []string
+			repos, wts := 0, 0
 			for _, f := range fails {
 				msgs = append(msgs, f.Error())
+				if f.Path != "" {
+					wts++
+				} else {
+					repos++
+				}
 			}
-			return fmt.Errorf("%d of the repositories or worktrees could not be listed:\n  %s", len(fails), strings.Join(msgs, "\n  "))
+			var what []string
+			if repos > 0 {
+				what = append(what, countOf(repos, "repository", "repositories"))
+			}
+			if wts > 0 {
+				what = append(what, countOf(wts, "worktree", "worktrees"))
+			}
+			return fmt.Errorf("%s could not be listed:\n  %s", strings.Join(what, " and "), strings.Join(msgs, "\n  "))
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
@@ -355,7 +388,7 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 		if opts.WorkingDir, err = d.getwd(); err != nil {
 			return err
 		}
-		msg, err := ops.RemoveWorktree(c.Context(), w, repo, target, opts, emit)
+		msg, err := ops.RemoveWorktree(singleRepoContext(c), w, repo, target, opts, emit)
 		if errors.Is(err, ops.ErrNotConfirmed) {
 			return fmt.Errorf("removing worktree %s of %s needs confirmation: pass --yes (sheaf never prompts in CLI mode)", target.Name, repo)
 		}
@@ -411,11 +444,14 @@ func branchLabel(in ops.WorktreeInfo) string {
 	return in.Branch
 }
 
-func commitCount(n int) string {
+func commitCount(n int) string { return countOf(n, "commit", "commits") }
+
+// countOf is "<n> <one>" or "<n> <many>".
+func countOf(n int, one, many string) string {
 	if n == 1 {
-		return "1 commit"
+		return "1 " + one
 	}
-	return fmt.Sprintf("%d commits", n)
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 func newPathCmd(d Deps) *cobra.Command {
@@ -469,7 +505,8 @@ func newWorktreePRCmd(d Deps) *cobra.Command {
 			"fetched from refs/pull/<number>/head into the local branch pr/<number>, at\n" +
 			"<repo>/pr-<number>/, tracking that ref (git pull works there; `sheaf update` skips\n" +
 			"it). Running the command again for such a pull request fast-forwards its worktree\n" +
-			"to the current head: it refuses uncommitted changes and force-pushed heads.\n" +
+			"to the current head: it refuses uncommitted changes and force-pushed heads. The head\n" +
+			"is recorded as refs/sheaf/pull/<number>: `sheaf remove` counts its commits as pushed.\n" +
 			"The number may be written #<number>. The path is printed on stdout.\n\n" +
 			"With one argument the repository is inferred from the working directory.",
 		Args: cobra.RangeArgs(1, 2),
@@ -496,7 +533,7 @@ func newWorktreePRCmd(d Deps) *cobra.Command {
 				return err
 			}
 			emit := eventSink(c, rc.Name, ops.PhasePR)
-			res, err := ops.AddPRWorktree(checkoutContext(c), w, d.hosting(), rc.Name, n, emit)
+			res, err := ops.AddPRWorktree(singleRepoContext(c), w, d.hosting(), rc.Name, n, emit)
 			if err != nil {
 				return err
 			}

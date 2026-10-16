@@ -2,7 +2,7 @@ package ops
 
 import "testing"
 
-func TestSlugFromRemoteURL(t *testing.T) {
+func TestParseRemoteURLSlug(t *testing.T) {
 	t.Parallel()
 	ok := map[string]string{
 		"git@github.com:jponge/boiler-vroom.git":          "jponge/boiler-vroom",
@@ -19,9 +19,9 @@ func TestSlugFromRemoteURL(t *testing.T) {
 		"https://gitlab.example.com/group/sub/proj.git":   "sub/proj",
 	}
 	for in, want := range ok {
-		got, err := SlugFromRemoteURL(in)
+		_, got, err := ParseRemoteURL(in)
 		if err != nil || got != want {
-			t.Errorf("SlugFromRemoteURL(%q) = %q, %v; want %q", in, got, err, want)
+			t.Errorf("ParseRemoteURL(%q) slug = %q, %v; want %q", in, got, err, want)
 		}
 	}
 	bad := []string{
@@ -35,8 +35,8 @@ func TestSlugFromRemoteURL(t *testing.T) {
 		"https://github.com/o/.git",
 	}
 	for _, in := range bad {
-		if got, err := SlugFromRemoteURL(in); err == nil {
-			t.Errorf("SlugFromRemoteURL(%q) = %q, want error", in, got)
+		if _, got, err := ParseRemoteURL(in); err == nil {
+			t.Errorf("ParseRemoteURL(%q) slug = %q, want error", in, got)
 		}
 	}
 }

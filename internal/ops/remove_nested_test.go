@@ -142,26 +142,20 @@ func TestRemoveNestedEdgeCasesBlock(t *testing.T) {
 	}
 }
 
-// NIT: when the final sheaf.yaml update is cancelled after the directory
-// was deleted, the update is retried once without cancellation.
-func TestRemoveRetriesRegistrationAfterCancel(t *testing.T) {
+// NIT: a cancellation once the directory is being deleted does not leave
+// its entry behind in sheaf.yaml (the unregistration runs under the bundle
+// lock taken before the deletion, and cannot be cancelled).
+func TestRemoveCancelledDuringDeletionUnregisters(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var release func()
 	deleted := false
-	_, err := Remove(ctx, f.w, "a", RemoveOptions{Confirm: func(RemovePlan) bool {
-		release = holdLock(t, f.w.Root) // the final update will have to wait
-		return true
-	}}, func(e Event) {
+	_, err := Remove(ctx, f.w, "a", RemoveOptions{Confirm: yes}, func(e Event) {
 		if strings.HasPrefix(e.Message, "deleting ") {
 			deleted = true
-		}
-		if deleted && strings.Contains(e.Message, "waiting for .sheaf.lock") {
 			cancel()
-			go release()
 		}
 	})
 	if !deleted {

@@ -20,7 +20,7 @@ import (
 // branch worktrees.
 //
 // It validates the tag name (a valid ref component, not starting with '-'),
-// fetches origin with its tags unless opts.NoFetch (gitx.FetchTags, which
+// fetches origin with its tags unless opts.NoFetch (gitx.FetchTagsFrom, which
 // never deletes local tags; a failed fetch is an error), and refuses a tag
 // that already has a worktree and a directory name taken, case-insensitively,
 // by any checkout (primary, branch or tag worktree) or by another entry. The
@@ -29,9 +29,9 @@ import (
 func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts WorktreeAddOptions, emit func(Event)) (WorktreeAddResult, error) {
 	ctx = withCommandCache(ctx)
 	b := w.Bundle()
-	r, ok := lookupRepo(b, repo)
-	if !ok {
-		return WorktreeAddResult{}, fmt.Errorf("no repository named %q in the bundle (%s)", repo, repoList(b))
+	r, err := repoNamed(b, repo)
+	if err != nil {
+		return WorktreeAddResult{}, err
 	}
 	if opts.Base != "" {
 		return WorktreeAddResult{}, errors.New("--base does not apply to a tag worktree")
@@ -113,7 +113,7 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 	return WorktreeAddResult{Repo: r.Name, Dir: dir, Path: path, Tag: tag, Head: oid, Warnings: warnings}, nil
 }
 
-// keptTagWarnings describes the local tags that gitx.FetchTags kept because
+// keptTagWarnings describes the local tags that gitx.FetchTagsFrom kept because
 // origin has a different tag of the same name; the requested tag gets its
 // own warning, since the worktree is then made from the local one.
 func keptTagWarnings(kept []string, tag, remote string) []string {
@@ -245,20 +245,14 @@ func baseNotFoundError(ctx context.Context, dir, repo, base string, noFetch bool
 	return errors.New(msg)
 }
 
-// closestRefs returns, as usable start points ("origin/<branch>", "<branch>
-// (local branch)", "<tag> (tag)"), the remote branches, local branches and
-// tags among refs (full ref names) whose
-// short names match query (base without an origin/, tags/ or refs/...
-// prefix), ignoring case, best first: equal, prefixed by the query,
-// containing it, contained in it (two characters at least), sharing a prefix
-// of half the query at least. Ties go to the name closest in length, then
-// remote branches, local branches, tags, then by name. At most maxBaseSuggestions.
-func closestRefs(query string, refs []string) []string {
-	return closestRefsFor(query, refs, gitx.OriginRemotes.BranchSearch())
-}
-
-// closestRefsFor is closestRefs with the remote branches of remotes
-// ("<remote>/<branch>") instead of origin's only.
+// closestRefsFor returns, as usable start points ("<remote>/<branch>",
+// "<branch> (local branch)", "<tag> (tag)"), the branches of remotes, local
+// branches and tags among refs (full ref names) whose short names match
+// query (base without a <remote>/, tags/ or refs/... prefix), ignoring case,
+// best first: equal, prefixed by the query, containing it, contained in it
+// (two characters at least), sharing a prefix of half the query at least.
+// Ties go to the name closest in length, then remote branches, local
+// branches, tags, then by name. At most maxBaseSuggestions.
 func closestRefsFor(query string, refs []string, remotes []string) []string {
 	q := strings.ToLower(query)
 	prefixes := []string{}

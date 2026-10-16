@@ -12,11 +12,11 @@ Status: approved 2026-10-14. Source of requirements: `goals.md`.
 | Primary checkout | the directory `<bundle>/<repo>/<default-branch-normalized>/`; it may have any branch checked out (temporary switches in the primary are a normal workflow) |
 | Worktrees | `<bundle>/<repo>/<branch-normalized>/` as siblings of the primary; created with `git worktree add` from the primary |
 | Normalization | `/` and other path-unsafe characters → `-`, consecutive `-` collapsed; collisions (e.g. `feat/a-b` vs `feat-a/b`) are detected and refused |
-| update | `git pull --ff-only`; skip and report when the tree is dirty (staged or unstaged), there is no upstream, or the branch has diverged |
-| remove | refuses when any checkout/worktree has uncommitted changes, stashes, or unpushed commits; `--force` overrides |
+| update | one fetch per repository, then `git merge --ff-only @{upstream}` in each checkout (only checked-out branches move); skip and report when the tree is dirty (staged or unstaged), there is no upstream, or the branch has diverged |
+| remove | refuses when any checkout/worktree has uncommitted changes, stashes, unpushed commits (commits of a recorded `wt pr` head count as pushed), unknown entries, or the remote is gone; `--force` overrides only these. Never overridden: working directory inside, repository directory a symlink, no or several primaries, locked worktrees, worktrees outside the directory or of other repositories inside it, unreadable directories in unknown entries, other fetch failures |
 | UI mode | TUI when stdin+stdout are TTYs; plain CLI otherwise or with `--no-tui`. In CLI mode every TUI choice has a flag equivalent; missing required input is an error, never a prompt |
 | Bundle discovery | walk up from CWD to the first directory containing `sheaf.yaml`; `--bundle <dir>` overrides |
-| adopt | a plain clone `foo/` is moved to `foo/<branch-normalized>/`; existing linked worktrees fixed with `git worktree repair`; refuse if the target exists |
+| adopt | a plain clone `foo/` is moved to `foo/<default-branch-normalized>/` whatever branch it has checked out (never switched, see the design decision of 2026-10-14); existing linked worktrees fixed with `git worktree repair`; refuse if the target exists |
 | Org listing | archived repos hidden unless `--include-archived`; forks listed and marked |
 | Commits | orchestrator commits locally after each reviewed step (conventional commits, no attribution trailers); never pushes |
 
@@ -26,8 +26,12 @@ Status: approved 2026-10-14. Source of requirements: `goals.md`.
 cmd/sheaf/            main.go only
 internal/bundle/      sheaf.yaml model, Load/Save, Find (walk up), layout & name normalization
 internal/gitx/        thin exec wrapper over git: clone, default branch, status (porcelain v2), ahead/behind,
-                      stash count, worktree add/list/remove/repair, fetch, pull --ff-only
-internal/hosting/     interface Hosting { ListRepos(owner), Repo(owner, name) }; gh CLI impl (gh repo list/view --json); in-memory fake
+                      stash count, worktree add/list/remove/repair, fetch (one remote, all remotes, explicit
+                      refspecs), fast-forward of a checkout to its upstream after the fetch (merge --ff-only),
+                      deletion risks, per-command query cache
+internal/hosting/     interface Hosting { ListRepos, Repo, PR, CurrentUser, ListForks }; gh CLI impl (gh repo
+                      list/view --json, gh api user); in-memory Fake for tests (fake.go: a production file of
+                      the package, used only by tests; the linker drops it from the sheaf binary)
 internal/ops/         use cases, UI-agnostic; emit progress events (repo, worktree, phase, message, error) on a channel;
                       bounded-parallel executor (-j N, default NumCPU)
 internal/tui/         bubbletea models: multi-select (filter, select all/none), progress view over ops events, confirm dialog
@@ -52,6 +56,9 @@ repositories:
     default_branch: main
     origin: explicit         # explicit | org:<name> | adopted
     host: gitlab.com         # optional; omitted = github.com, "local" for file:// origins; gh features skip non-GitHub repos
+    fork:                    # optional: your fork, cloned as origin (the repository above is then upstream)
+      slug: jponge-fork/boiler-vroom
+      url: git@github.com:jponge-fork/boiler-vroom.git
 ```
 
 ## Testing rules (non-negotiable, applies to every step)

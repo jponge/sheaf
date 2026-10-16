@@ -587,15 +587,6 @@ func TestSourceMutations(t *testing.T) {
 	if err := b.AddExclude("smallrye", ""); err == nil {
 		t.Fatal("expected error for empty repo name")
 	}
-	if err := b.RemoveSource("unknown"); err == nil {
-		t.Fatal("expected error for unknown source")
-	}
-	if err := b.RemoveSource("smallrye"); err != nil {
-		t.Fatal(err)
-	}
-	if len(b.Sources) != 0 {
-		t.Fatal("not removed")
-	}
 }
 
 func FuzzNormalizeBranch(f *testing.F) {

@@ -33,7 +33,7 @@ func readFile(t *testing.T, p string) string {
 
 func originSlug(t *testing.T, o testutil.Origin) string {
 	t.Helper()
-	s, err := SlugFromRemoteURL(o.URL)
+	_, s, err := ParseRemoteURL(o.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

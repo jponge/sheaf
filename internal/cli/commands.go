@@ -21,7 +21,7 @@ func addBundleCommands(root *cobra.Command, d Deps) {
 	addCheckoutCommands(root, d)
 	addWorktreeCommands(root, d)
 	addSyncCommands(root, d)
-	addShellCommands(root, d)
+	addShellCommands(root)
 	addMaintenanceCommands(root, d)
 }
 
@@ -230,9 +230,18 @@ func newRemoveCmd(d Deps) *cobra.Command {
 		Short: "Remove a repository, its worktrees and its directory from the bundle",
 		Long: "Remove a repository: fetch it, refuse when any checkout or worktree has data that\n" +
 			"would be lost (changes, untracked files, stashes, unpushed commits) unless --force,\n" +
-			"then delete its worktrees, its directory and its sheaf.yaml entry. In CLI mode the\n" +
-			"removal must be confirmed with --yes; sheaf never prompts. In TUI mode a dialog\n" +
-			"shows what will be deleted and asks for confirmation, unless --yes is given.",
+			"then delete its worktrees, its directory and its sheaf.yaml entry. Commits of a pull\n" +
+			"request head checked out by `sheaf wt pr` count as pushed (with --offline, as of its\n" +
+			"last fetch). Entries of the repository directory that are not checkouts of it are\n" +
+			"data at risk too: --force deletes them unchecked.\n\n" +
+			"--force never overrides these refusals: the working directory is inside the\n" +
+			"repository directory; the repository directory is a symbolic link; no (or several)\n" +
+			"primary checkouts; a locked worktree; a worktree outside the repository directory; a\n" +
+			"worktree of another repository anywhere inside it (or a directory there that cannot\n" +
+			"be read); a fetch that failed for another reason than a gone remote.\n\n" +
+			"In CLI mode the removal must be confirmed with --yes; sheaf never prompts. In TUI mode\n" +
+			"a dialog shows what will be deleted and asks for confirmation, unless --yes is given.\n" +
+			"In plain mode with stdin on a terminal, git keeps the terminal (ssh may prompt).",
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			w, err := openWorkspace(c, d)
@@ -266,7 +275,7 @@ func newRemoveCmd(d Deps) *cobra.Command {
 				}
 				return yes
 			}
-			msg, err := ops.Remove(checkoutContext(c), w, name, ops.RemoveOptions{Force: force, Offline: offline, Confirm: confirm, WorkingDir: wd}, emit)
+			msg, err := ops.Remove(singleRepoContext(c), w, name, ops.RemoveOptions{Force: force, Offline: offline, Confirm: confirm, WorkingDir: wd}, emit)
 			if errors.Is(err, ops.ErrNotConfirmed) {
 				return fmt.Errorf("removing %s needs confirmation: pass --yes (sheaf never prompts in CLI mode)", name)
 			}

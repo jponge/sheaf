@@ -53,7 +53,7 @@ func TestR10PRHeadNotFromSharedFetchHead(t *testing.T) {
 		t.Fatalf("refresh: HEAD = %s, want PR 7's head %s", got, next7b)
 	}
 	// No temporary ref is left behind.
-	if out := testutil.Git(t, primary, "for-each-ref", "refs/sheaf/"); out != "" {
+	if out := testutil.Git(t, primary, "for-each-ref", "refs/sheaf/tmp/"); out != "" {
 		t.Fatalf("leftover refs: %s", out)
 	}
 }

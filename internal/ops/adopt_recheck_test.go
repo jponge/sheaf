@@ -184,7 +184,7 @@ func TestRecheckOfUnregisteredDirectoryFails(t *testing.T) {
 	dir := filepath.Join(f.w.Root, "u")
 	plainClone(t, o, dir)
 	_, _, err := recheck(t, f, dir)
-	if err == nil || !strings.Contains(err.Error(), "not registered") {
+	if err == nil || !strings.Contains(err.Error(), `no repository named "u" in the bundle`) || !strings.Contains(err.Error(), "adopt it first") {
 		t.Fatalf("err = %v", err)
 	}
 	if !exists(filepath.Join(dir, ".git")) || len(f.onDisk(t).Repositories) != 0 {

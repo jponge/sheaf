@@ -13,7 +13,7 @@ import (
 var shells = []string{"bash", "zsh", "fish"}
 
 // addShellCommands registers completion and shell-init commands.
-func addShellCommands(root *cobra.Command, d Deps) {
+func addShellCommands(root *cobra.Command) {
 	root.AddCommand(newCompletionCmd(), newShellInitCmd())
 }
 

@@ -57,7 +57,7 @@ func NewRootCmdWithDeps(s Streams, d Deps) *cobra.Command {
 	pf := root.PersistentFlags()
 	pf.String("bundle", "", "bundle directory (default: nearest parent containing sheaf.yaml)")
 	pf.Bool("no-tui", false, "disable the interactive TUI and use plain CLI output")
-	pf.IntP("jobs", "j", runtime.NumCPU(), "number of repositories processed in parallel")
+	pf.IntP("jobs", "j", runtime.NumCPU(), "number of repositories processed in parallel (checkouts for status and run); with -j 1, in plain mode with stdin on a terminal, git keeps the terminal and may prompt (ssh passphrase, host key): remove and wt add/rm/pr always do so")
 
 	root.AddCommand(newVersionCmd())
 	addBundleCommands(root, d)

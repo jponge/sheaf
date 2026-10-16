@@ -80,8 +80,6 @@ func (w *Workspace) update(fn func(b *bundle.Bundle) error) error {
 
 // updateCtx is update with cancellation of the lock wait.
 func (w *Workspace) updateCtx(ctx context.Context, emit func(Event), fn func(b *bundle.Bundle) error) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
 	waiting := func() {
 		if emit != nil {
 			emit(Event{Message: "waiting for " + lockFileName + " (another sheaf process is updating the bundle)"})
@@ -95,6 +93,17 @@ func (w *Workspace) updateCtx(ctx context.Context, emit func(Event), fn func(b *
 		return fmt.Errorf("locking %s: %w", bundle.FileName, err)
 	}
 	defer unlock()
+	return w.updateLocked(fn)
+}
+
+// updateLocked is update for a caller that holds the bundle lock
+// (lockBundle). The lock is always taken before w.mu (here and in
+// updateCtx): lockBundle also excludes the other tasks of this process (each
+// call opens its own file description), and w.mu is never held while
+// waiting for it.
+func (w *Workspace) updateLocked(fn func(b *bundle.Bundle) error) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	c, err := bundle.Load(w.Root)
 	if err != nil {
 		return err

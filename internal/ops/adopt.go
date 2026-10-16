@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,6 +74,20 @@ type AdoptOptions struct {
 // A directory already registered under its name is skipped (Skip error),
 // unless opts.Recheck is set: see Recheck.
 func Adopt(ctx context.Context, w *Workspace, dir string, opts AdoptOptions, emit func(Event)) (string, error) {
+	if opts.Recheck {
+		// A registered repository is named by its directory: a missing one
+		// is looked up by name (an unknown name gets the usual message).
+		if abs, err := filepath.Abs(dir); err == nil && resolveExisting(filepath.Dir(abs)) == w.Root {
+			if _, err := os.Lstat(abs); errors.Is(err, fs.ErrNotExist) {
+				name, b := filepath.Base(abs), w.Bundle()
+				_, registered := lookupRepo(b, name)
+				if _, near := caseVariant(b, name); !registered && !near {
+					return "", fmt.Errorf("cannot re-examine %s: %w, and no directory %s", name, repoNotFound(b, name), abs)
+				}
+				return recheckEntry(ctx, w, name, opts, emit)
+			}
+		}
+	}
 	dir, name, err := adoptTarget(w, dir)
 	if err != nil {
 		return "", err
@@ -252,8 +267,7 @@ func adoptCheckout(ctx context.Context, root string, l layout, entry bundle.Repo
 // operation.
 func relocate(root string, l layout, defDir string) (func() error, error) {
 	if l.plain {
-		_, undo, err := moveIntoSubdir(root, l.dir, defDir)
-		return undo, err
+		return moveIntoSubdir(root, l.dir, defDir)
 	}
 	target := filepath.Join(l.dir, defDir)
 	if err := osRename(l.checkout, target); err != nil {
@@ -300,8 +314,11 @@ func adoptTarget(w *Workspace, dir string) (string, string, error) {
 		return "", "", err
 	}
 	fi, err := os.Lstat(abs)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", "", fmt.Errorf("cannot adopt %s: no such directory", abs)
+	}
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("cannot adopt %s: %w", abs, err)
 	}
 	if !fi.IsDir() {
 		return "", "", fmt.Errorf("cannot adopt %s: not a directory (symbolic links are not followed)", abs)
@@ -428,21 +445,21 @@ func describeCheckout(ctx context.Context, checkout string, finalPath func(def s
 }
 
 // moveIntoSubdir moves dir to dir/sub through a temporary directory in root
-// and returns the new path and a function that moves it back.
-func moveIntoSubdir(root, dir, sub string) (string, func() error, error) {
+// and returns a function that moves it back.
+func moveIntoSubdir(root, dir, sub string) (func() error, error) {
 	fi, err := os.Lstat(dir)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	target := filepath.Join(dir, sub)
 	tmp, err := os.MkdirTemp(root, ".sheaf-adopt-"+filepath.Base(dir)+"-")
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	staged := filepath.Join(tmp, "repo")
 	if err := osRename(dir, staged); err != nil {
 		os.Remove(tmp)
-		return "", nil, err
+		return nil, err
 	}
 	// From here on dir is missing: every failure must put it back.
 	restore := func(cause error) error {
@@ -453,13 +470,13 @@ func moveIntoSubdir(root, dir, sub string) (string, func() error, error) {
 		return cause
 	}
 	if err := osMkdir(dir, fi.Mode().Perm()); err != nil {
-		return "", nil, restore(err)
+		return nil, restore(err)
 	}
 	if err := osRename(staged, target); err != nil {
 		if rerr := os.Remove(dir); rerr != nil {
-			return "", nil, fmt.Errorf("%w; the clone is still in %s (removing %s failed: %v)", err, staged, dir, rerr)
+			return nil, fmt.Errorf("%w; the clone is still in %s (removing %s failed: %v)", err, staged, dir, rerr)
 		}
-		return "", nil, restore(err)
+		return nil, restore(err)
 	}
 	os.Remove(tmp)
 	undo := func() error {
@@ -485,7 +502,7 @@ func moveIntoSubdir(root, dir, sub string) (string, func() error, error) {
 		os.Remove(back)
 		return nil
 	}
-	return target, undo, nil
+	return undo, nil
 }
 
 // AdoptAll adopts each of dirs (see Adopt) with at most jobs in parallel.
@@ -518,11 +535,14 @@ func AdoptAll(ctx context.Context, w *Workspace, dirs []string, opts AdoptOption
 // it, and no remote is asked). An entry that already has a fork is never
 // changed, even when its remotes no longer qualify: that is warned about.
 func recheckEntry(ctx context.Context, w *Workspace, name string, opts AdoptOptions, emit func(Event)) (string, error) {
-	r, ok := w.Bundle().Repository(name)
+	b := w.Bundle()
+	cur, ok := lookupRepo(b, name)
 	if !ok {
-		return "", fmt.Errorf("cannot re-examine %s: it is not registered in %s (adopt it first: sheaf adopt %s)", name, bundle.FileName, name)
+		if _, ok := caseVariant(b, name); ok {
+			return "", fmt.Errorf("cannot re-examine %s: %w", name, repoNotFound(b, name))
+		}
+		return "", fmt.Errorf("cannot re-examine %s: %w; adopt it first: sheaf adopt %s", name, repoNotFound(b, name), name)
 	}
-	cur := *r
 	primary, _, prob := coCheckPrimary(ctx, w.Root, cur)
 	if prob != nil {
 		return "", fmt.Errorf("cannot re-examine %s: %s: %w", name, prob.Path, prob.Err)

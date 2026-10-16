@@ -26,19 +26,45 @@ type RepoContext struct {
 	Worktree string
 }
 
-// lookupRepo finds a repository by directory name: exact match first, then
-// a case-insensitive one (unique: bundle validation rejects names differing
-// only by case).
+// lookupRepo finds a repository by its directory name, exactly: names are
+// case-sensitive everywhere (a name that only differs by case is a miss,
+// which repoNotFound points out).
 func lookupRepo(b *bundle.Bundle, name string) (bundle.Repository, bool) {
 	if r, ok := b.Repository(name); ok {
 		return *r, true
 	}
+	return bundle.Repository{}, false
+}
+
+// repoNamed is lookupRepo with the error every command reports for an
+// unknown name (see repoNotFound).
+func repoNamed(b *bundle.Bundle, name string) (bundle.Repository, error) {
+	if r, ok := lookupRepo(b, name); ok {
+		return r, nil
+	}
+	return bundle.Repository{}, repoNotFound(b, name)
+}
+
+// repoNotFound describes an unknown repository name: it lists the
+// repositories and, when name only differs from one by case, suggests it.
+func repoNotFound(b *bundle.Bundle, name string) error {
+	msg := fmt.Sprintf("no repository named %q in the bundle (%s)", name, repoList(b))
+	if alt, ok := caseVariant(b, name); ok {
+		msg += fmt.Sprintf("; did you mean %q?", alt)
+	}
+	return errors.New(msg)
+}
+
+// caseVariant returns the name of the repository whose name only differs
+// from name by case (unique: bundle validation rejects names differing only
+// by case).
+func caseVariant(b *bundle.Bundle, name string) (string, bool) {
 	for _, r := range b.Repositories {
-		if strings.EqualFold(r.Name, name) {
-			return r, true
+		if r.Name != name && strings.EqualFold(r.Name, name) {
+			return r.Name, true
 		}
 	}
-	return bundle.Repository{}, false
+	return "", false
 }
 
 // repoList describes the repositories of b for error messages.
@@ -55,16 +81,17 @@ func repoList(b *bundle.Bundle) string {
 }
 
 // ResolveRepo resolves the optional repository argument of a command. A
-// non-empty arg must name a repository of the bundle (exactly, or
-// case-insensitively). An empty arg is inferred from cwd when it is inside
-// <root>/<repo> of a registered repository; RepoContext.Worktree is then the
-// first path component below it, if any. Errors list the repositories.
+// non-empty arg must name a repository of the bundle exactly. An empty arg
+// is inferred from cwd when it is inside <root>/<repo> of a registered
+// repository (named exactly by that path component); RepoContext.Worktree
+// is then the first path component below it, if any. Errors list the
+// repositories (see repoNotFound).
 func ResolveRepo(w *Workspace, arg, cwd string) (RepoContext, error) {
 	b := w.Bundle()
 	if arg != "" {
-		r, ok := lookupRepo(b, arg)
-		if !ok {
-			return RepoContext{}, fmt.Errorf("no repository named %q in the bundle (%s)", arg, repoList(b))
+		r, err := repoNamed(b, arg)
+		if err != nil {
+			return RepoContext{}, err
 		}
 		return RepoContext{Name: r.Name}, nil
 	}
@@ -132,9 +159,9 @@ func ListWorktrees(ctx context.Context, w *Workspace, repo string) ([]WorktreeIn
 	b := w.Bundle()
 	var repos []bundle.Repository
 	if repo != "" {
-		r, ok := lookupRepo(b, repo)
-		if !ok {
-			return nil, nil, fmt.Errorf("no repository named %q in the bundle (%s)", repo, repoList(b))
+		r, err := repoNamed(b, repo)
+		if err != nil {
+			return nil, nil, err
 		}
 		repos = []bundle.Repository{r}
 	} else {
@@ -390,9 +417,9 @@ type WorktreeAddResult struct {
 func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts WorktreeAddOptions, emit func(Event)) (WorktreeAddResult, error) {
 	ctx = withCommandCache(ctx)
 	b := w.Bundle()
-	r, ok := lookupRepo(b, repo)
-	if !ok {
-		return WorktreeAddResult{}, fmt.Errorf("no repository named %q in the bundle (%s)", repo, repoList(b))
+	r, err := repoNamed(b, repo)
+	if err != nil {
+		return WorktreeAddResult{}, err
 	}
 	report := func(phase, msg string) {
 		emit(Event{Repo: r.Name, Phase: phase, Kind: KindProgress, Message: msg})
@@ -436,7 +463,7 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 			return WorktreeAddResult{}, fmt.Errorf("fetching %s failed: %w\npass --no-fetch to create the worktree from the local state of the repository", r.Name, err)
 		}
 		// A new branch would be created: fetch origin's tags too (safely, see
-		// gitx.FetchTags), so that checkNotOnlyATag also sees tags that git's
+		// gitx.FetchTagsFrom), so that checkNotOnlyATag also sees tags that git's
 		// automatic tag following did not bring. Kept local tags do not matter
 		// here: the check only needs the names.
 		if newBranch, err := wouldCreateBranch(ctx, primary, branch, search); err != nil {
@@ -759,7 +786,7 @@ func (e *WorktreeRefusedError) Error() string {
 		sb.WriteString("\n  " + e.Plan.Unmerged + " (use -D to delete anyway)")
 	}
 	if len(e.Plan.Hard) > 0 {
-		sb.WriteString("\nsome problems cannot be overridden; fix them first")
+		sb.WriteString("\nsome problems cannot be overridden with --force; fix them first")
 	}
 	if blocking {
 		sb.WriteString("\npass --force to remove the worktree anyway (the changes listed above will be lost)")
@@ -794,9 +821,9 @@ func (e *WorktreeRefusedError) Error() string {
 func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt WorktreeTarget, opts WorktreeRemoveOptions, emit func(Event)) (string, error) {
 	ctx = withCommandCache(ctx)
 	b := w.Bundle()
-	r, ok := lookupRepo(b, repo)
-	if !ok {
-		return "", fmt.Errorf("no repository named %q in the bundle (%s)", repo, repoList(b))
+	r, err := repoNamed(b, repo)
+	if err != nil {
+		return "", err
 	}
 	primary, common, prob := coCheckPrimary(ctx, w.Root, r)
 	if prob != nil {

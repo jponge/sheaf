@@ -42,17 +42,9 @@ func clone(ctx context.Context, url, dest, branch, remote string) error {
 // ErrDetachedHead is returned by CurrentBranch when HEAD is detached.
 var ErrDetachedHead = errors.New("gitx: HEAD is detached")
 
-// ErrNoDefaultBranch is returned by DefaultBranch when neither
-// refs/remotes/origin/HEAD nor the remote itself names a default branch.
+// ErrNoDefaultBranch is returned by DefaultBranchOf when neither
+// refs/remotes/<remote>/HEAD nor the remote itself names a default branch.
 var ErrNoDefaultBranch = errors.New("gitx: cannot determine the default branch of origin")
-
-// DefaultBranch returns the short name of origin's default branch (e.g.
-// "main"). It reads the local refs/remotes/origin/HEAD symbolic ref and, when
-// that is missing, asks the remote with `git ls-remote --symref origin HEAD`
-// (network access; nothing is written locally).
-func DefaultBranch(ctx context.Context, repoDir string) (string, error) {
-	return defaultBranchOf(ctx, repoDir, "origin")
-}
 
 func defaultBranchOf(ctx context.Context, repoDir, remote string) (string, error) {
 	if b, err := localDefaultBranchOf(ctx, repoDir, remote); err == nil {
@@ -148,7 +140,7 @@ func IsRepo(ctx context.Context, dir string) bool {
 // worktrees of the repository containing dir (`git rev-parse
 // --git-common-dir`): the primary checkout and its linked worktrees return the
 // same path, so callers can group work trees by repository, e.g. to run one
-// Fetch per repository.
+// fetch per repository.
 func CommonDir(ctx context.Context, dir string) (string, error) {
 	out, err := Run(ctx, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {

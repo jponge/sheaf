@@ -396,10 +396,10 @@ func newUpdateCmd(d Deps) *cobra.Command {
 		Short: "Fetch, then fast-forward every clean checkout and worktree",
 		Long: "Fetch origin once per repository (upstream and origin for a clone of your fork; if\n" +
 			"only your fork cannot be fetched, the checkouts tracking it fail and the others are\n" +
-			"updated), then fast-forward each checkout (primary first,\n" +
-			"then worktrees) to its upstream with `git merge --ff-only`. Checkouts are skipped,\n" +
-			"with the reason, when they have staged or unstaged changes (untracked files do not\n" +
-			"count), are detached, have no upstream or a deleted one, or have diverged.\n" +
+			"updated), then fast-forward each checkout (primary first, then worktrees) to its\n" +
+			"upstream with `git merge --ff-only`. Checkouts are skipped, with the reason, when\n" +
+			"they have staged or unstaged changes (untracked files do not count), are detached,\n" +
+			"have no upstream or a deleted one, or have diverged.\n" +
 			"Worktrees pinned at a tag (wt add --tag) are never moved: they are reported as\n" +
 			"pinned, which is not a skip; once their HEAD left the tag's commit, they are\n" +
 			"skipped as detached.\n" +

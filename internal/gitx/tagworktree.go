@@ -29,21 +29,6 @@ const TagMarkerFile = "sheaf-tag"
 // exist.
 var ErrTagNotFound = errors.New("gitx: tag not found")
 
-// FetchTags runs `git fetch --no-prune --tags origin`: origin's branches
-// (the configured refspec) and all its tags, including tags on commits that
-// no branch contains. Pruning is disabled explicitly: with fetch.pruneTags
-// or remote.origin.pruneTags configured, a pruning fetch would delete the
-// local tags missing on origin.
-//
-// Git refuses to overwrite a local tag that differs from origin's tag of the
-// same name ("would clobber existing tag"): it applies the rest of the fetch
-// and exits with status 1. FetchTags returns the names of such kept local
-// tags (sorted) and no error when these refusals are the only failures;
-// any other failure is an error.
-func FetchTags(ctx context.Context, dir string) (kept []string, err error) {
-	return fetchTags(ctx, dir, "origin")
-}
-
 func fetchTags(ctx context.Context, dir, remote string) (kept []string, err error) {
 	// Without --quiet: the refusals are only listed in the ref update
 	// summary, which fetch.output=full keeps parseable (compact shows "*"
@@ -67,7 +52,7 @@ func fetchTags(ctx context.Context, dir, remote string) (kept []string, err erro
 // stderr reports any other failure (or none of these). Server messages
 // ("remote: ...") and ssh's "Warning: Permanently added ..." are ignored;
 // error:, hint:, fatal: and any unknown line count as failures. The format
-// was verified against git 2.47.3 only; an unknown format makes FetchTags
+// was verified against git 2.47.3 only; an unknown format makes FetchTagsFrom
 // fail rather than succeed.
 func keptTags(stderr string) []string {
 	var kept []string
@@ -119,7 +104,7 @@ func TagCommit(ctx context.Context, dir, tag string) (string, error) {
 // repoDir) with a detached HEAD at the commit of refs/tags/<tag>, and records
 // the tag in its TagMarkerFile. It returns that commit. path must be absent
 // or an empty directory (ErrWorktreePathOccupied). It never accesses the
-// network: callers wanting origin's tags should FetchTags first. If the
+// network: callers wanting origin's tags should FetchTagsFrom first. If the
 // marker cannot be written, the fresh worktree is removed again.
 func WorktreeAddTag(ctx context.Context, repoDir, path, tag string) (string, error) {
 	if tag == "" {

@@ -463,9 +463,9 @@ func pruneBranch(ctx context.Context, w *Workspace, c PruneCandidate, distrust f
 		res.Outcome, res.Message = PruneKept, "kept branch "+c.Branch+": "+msg
 		return res
 	}
-	r, ok := lookupRepo(w.Bundle(), c.Repo)
-	if !ok {
-		return failed(fmt.Errorf("no repository named %q in the bundle", c.Repo))
+	r, err := repoNamed(w.Bundle(), c.Repo)
+	if err != nil {
+		return failed(err)
 	}
 	primary, _, prob := coCheckPrimary(ctx, w.Root, r)
 	if prob != nil {

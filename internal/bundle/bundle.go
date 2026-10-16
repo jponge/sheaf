@@ -553,18 +553,6 @@ func (b *Bundle) AddSource(org string) error {
 	return nil
 }
 
-// RemoveSource stops tracking an organization (matched case-insensitively,
-// like AddSource and AddExclude).
-func (b *Bundle) RemoveSource(org string) error {
-	for i, s := range b.Sources {
-		if strings.EqualFold(s.Org, org) {
-			b.Sources = slices.Delete(b.Sources, i, i+1)
-			return nil
-		}
-	}
-	return fmt.Errorf("no source %q in the bundle", org)
-}
-
 // AddExclude records that repoName of a tracked org was deliberately declined.
 // It is idempotent.
 func (b *Bundle) AddExclude(org, repoName string) error {

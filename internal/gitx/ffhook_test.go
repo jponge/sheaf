@@ -17,7 +17,7 @@ func TestFastForwardOnMergeStartOnlyWhenMerging(t *testing.T) {
 		t.Fatalf("up to date: outcome %v, %d calls, want 0", r.Outcome, calls)
 	}
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
-	if err := Fetch(context.Background(), dir); err != nil {
+	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, dir, "file-1.txt", "dirty\n")
@@ -34,7 +34,7 @@ func TestFastForwardOnMergeStartOnlyWhenMerging(t *testing.T) {
 func TestFastForwardCancelledAfterPreCheckDoesNotMerge(t *testing.T) {
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
-	if err := Fetch(context.Background(), dir); err != nil {
+	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	before := head(t, dir)

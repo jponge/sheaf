@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/jponge/sheaf/internal/bundle"
 	"github.com/jponge/sheaf/internal/gitx"
@@ -135,28 +134,33 @@ func (e *RisksError) Error() string {
 // that has a remote (all its remotes, at every nesting level) before it is
 // assessed (remotes inside the repository directory do not count; with
 // Offline nothing is fetched), and lists the entries of the repository
-// directory that belong to no checkout. Data at risk, unknown
-// entries, a failed fetch, a missing primary checkout or a locked worktree
-// make Remove refuse with a *RisksError unless opts.Force is set. Worktrees
-// outside the repository directory and a repository directory that is a
-// symbolic link are always refused: Remove only ever deletes inside
+// directory that belong to no checkout. Data at risk, unknown entries or a
+// gone remote make Remove refuse with a *RisksError unless opts.Force is
+// set. Other failed fetches, a missing primary checkout, locked worktrees,
+// worktrees outside the repository directory and a repository directory
+// that is a symbolic link are always refused: Remove only ever deletes inside
 // <root>/<name>, a real directory directly under the bundle root (symbolic
 // links inside it are removed, never followed).
 //
-// The risk check and the deletion are not atomic: changes made in between
-// are lost.
+// Once confirmed, the plan is checked again under the bundle lock, which
+// is held until the deletion and the unregistration are done (other sheaf
+// processes wait); changes made by other programs between that re-check and
+// the deletion are lost.
 func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, emit func(Event)) (string, error) {
 	ctx = withCommandCache(ctx)
-	entry, ok := w.Bundle().Repository(name)
-	if !ok {
-		return "", fmt.Errorf("no repository named %q in the bundle", name)
+	entry, err := repoNamed(w.Bundle(), name)
+	if err != nil {
+		return "", err
 	}
-	rs := RemotesOf(*entry)
+	rs := RemotesOf(entry)
 	// The fetch happens once; the re-check after confirmation reuses its
 	// outcome.
 	// fetchForceable: the fetch problem is one that Force overrides (a gone
 	// remote, or a remote that answers although ExpectedGone says it is gone).
 	fetched, fetchMsg, fetchForceable := false, "", false
+	// published: the recorded heads of pull request branches (see
+	// publishedPullHeads), set by fetch.
+	var published []string
 	fetch := func(primary string) (string, error) {
 		if fetched {
 			return fetchMsg, nil
@@ -164,7 +168,9 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 		fetched = true
 		if opts.Offline {
 			emit(Event{Phase: PhaseFetch, Message: "offline: not fetching the repository nor its nested repositories; the remote state may be stale (commits whose remote branch was deleted are not detected)"})
-			return "", nil
+			var err error
+			published, err = publishedPullHeads(ctx, primary, rs.Reference, false, emit)
+			return "", err
 		}
 		emit(Event{Phase: PhaseFetch, Message: "fetching " + rs.Reference})
 		if err := gitx.FetchRemote(ctx, primary, rs.Reference); err != nil {
@@ -176,8 +182,13 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 			if errors.As(err, &ge) && remoteRepoGoneFor(ge.Stderr, rs.Reference) {
 				fetchMsg, fetchForceable = goneRemoteProblem, true
 			}
-		} else if opts.ExpectedGone != "" {
-			fetchMsg, fetchForceable = "the GitHub API cannot see "+opts.ExpectedGone+" but its remote still answers: check gh authentication scope (not removed)", true
+		} else {
+			if published, err = publishedPullHeads(ctx, primary, rs.Reference, true, emit); err != nil {
+				return "", err
+			}
+			if opts.ExpectedGone != "" {
+				fetchMsg, fetchForceable = "the GitHub API cannot see "+opts.ExpectedGone+" but its remote still answers: check gh authentication scope (not removed)", true
+			}
 		}
 		if !rs.Forked() {
 			return fetchMsg, nil
@@ -215,24 +226,38 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 		}
 	}
 	risksOf := func(ctx context.Context, dir, deletedRoot string) ([]gitx.Risk, error) {
-		return gitx.DeletionRisksWithOptions(ctx, dir, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: deletedRoot})
+		return gitx.DeletionRisksWithOptions(ctx, dir, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: deletedRoot, PublishedRefs: published, ForeignWorktrees: true})
 	}
 	plan, err := planRemoval(ctx, w, name, wd, fetch, func() bool { return fetchForceable }, risksOf, emit)
 	if err != nil {
 		return "", err
 	}
 	if plan.Refused(opts.Force) {
+		if err := nameUnpushedBranches(ctx, &plan, published); err != nil {
+			return "", err
+		}
 		return "", &RisksError{Plan: plan, Force: opts.Force}
 	}
 	if opts.Confirm == nil || !opts.Confirm(plan) {
 		return "", fmt.Errorf("%w: %s", ErrNotConfirmed, name)
 	}
-	// From here on (re-check and deletion), git is read afresh: nothing
-	// cached before or while Confirm was pending is trusted.
-	ctx = gitx.WithFreshReads(ctx)
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	// The re-check, the deletion and the unregistration run under the
+	// bundle lock, serialized with other sheaf processes and tasks (like wt
+	// rm and prune), and git is read afresh: nothing cached before or while
+	// Confirm was pending is trusted.
+	ctx, unlock, err := lockBundleFresh(ctx, w.Root, func() {
+		emit(Event{Phase: PhaseRemove, Message: "waiting for " + lockFileName + " (another sheaf process is working on the bundle)"})
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		return "", fmt.Errorf("locking %s: %w", bundle.FileName, err)
+	}
+	defer unlock()
 	// Changes made while Confirm was pending (e.g. a TUI dialog) would be
 	// deleted unchecked: check again, without fetching, and abort if
 	// anything differs.
@@ -248,18 +273,14 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 			return "", err
 		}
 	}
-	unregister := func(b *bundle.Bundle) error { return b.RemoveRepository(name) }
-	if err := w.updateCtx(ctx, emit, unregister); err != nil {
-		if ctx.Err() == nil || plan.Dir == "" {
+	// Under the lock already held, the unregistration cannot be cancelled:
+	// a deleted directory never leaves its entry behind because of a
+	// cancellation.
+	if err := w.updateLocked(func(b *bundle.Bundle) error { return b.RemoveRepository(name) }); err != nil {
+		if plan.Dir == "" {
 			return "", err
 		}
-		// The directory is gone: do not leave its entry behind because of a
-		// cancellation; retry once, briefly, ignoring it.
-		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), registrationRetryTimeout)
-		defer cancel()
-		if rerr := w.updateCtx(rctx, emit, unregister); rerr != nil {
-			return "", fmt.Errorf("%s was deleted but removing its entry from %s failed: %w (run remove again)", plan.Dir, bundle.FileName, rerr)
-		}
+		return "", fmt.Errorf("%s was deleted but removing its entry from %s failed: %w (run remove again)", plan.Dir, bundle.FileName, err)
 	}
 	if plan.Dir == "" {
 		return "removed " + name + " from the bundle (its directory did not exist)", nil
@@ -418,15 +439,97 @@ func planRemoval(ctx context.Context, w *Workspace, name, wd string, fetch func(
 		}
 		it.Risks = risks
 		it.Worktree = i > 0
+		if slices.ContainsFunc(risks, func(r gitx.Risk) bool { return r.Kind == gitx.RiskForeignWorktree }) {
+			// Like a worktree outside the directory: whatever --force.
+			it.Problem, it.Hard = "remove or move the worktrees of other repositories first", true
+		}
 		if wt.Locked {
-			it.Problem = "locked"
+			// Like wt rm: whatever --force, git keeps it for a reason.
+			p := "locked"
 			if wt.LockReason != "" {
-				it.Problem += " (" + wt.LockReason + ")"
+				p += " (" + wt.LockReason + ")"
 			}
+			it.Problem, it.Hard = joinProblem(it.Problem, p+"; unlock it with `git worktree unlock "+it.Path+"`"), true
 		}
 		plan.Items = append(plan.Items, it)
 	}
-	return plan, addUnknownEntries(dir, known, &plan)
+	return plan, addUnknownEntries(dir, primary, known, &plan)
+}
+
+// publishedPullHeads returns the recorded heads (gitx.PullHeadRef) of the
+// pull requests whose head a local branch of primary tracks from remote
+// (the branches `sheaf wt pr` sets up for pull requests from forks), for
+// gitx.DeletionRisksOptions.PublishedRefs: their commits count as published,
+// only the commits beyond them are at risk.
+//
+// With fetch, the heads are fetched first (one fetch); when that fails (or
+// the branches cannot be read), none is returned and their commits count as
+// unpushed. Without fetch (offline), the recorded heads are used as of their
+// last fetch, like remote-tracking refs; a branch whose head was never
+// recorded (made before sheaf recorded heads) gets none: its commits count
+// as unpushed until remove fetches online or `sheaf wt pr` refreshes it.
+// Only a cancellation of ctx is returned as an error.
+func publishedPullHeads(ctx context.Context, primary, remote string, fetch bool, emit func(Event)) ([]string, error) {
+	ns, err := gitx.PullRequestBranches(ctx, primary, remote)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		emit(Event{Phase: PhaseFetch, Message: "cannot read the pull request branches: " + err.Error() + "; their commits count as unpushed"})
+		return nil, nil
+	}
+	if len(ns) == 0 {
+		return nil, nil
+	}
+	var refs, specs []string
+	for _, n := range ns {
+		refs = append(refs, gitx.PullHeadRef(n))
+		specs = append(specs, fmt.Sprintf("+refs/pull/%d/head:%s", n, gitx.PullHeadRef(n)))
+	}
+	if !fetch {
+		return refs, nil
+	}
+	emit(Event{Phase: PhaseFetch, Message: "fetching the pull request heads of " + strings.Join(refs, ", ")})
+	if err := gitx.FetchRefspecs(ctx, primary, remote, specs...); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		emit(Event{Phase: PhaseFetch, Message: "could not fetch the pull request heads (" + failureLine(err) + "); the commits of their branches count as unpushed"})
+		return nil, nil
+	}
+	return refs, nil
+}
+
+// failureLine condenses an error to its first line.
+func failureLine(err error) string {
+	s, _, _ := strings.Cut(strings.TrimSpace(err.Error()), "\n")
+	return s
+}
+
+// nameUnpushedBranches sets the Detail of the unpushed-commits risk of the
+// primary checkout's item to the branches carrying them (gitx.UnpushedBranches
+// with the published refs Remove used), for the refusal message.
+func nameUnpushedBranches(ctx context.Context, plan *RemovePlan, published []string) error {
+	for i, it := range plan.Items {
+		for j, r := range it.Risks {
+			if r.Kind != gitx.RiskUnpushedBranchCommits || it.Path != plan.Primary {
+				continue
+			}
+			names, err := gitx.UnpushedBranches(ctx, plan.Primary, gitx.DeletionRisksOptions{PublishedRefs: published})
+			if err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				continue // the count alone
+			}
+			const max = 5
+			if len(names) > max {
+				names = append(names[:max:max], fmt.Sprintf("and %d more", len(names)-max))
+			}
+			plan.Items[i].Risks[j].Detail = strings.Join(names, ", ")
+		}
+	}
+	return nil
 }
 
 // fetchProblem describes a failed fetch. A lock file left behind (or held
@@ -451,9 +554,10 @@ const goneRemoteProblem = "the remote repository appears to be gone: this clone 
 // quotedNotFound matches git's "repository '<url>' not found" (HTTP 404).
 var quotedNotFound = regexp.MustCompile(`repository '[^']*' not found`)
 
-// remoteRepoGone reports whether the standard error of a failed fetch says
-// that the remote repository does not exist. git runs with LC_ALL=C, so the
-// messages are the untranslated ones. These are heuristics:
+// remoteRepoGoneFor reports whether the standard error of a failed fetch of
+// the named remote says that the remote repository does not exist. git runs
+// with LC_ALL=C, so the messages are the untranslated ones. These are
+// heuristics:
 //
 //   - "Repository not found": GitHub over SSH ("ERROR: Repository not
 //     found.") and over HTTPS ("remote: Repository not found."); GitHub
@@ -461,18 +565,12 @@ var quotedNotFound = regexp.MustCompile(`repository '[^']*' not found`)
 //     for this user also means the clone may be the only copy;
 //   - "repository '<url>' not found": git over HTTP(S) on a 404;
 //   - "'<path>' does not appear to be a git repository": a local or SSH
-//     path that no longer holds a repository, except "'origin' does not
-//     appear ..." which means that no remote named origin is configured
-//     (left to the generic fetch failure).
+//     path that no longer holds a repository, except "'<remote>' does not
+//     appear ..." which means that no such remote is configured (left to
+//     the generic fetch failure).
 //
 // "Could not read from remote repository" alone is not enough: git prints
 // it for authentication and network failures too.
-func remoteRepoGone(stderr string) bool {
-	return remoteRepoGoneFor(stderr, "origin")
-}
-
-// remoteRepoGoneFor is remoteRepoGone for a fetch of the named remote
-// ("'<remote>' does not appear ..." means that no such remote is configured).
 func remoteRepoGoneFor(stderr, remote string) bool {
 	if strings.Contains(stderr, "Repository not found") || quotedNotFound.MatchString(stderr) {
 		return true
@@ -539,10 +637,6 @@ func joinProblem(a, b string) string {
 	return a + "; " + b
 }
 
-// registrationRetryTimeout bounds the non-cancellable retry of the final
-// sheaf.yaml update after the repository directory was deleted.
-const registrationRetryTimeout = 5 * time.Second
-
 // osJunk lists files that operating systems create on their own in any
 // directory; they are not unknown entries.
 var osJunk = map[string]bool{".DS_Store": true, "Thumbs.db": true, "desktop.ini": true}
@@ -563,19 +657,71 @@ func significantEntries(dir string) ([]string, error) {
 }
 
 // addUnknownEntries adds an item for each entry of dir that is none of the
-// known checkouts.
-func addUnknownEntries(dir string, known []string, plan *RemovePlan) error {
+// known checkouts, and a hard one for each worktree of another repository
+// found in them (see foreignWorktrees).
+func addUnknownEntries(dir, primary string, known []string, plan *RemovePlan) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
 	}
+	root := resolveExisting(dir)
 	for _, e := range entries {
 		p := filepath.Join(dir, e.Name())
-		if !slices.Contains(known, p) && !osJunk[e.Name()] {
+		if slices.Contains(known, p) || osJunk[e.Name()] {
+			continue
+		}
+		foreign := foreignWorktrees(p, root)
+		if len(foreign) == 0 || foreign[0].Path != p {
 			plan.Items = append(plan.Items, RemoveItem{Path: p, Problem: "not a checkout of this repository"})
 		}
+		plan.Items = append(plan.Items, foreign...)
 	}
 	return nil
+}
+
+// foreignWorktrees walks p (without following symbolic links, and below
+// embedded repositories too) for work trees whose .git file names a git
+// directory outside root, the resolved repository directory being removed:
+// worktrees of other repositories (or .git files that cannot be read).
+// Deleting one would lose its changes unchecked and leave its repository's
+// administrative files dangling, so each is a hard item, like a worktree
+// outside the repository directory. A work tree whose git directory is
+// inside root (e.g. of a repository embedded there) is not one: it is
+// deleted with that repository. A directory that cannot be read cannot be
+// checked: it is a hard item too.
+func foreignWorktrees(p, root string) []RemoveItem {
+	var out []RemoveItem
+	_ = filepath.WalkDir(p, func(d string, de fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil // vanished meanwhile
+			}
+			out = append(out, RemoveItem{Path: d, Hard: true, Problem: "cannot be checked for worktrees of other repositories (" + err.Error() + "); fix its permissions, or inspect it and delete it manually"})
+			if de != nil && de.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !de.IsDir() {
+			return nil
+		}
+		if de.Name() == ".git" {
+			return filepath.SkipDir // a repository's git directory
+		}
+		fi, err := os.Lstat(filepath.Join(d, ".git"))
+		if err != nil || !fi.Mode().IsRegular() {
+			return nil
+		}
+		gitdir, rerr := gitx.GitFileDir(d)
+		switch {
+		case rerr != nil:
+			out = append(out, RemoveItem{Path: d, Hard: true, Problem: "unreadable .git file (" + rerr.Error() + "); remove or move it first"})
+		case !within(root, resolveExisting(gitdir)):
+			out = append(out, RemoveItem{Path: d, Hard: true, Problem: "worktree of another repository (git directory " + gitdir + "); remove or move it first"})
+		}
+		return nil
+	})
+	return out
 }
 
 func deleteRepoDir(ctx context.Context, root string, plan RemovePlan, emit func(Event)) error {
@@ -597,7 +743,7 @@ func deleteRepoDir(ctx context.Context, root string, plan RemovePlan, emit func(
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				emit(Event{Phase: PhaseRemove, Worktree: filepath.Base(it.Path), Message: "git worktree remove failed, deleting the directory instead: " + err.Error()})
+				return fmt.Errorf("removing worktree %s: %w; %s was not deleted, run remove again", it.Path, err, dir)
 			}
 		}
 	}

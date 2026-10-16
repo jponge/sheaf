@@ -156,7 +156,7 @@ func TestStaleLockPath(t *testing.T) {
 	refLock := filepath.Join(dir, ".git", "refs", "remotes", "origin", "main.lock")
 	writeFile(t, filepath.Dir(refLock), "main.lock", "")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
-	err := Fetch(ctx, dir)
+	err := FetchRemote(ctx, dir, "origin")
 	if err == nil {
 		t.Fatal("precondition: Fetch succeeded despite a ref lock")
 	}

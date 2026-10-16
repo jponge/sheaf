@@ -31,7 +31,7 @@ const (
 	// Repository-wide kinds (lost when the repository, i.e. its last work
 	// tree, is deleted; irrelevant to removing a linked worktree).
 	RiskStash                 // stash entries
-	RiskUnpushedBranchCommits // commits on local branches not on any remote-tracking ref
+	RiskUnpushedBranchCommits // commits on local branches not on any remote-tracking ref (nor DeletionRisksOptions.PublishedRefs)
 	// RiskDetachedCommits: commits reachable from this work tree's detached
 	// HEAD but from no branch, tag or remote-tracking ref (work-tree-local).
 	RiskDetachedCommits
@@ -65,6 +65,15 @@ const (
 	// (clean, with a remote, everything pushed); informational, work-tree-
 	// local. Risk.Detail lists their paths.
 	RiskNestedRepositoryClean
+	// RiskForeignWorktree: work trees of other repositories found inside the
+	// work tree, at any nesting level, whose .git file names a git directory
+	// outside the deleted tree (or cannot be read): deleting them would lose
+	// their changes unchecked and leave their repository's administrative
+	// files dangling. Reported only with
+	// DeletionRisksOptions.ForeignWorktrees (they are nested repositories
+	// otherwise); work-tree-local, blocking. Risk.Detail lists their paths
+	// with the git directories.
+	RiskForeignWorktree
 )
 
 func (k RiskKind) String() string {
@@ -95,24 +104,66 @@ func (k RiskKind) String() string {
 		return "nested repositories"
 	case RiskNestedRepositoryClean:
 		return "clean, fully pushed nested repositories"
+	case RiskForeignWorktree:
+		return "worktrees of other repositories"
 	}
 	return fmt.Sprintf("RiskKind(%d)", int(k))
+}
+
+// phrase is String for n entries: the singular form when n is 1.
+func (k RiskKind) phrase(n int) string {
+	if n != 1 {
+		return k.String()
+	}
+	switch k {
+	case RiskStaged:
+		return "staged change"
+	case RiskUnstaged:
+		return "unstaged change"
+	case RiskConflicted:
+		return "conflict"
+	case RiskUntracked:
+		return "untracked file"
+	case RiskStash:
+		return "stash"
+	case RiskUnpushedBranchCommits:
+		return "unpushed commit on local branches"
+	case RiskDetachedCommits:
+		return "commit only on detached HEAD"
+	case RiskTagOnlyCommits:
+		return "commit only reachable from local tags"
+	case RiskIgnoredFiles:
+		return "ignored file"
+	case RiskHiddenModifications:
+		return "hidden modification (skip-worktree or assume-unchanged file)"
+	case RiskUnverifiable:
+		return "file that could not be verified"
+	case RiskNestedRepository:
+		return "nested repository"
+	case RiskNestedRepositoryClean:
+		return "clean, fully pushed nested repository"
+	case RiskForeignWorktree:
+		return "worktree of another repository"
+	}
+	return k.String()
 }
 
 // Risk is one kind of data at risk, with the number of entries or commits.
 type Risk struct {
 	Kind  RiskKind
 	Count int
-	// Detail is an optional human-readable explanation (the reason for
-	// RiskUnverifiable); empty for the other kinds.
+	// Detail is an optional human-readable explanation: the reason for
+	// RiskUnverifiable, the branches carrying the commits for
+	// RiskUnpushedBranchCommits, the repositories for the nested kinds;
+	// empty for the other kinds.
 	Detail string
 }
 
 func (r Risk) String() string {
 	if r.Detail != "" {
-		return fmt.Sprintf("%d %v: %s", r.Count, r.Kind, r.Detail)
+		return fmt.Sprintf("%d %s: %s", r.Count, r.Kind.phrase(r.Count), r.Detail)
 	}
-	return fmt.Sprintf("%d %v", r.Count, r.Kind)
+	return fmt.Sprintf("%d %s", r.Count, r.Kind.phrase(r.Count))
 }
 
 // Informational reports whether the risk should be shown but not block a
@@ -224,14 +275,31 @@ type DeletionRisksOptions struct {
 	// a fork that appears to be gone: commits reachable only from them are
 	// reported as unpushed or detached.
 	UntrustedRemotes []string
+	// PublishedRefs are refs (full names) whose commits count as pushed for
+	// dir's own repository, like remote-tracking refs (not for nested
+	// repositories), e.g. recorded pull request heads (see PullHeadRef).
+	// Refs that do not exist are ignored.
+	PublishedRefs []string
+	// ForeignWorktrees reports the nested work trees whose .git file names a
+	// git directory outside DeletedRoot (or cannot be read) as
+	// RiskForeignWorktree instead of nested repositories, at every nesting
+	// level. Meant for deleting a whole repository: a submodule's git
+	// directory, for instance, lies outside a linked worktree.
+	ForeignWorktrees bool
 }
 
 // nestOpts carries the options and the recursion state.
 type nestOpts struct {
-	before  func(ctx context.Context, dir string) error
-	remotes []string // "--exclude=<remote>/*"... "--remotes" for the top-level repository
-	root    string   // resolved DeletedRoot
-	visited map[string]bool
+	before func(ctx context.Context, dir string) error
+	// lead and remotes are pushedArgs for the top-level repository.
+	lead, remotes []string
+	root          string // resolved DeletedRoot
+	visited       map[string]bool
+	// foreign is set with ForeignWorktrees; the foreign work trees found at
+	// any level are collected in it ("path (git directory ...)", relative
+	// to top) and reported at the top level.
+	foreign *[]string
+	top     string
 }
 
 // DeletionRisksWithOptions is DeletionRisks with options.
@@ -241,8 +309,9 @@ func DeletionRisksWithOptions(ctx context.Context, dir string, opts DeletionRisk
 		return nil, err
 	}
 	no := &nestOpts{before: opts.BeforeNested, root: resolvePath(top), visited: map[string]bool{resolvePath(top): true}}
-	for _, r := range opts.UntrustedRemotes {
-		no.remotes = append(no.remotes, "--exclude="+r+"/*")
+	no.lead, no.remotes = pushedArgs(opts)
+	if opts.ForeignWorktrees {
+		no.foreign, no.top = new([]string), top
 	}
 	if opts.DeletedRoot != "" {
 		no.root = resolvePath(opts.DeletedRoot)
@@ -261,21 +330,23 @@ func deletionRisks(ctx context.Context, dir, top string, depth int, no *nestOpts
 	if err != nil {
 		return nil, err
 	}
+	var lead []string
 	remotes := []string{"--remotes"}
 	if depth == maxNestingDepth { // dir's own repository, not a nested one
-		remotes = append(slices.Clone(no.remotes), "--remotes")
+		lead, remotes = no.lead, no.remotes
 	}
-	branchCommits, err := revCount(ctx, dir, append([]string{"--branches", "--not"}, remotes...)...)
+	revArgs := func(args ...string) []string { return append(append(slices.Clone(lead), args...), remotes...) }
+	branchCommits, err := revCount(ctx, dir, revArgs("--branches", "--not")...)
 	if err != nil {
 		return nil, err
 	}
 	detachedCommits := 0
 	if st.Detached && !st.Unborn {
-		if detachedCommits, err = revCount(ctx, dir, append([]string{"HEAD", "--not", "--branches", "--tags"}, remotes...)...); err != nil {
+		if detachedCommits, err = revCount(ctx, dir, revArgs("HEAD", "--not", "--branches", "--tags")...); err != nil {
 			return nil, err
 		}
 	}
-	tagCommits, err := revCount(ctx, dir, append([]string{"--tags", "--not", "--branches"}, remotes...)...)
+	tagCommits, err := revCount(ctx, dir, revArgs("--tags", "--not", "--branches")...)
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +378,59 @@ func deletionRisks(ctx context.Context, dir, top string, depth int, no *nestOpts
 			risks = append(risks, r)
 		}
 	}
+	if depth == maxNestingDepth && no.foreign != nil && len(*no.foreign) > 0 {
+		risks = append(risks, Risk{Kind: RiskForeignWorktree, Count: len(*no.foreign), Detail: summarizeList(*no.foreign, "; ")})
+	}
 	return risks, nil
+}
+
+// pushedArgs returns the rev-list arguments for the commits that count as
+// pushed in the repository itself under opts: the options to put before the
+// revisions (--ignore-missing, for PublishedRefs that do not exist), and the
+// refs to put after --not (remote-tracking refs except those of
+// UntrustedRemotes, then PublishedRefs).
+func pushedArgs(opts DeletionRisksOptions) (lead, refs []string) {
+	for _, r := range opts.UntrustedRemotes {
+		refs = append(refs, "--exclude="+r+"/*")
+	}
+	refs = append(append(refs, "--remotes"), opts.PublishedRefs...)
+	if len(opts.PublishedRefs) > 0 {
+		lead = []string{"--ignore-missing"}
+	}
+	return lead, refs
+}
+
+// UnpushedBranches returns, sorted, the local branches of the repository
+// containing dir that carry the commits DeletionRisksWithOptions counts as
+// RiskUnpushedBranchCommits with the same opts (UntrustedRemotes and
+// PublishedRefs; the other options do not matter). A branch carries
+// unpushed commits exactly when its tip is unpushed: a pushed tip makes all
+// its ancestors pushed.
+func UnpushedBranches(ctx context.Context, dir string, opts DeletionRisksOptions) ([]string, error) {
+	lead, refs := pushedArgs(opts)
+	// --simplify-by-decoration: only the unpushed commits some ref points at.
+	args := append(append(append([]string{"rev-list"}, lead...), "--simplify-by-decoration", "--branches", "--not"), refs...)
+	out, err := Run(ctx, dir, args...)
+	if err != nil {
+		return nil, err
+	}
+	tips := map[string]bool{}
+	for l := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
+		tips[l] = true
+	}
+	heads, err := Run(ctx, dir, "for-each-ref", "--format=%(objectname) %(refname)", "refs/heads")
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for l := range strings.SplitSeq(strings.TrimSpace(heads), "\n") {
+		oid, ref, ok := strings.Cut(l, " ")
+		if ok && tips[oid] {
+			names = append(names, strings.TrimPrefix(ref, "refs/heads/"))
+		}
+	}
+	slices.Sort(names)
+	return names, nil
 }
 
 // revCount runs `git rev-list --count args...` and parses the result.
@@ -709,6 +832,20 @@ func assessNested(ctx context.Context, top string, depth int, no *nestOpts) (blo
 			continue
 		}
 		no.visited[rp] = true
+		if no.foreign != nil && !nr.bare {
+			if fi, err := os.Lstat(filepath.Join(p, ".git")); err == nil && fi.Mode().IsRegular() {
+				gd, gerr := GitFileDir(p)
+				rel, _ := filepath.Rel(no.top, p)
+				switch {
+				case gerr != nil:
+					*no.foreign = append(*no.foreign, rel+" (unreadable .git file: "+gerr.Error()+")")
+					continue
+				case !within(no.root, resolvePath(gd)):
+					*no.foreign = append(*no.foreign, rel+" (git directory "+gd+")")
+					continue
+				}
+			}
+		}
 		reasons, err := nestedReasons(ctx, p, rp, nr.bare, depth, no)
 		if err != nil {
 			return nil, nil, err
@@ -844,6 +981,30 @@ func localRemotePath(base, u string) (string, bool) {
 		return "", false // scp-like host:path
 	}
 	return filepath.Join(base, u), true
+}
+
+// GitFileDir returns the git directory named by the .git file of dir
+// ("gitdir: <path>", relative to dir unless absolute), cleaned but not
+// resolved.
+func GitFileDir(dir string) (string, error) {
+	b, err := os.ReadFile(filepath.Join(dir, ".git"))
+	if err != nil {
+		return "", err
+	}
+	gd, ok := strings.CutPrefix(strings.TrimRight(string(b), "\r\n"), "gitdir: ")
+	if !ok || gd == "" {
+		return "", errors.New("no gitdir line")
+	}
+	if !filepath.IsAbs(gd) {
+		gd = filepath.Join(dir, gd)
+	}
+	return filepath.Clean(gd), nil
+}
+
+// within reports whether p is root or below it (both resolved).
+func within(root, p string) bool {
+	rel, err := filepath.Rel(root, p)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 func resolvePath(p string) string {

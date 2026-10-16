@@ -240,7 +240,7 @@ func TestSyncAddNewClonesWithOrgOrigin(t *testing.T) {
 	f.repo(t, "o", "c", "main", false)
 	r := syncNow(t, f, f.fake, SyncOptions{})
 	wantProposals(t, r, "new o/b", "new o/c")
-	s := SyncAddNew(context.Background(), f.w, r.Proposals[:1], 2, Discard)
+	s := SyncAddNewWithOptions(context.Background(), f.w, r.Proposals[:1], CloneOptions{}, 2, Discard)
 	if got := statuses(s); !mapsEqual(got, map[string]Status{"b": StatusDone}) {
 		t.Fatalf("statuses = %v", got)
 	}
@@ -257,7 +257,7 @@ func TestSyncAddNewClonesWithOrgOrigin(t *testing.T) {
 func TestSyncAddNewIgnoresOtherKinds(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	s := SyncAddNew(context.Background(), f.w, []Proposal{{Key: "gone:o/a", Kind: ProposalGone, Org: "o", Name: "a", Slug: "o/a"}}, 1, Discard)
+	s := SyncAddNewWithOptions(context.Background(), f.w, []Proposal{{Key: "gone:o/a", Kind: ProposalGone, Org: "o", Name: "a", Slug: "o/a"}}, CloneOptions{}, 1, Discard)
 	if got := statuses(s); !mapsEqual(got, map[string]Status{"a": StatusFailed}) {
 		t.Fatalf("statuses = %v, want a failed (not a new proposal)", got)
 	}

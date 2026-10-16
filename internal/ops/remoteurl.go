@@ -7,12 +7,12 @@ import (
 	"strings"
 )
 
-// SlugFromRemoteURL derives an "owner/name" slug from a git remote URL, as
-// recorded in sheaf.yaml for adopted repositories. Accepted forms:
+// ParseRemoteURL returns the host and the "owner/name" slug of a git remote
+// URL, as recorded in sheaf.yaml for adopted repositories. Accepted forms:
 //
 //   - scp-like: [user@]host:owner/name[.git]
-//   - URLs: https://, http://, ssh://, git://, file:// (host, user and port
-//     are ignored)
+//   - URLs: https://, http://, ssh://, git://, file:// (user and port are
+//     ignored)
 //   - absolute local paths: /path/to/owner/name[.git]
 //
 // The slug is made of the last two path components, with a trailing ".git"
@@ -21,17 +21,12 @@ import (
 // in tests) the last two components are used whatever the depth, so the slug
 // does not necessarily name a GitHub repository. Both parts must only
 // contain [A-Za-z0-9._-].
-func SlugFromRemoteURL(raw string) (string, error) {
-	_, slug, err := ParseRemoteURL(raw)
-	return slug, err
-}
-
-// ParseRemoteURL returns the host and the slug (see SlugFromRemoteURL) of a
-// git remote URL. The host is lowercased and has no user or port; file://
-// URLs and local paths have the host bundle.HostLocal ("local");
-// ssh.github.com and www.github.com are github.com. Host aliases from the
-// SSH configuration (e.g. "github_work") cannot be resolved here and are
-// returned as-is (adopt has --host to override them).
+//
+// The host is lowercased and has no user or port; file:// URLs and local
+// paths have the host bundle.HostLocal ("local"); ssh.github.com and
+// www.github.com are github.com. Host aliases from the SSH configuration
+// (e.g. "github_work") cannot be resolved here and are returned as-is (adopt
+// has --host to override them).
 func ParseRemoteURL(raw string) (host, slug string, err error) {
 	host, path, err := splitRemote(raw)
 	if err != nil {

@@ -64,9 +64,9 @@ type PRWorktreeResult struct {
 // and points to this command.
 func AddPRWorktree(ctx context.Context, w *Workspace, h hosting.Hosting, repo string, number int, emit func(Event)) (PRWorktreeResult, error) {
 	b := w.Bundle()
-	r, ok := lookupRepo(b, repo)
-	if !ok {
-		return PRWorktreeResult{}, fmt.Errorf("no repository named %q in the bundle (%s)", repo, repoList(b))
+	r, err := repoNamed(b, repo)
+	if err != nil {
+		return PRWorktreeResult{}, err
 	}
 	// SSH aliases of github.com (e.g. "github_work") are accepted with the
 	// heuristic add uses for them (looksLikeGitHubAlias).
@@ -266,7 +266,9 @@ func pullRefPR(ctx context.Context, w *Workspace, r bundle.Repository, primary s
 	note := ""
 	if !exists {
 		emit(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindProgress, Message: "fetching " + pullRef + " into " + branch})
-		if err := gitx.FetchRefspecs(ctx, primary, remote, pullRef+":refs/heads/"+branch); err != nil {
+		// The head is also recorded (see gitx.PullHeadRef): remove counts
+		// its commits as published.
+		if err := gitx.FetchRefspecs(ctx, primary, remote, pullRef+":refs/heads/"+branch, "+"+pullRef+":"+gitx.PullHeadRef(n)); err != nil {
 			if ctx.Err() != nil {
 				return PRWorktreeResult{}, ctx.Err()
 			}
@@ -363,7 +365,8 @@ func updatePRBranch(ctx context.Context, root string, r bundle.Repository, prima
 // fetchPullHead fetches pullRef of remote into a private temporary ref
 // (refs/sheaf/tmp/pr-<n>-<pid>-<random>), reads it and deletes it, and
 // returns the commit. FETCH_HEAD is not used: another fetch in the same work
-// tree could overwrite it in between.
+// tree could overwrite it in between. The head is also recorded as
+// gitx.PullHeadRef(n) (not read back: a concurrent fetch may move it).
 func fetchPullHead(ctx context.Context, dir, remote, pullRef string, n int) (string, error) {
 	var rnd [6]byte
 	if _, err := rand.Read(rnd[:]); err != nil {
@@ -376,7 +379,7 @@ func fetchPullHead(ctx context.Context, dir, remote, pullRef string, n int) (str
 		defer cancel()
 		_, _ = gitx.Run(dctx, dir, "update-ref", "-d", tmp)
 	}()
-	if err := gitx.FetchRefspecs(ctx, dir, remote, "+"+pullRef+":"+tmp); err != nil {
+	if err := gitx.FetchRefspecs(ctx, dir, remote, "+"+pullRef+":"+tmp, "+"+pullRef+":"+gitx.PullHeadRef(n)); err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}

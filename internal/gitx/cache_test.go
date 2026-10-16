@@ -125,7 +125,7 @@ func TestQueryCacheMutationsInvalidate(t *testing.T) {
 			t.Fatal("origin/late exists before the fetch")
 		}
 		testutil.Git(t, o.Path, "branch", "late", "main")
-		if err := Fetch(ctx, dir); err != nil {
+		if err := FetchRemote(ctx, dir, "origin"); err != nil {
 			t.Fatal(err)
 		}
 		if !mustRef(t, ctx, dir, "refs/remotes/origin/late") {

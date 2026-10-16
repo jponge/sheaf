@@ -68,21 +68,43 @@ func CloneFork(ctx context.Context, upstreamURL, forkURL, dest, branch string) e
 	return nil
 }
 
-// FetchRemote runs `git fetch --quiet --prune <remote>` in dir; see Fetch
-// for the serialization rules.
+// FetchRemote runs `git fetch --quiet --prune <remote>` in dir: it updates
+// the remote-tracking refs of remote and deletes those whose remote branch no
+// longer exists. Branches tracking another remote are not refreshed and
+// FastForward sees them as of their last fetch.
+//
+// Remote-tracking refs are shared by all worktrees of a repository, and two
+// concurrent fetches into the same repository fail with "cannot lock ref".
+// Callers must therefore serialize fetches per repository (group worktrees by
+// CommonDir) and fetch once per repository, then call FastForward on each
+// worktree, which may run in parallel. FetchRemote is cancellable at any
+// point through ctx; a fetch killed with SIGKILL may leave a ref lock behind
+// (see StaleLockPath). Under a context made by WithInteractive, git keeps
+// the caller's controlling terminal.
 func FetchRemote(ctx context.Context, dir, remote string) error {
 	_, err := run(ctx, netOpts(ctx), dir, "fetch", "--quiet", "--prune", remote)
 	return err
 }
 
-// DefaultBranchOf is DefaultBranch for the given remote: it reads
-// refs/remotes/<remote>/HEAD and, when missing, asks the remote with
-// `git ls-remote --symref <remote> HEAD`.
+// DefaultBranchOf returns the short name of the default branch of remote
+// (e.g. "main"). It reads the local refs/remotes/<remote>/HEAD symbolic ref
+// and, when that is missing, asks the remote with `git ls-remote --symref
+// <remote> HEAD` (network access; nothing is written locally).
 func DefaultBranchOf(ctx context.Context, dir, remote string) (string, error) {
 	return defaultBranchOf(ctx, dir, remote)
 }
 
-// FetchTagsFrom is FetchTags for the given remote.
+// FetchTagsFrom runs `git fetch --no-prune --tags <remote>`: the remote's
+// branches (the configured refspec) and all its tags, including tags on
+// commits that no branch contains. Pruning is disabled explicitly: with
+// fetch.pruneTags or remote.<remote>.pruneTags configured, a pruning fetch
+// would delete the local tags missing on the remote.
+//
+// Git refuses to overwrite a local tag that differs from the remote's tag of
+// the same name ("would clobber existing tag"): it applies the rest of the
+// fetch and exits with status 1. FetchTagsFrom returns the names of such kept
+// local tags (sorted) and no error when these refusals are the only
+// failures; any other failure is an error.
 func FetchTagsFrom(ctx context.Context, dir, remote string) ([]string, error) {
 	return fetchTags(ctx, dir, remote)
 }

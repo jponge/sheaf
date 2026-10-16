@@ -149,7 +149,7 @@ func TestSyncAddNewSkipsEmptyRepositories(t *testing.T) {
 	f.fake.AddRepo(hosting.Repo{Owner: "o", Name: "empty", CloneURL: "file:///nowhere.git"})
 	r := syncNow(t, f, f.fake, SyncOptions{})
 	wantProposals(t, r, "new o/empty")
-	s := SyncAddNew(context.Background(), f.w, r.Proposals, 1, Discard)
+	s := SyncAddNewWithOptions(context.Background(), f.w, r.Proposals, CloneOptions{}, 1, Discard)
 	if got := statuses(s); !mapsEqual(got, map[string]Status{"empty": StatusSkipped}) || !strings.Contains(s.Results[0].Message, "empty") {
 		t.Fatalf("summary = %+v", s)
 	}

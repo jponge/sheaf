@@ -73,7 +73,6 @@ func TestResolveRepo(t *testing.T) {
 		want     RepoContext
 	}{
 		{"alpha", root, RepoContext{Name: "alpha"}},
-		{"BETA", root, RepoContext{Name: "beta"}},
 		{"", sub, RepoContext{Name: "alpha", Worktree: "main"}},
 		{"", filepath.Join(root, "beta", "main"), RepoContext{Name: "beta", Worktree: "main"}},
 		{"", filepath.Join(root, "beta"), RepoContext{Name: "beta"}},
@@ -86,6 +85,7 @@ func TestResolveRepo(t *testing.T) {
 	}
 	for _, tc := range []struct{ arg, cwd string }{
 		{"gamma", root},
+		{"BETA", root}, // repository names are case-sensitive
 		{"", root},
 		{"", t.TempDir()},
 	} {
@@ -538,7 +538,6 @@ func TestResolvePath(t *testing.T) {
 		{nil, nil, root, root},
 		{nil, nil, x, root},
 		{[]string{"a"}, nil, root, primary},
-		{[]string{"A"}, nil, root, primary},
 		{[]string{"a", "feat/x"}, nil, root, x},
 		{[]string{"a", "feat-x"}, nil, root, x},
 		{[]string{"a", "main"}, nil, root, primary},
@@ -560,6 +559,7 @@ func TestResolvePath(t *testing.T) {
 		cwd  string
 	}{
 		{[]string{"nope"}, nil, root},
+		{[]string{"A"}, nil, root}, // repository names are case-sensitive
 		{[]string{"a", "nope"}, nil, root},
 		{[]string{"a", "b", "c"}, nil, root},
 		{[]string{"a", "x"}, &WorktreeTarget{Name: "feat-x", Kind: TargetDir}, root},

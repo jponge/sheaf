@@ -50,7 +50,7 @@ func TestLocalBranches(t *testing.T) {
 	testutil.Git(t, dir, "config", "branch.pr/5.remote", "origin")
 	testutil.Git(t, dir, "config", "branch.pr/5.merge", "refs/pull/5/head")
 	testutil.Git(t, o.Path, "branch", "-D", "feat/gone")
-	if err := Fetch(context.Background(), dir); err != nil {
+	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -87,14 +87,6 @@ func TestLocalBranches(t *testing.T) {
 	}
 	if n, ok := pr.PullRequest(); !ok || n != 5 {
 		t.Errorf("pr/5 PullRequest = %d, %v", n, ok)
-	}
-	// A pull request branch is never reported as gone.
-	gone, err := GoneBranches(context.Background(), dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(gone, []string{"feat/gone"}) {
-		t.Errorf("GoneBranches = %v", gone)
 	}
 }
 

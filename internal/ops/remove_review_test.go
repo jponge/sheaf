@@ -31,7 +31,7 @@ func TestRemoveRefusesNestedCloneInIgnoredDir(t *testing.T) {
 	testutil.CommitFile(t, nested, "precious.txt", "x\n", "unpushed commit in nested repo")
 	_, err := f.remove(t, "a", false, yes)
 	var re *RisksError
-	if !errors.As(err, &re) || !strings.Contains(err.Error(), "nested repositories") {
+	if !errors.As(err, &re) || !strings.Contains(err.Error(), "1 nested repository") {
 		t.Fatalf("err = %v, want refusal for the nested repository", err)
 	}
 	if !exists(filepath.Join(nested, "precious.txt")) {
@@ -65,7 +65,7 @@ func TestRemoveRefusesNestedWorktreeOfAnotherRepo(t *testing.T) {
 	testutil.Git(t, other, "worktree", "add", "-q", wt, "feat")
 	writeFile(t, filepath.Join(wt, "wip.txt"), "wip\n")
 	_, err := f.remove(t, "a", false, yes)
-	if err == nil || !strings.Contains(err.Error(), "nested repositories") {
+	if err == nil || !strings.Contains(err.Error(), "1 worktree of another repository") {
 		t.Fatalf("err = %v, want refusal for the nested worktree", err)
 	}
 	if !exists(filepath.Join(wt, ".git")) {

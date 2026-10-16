@@ -201,7 +201,7 @@ func TestMoveIntoSubdirFailuresRestore(t *testing.T) {
 				}
 				return os.Mkdir(p, m)
 			}
-			if _, _, err := moveIntoSubdir(root, dir, "main"); !errors.Is(err, boom) {
+			if _, err := moveIntoSubdir(root, dir, "main"); !errors.Is(err, boom) {
 				t.Fatalf("err = %v, want injected", err)
 			}
 			if fi, err := os.Lstat(filepath.Join(dir, ".git")); err != nil || !fi.IsDir() {

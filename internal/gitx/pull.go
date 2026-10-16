@@ -8,27 +8,7 @@ import (
 	"time"
 )
 
-// Fetch runs `git fetch --prune origin` in dir: it updates the
-// remote-tracking refs of origin and deletes those whose remote branch no
-// longer exists. It always fetches origin, whatever the upstream of the
-// current branch (which may be a local branch or another remote): branches
-// tracking another remote are not refreshed and FastForward sees them as of
-// their last fetch.
-//
-// Remote-tracking refs are shared by all worktrees of a repository, and two
-// concurrent fetches into the same repository fail with "cannot lock ref".
-// Callers must therefore serialize Fetch per repository (group worktrees by
-// CommonDir) and fetch once per repository, then call FastForward on each
-// worktree, which may run in parallel. Fetch is cancellable at any point
-// through ctx; a fetch killed with SIGKILL may leave a ref lock behind (see
-// StaleLockPath). Under a context made by WithInteractive, git keeps the
-// caller's controlling terminal.
-func Fetch(ctx context.Context, dir string) error {
-	_, err := run(ctx, netOpts(ctx), dir, "fetch", "--quiet", "--prune", "origin")
-	return err
-}
-
-// PullOutcome classifies the result of FastForward and PullFFOnly.
+// PullOutcome classifies the result of FastForward.
 type PullOutcome int
 
 const (
@@ -38,10 +18,10 @@ const (
 	// PullFastForwarded: HEAD moved forward from PullResult.Old to New.
 	PullFastForwarded
 	// PullSkippedDirty: staged, unstaged or conflicted changes; nothing was
-	// run (PullFFOnly does not fetch either).
+	// run.
 	PullSkippedDirty
 	// PullSkippedNoUpstream: no upstream configured, or its remote-tracking
-	// ref is gone; nothing was run (PullFFOnly does not fetch either).
+	// ref is gone; nothing was run.
 	PullSkippedNoUpstream
 	// PullSkippedDiverged: local and upstream both have commits the other
 	// lacks according to the remote-tracking ref; HEAD was not moved.
@@ -72,7 +52,7 @@ func (o PullOutcome) String() string {
 	return fmt.Sprintf("PullOutcome(%d)", int(o))
 }
 
-// PullResult is the result of FastForward and PullFFOnly.
+// PullResult is the result of FastForward.
 type PullResult struct {
 	Outcome PullOutcome
 	// Old and New are HEAD before and after the operation. They are equal
@@ -84,8 +64,8 @@ type PullResult struct {
 	Err error
 }
 
-// FastForwardOptions tunes FastForwardWithOptions and PullFFOnlyWithOptions.
-// The zero value gives the behaviour of FastForward and PullFFOnly.
+// FastForwardOptions tunes FastForwardWithOptions. The zero value gives the
+// behaviour of FastForward.
 type FastForwardOptions struct {
 	// MergeTimeout bounds the merge (see FastForward). Zero means
 	// DefaultMergeTimeout; a negative value is treated like zero.
@@ -106,42 +86,11 @@ type FastForwardOptions struct {
 	OnMergeStart func()
 }
 
-// DefaultMergeTimeout is the bound on the merge of FastForward and
-// PullFFOnly.
+// DefaultMergeTimeout is the bound on the merge of FastForward.
 const DefaultMergeTimeout = 10 * time.Minute
 
-// PullFFOnly is Fetch followed by FastForward, for a single checkout. The
-// cheap preconditions (detached, dirty, no or gone upstream) are checked
-// first, so a work tree that would be skipped is not fetched either.
-//
-// It is not safe to run concurrently with other fetches into the same
-// repository (see Fetch); to update several worktrees of one repository, call
-// Fetch once and FastForward on each.
-//
-// Cancellation: ctx interrupts the pre-checks and the fetch (outcome
-// PullFailed, Err matching ctx.Err()), but not the merge once FastForward has
-// started it: the merge runs to completion or for up to DefaultMergeTimeout
-// (10 minutes), whatever ctx does. Callers that must be able to abort sooner
-// need a hard-abort path: use PullFFOnlyWithOptions with a Force channel. See
-// FastForward.
-func PullFFOnly(ctx context.Context, dir string) PullResult {
-	return PullFFOnlyWithOptions(ctx, dir, FastForwardOptions{})
-}
-
-// PullFFOnlyWithOptions is PullFFOnly with the options of FastForwardWithOptions
-// (the fetch is not affected by them; it is cancelled through ctx).
-func PullFFOnlyWithOptions(ctx context.Context, dir string, opts FastForwardOptions) PullResult {
-	if r, ok := preCheck(ctx, dir, false); !ok {
-		return r
-	}
-	if err := Fetch(ctx, dir); err != nil {
-		return PullResult{Outcome: PullFailed, Err: err}
-	}
-	return FastForwardWithOptions(ctx, dir, opts)
-}
-
 // FastForward fast-forwards the branch checked out in dir to the local
-// remote-tracking ref of its upstream, as of the last Fetch. It never
+// remote-tracking ref of its upstream, as of the last fetch. It never
 // accesses the network, so FastForward calls on different worktrees of the
 // same repository may run concurrently.
 //
@@ -183,7 +132,7 @@ func PullFFOnlyWithOptions(ctx context.Context, dir string, opts FastForwardOpti
 // is PullFailed with an Err matching context.DeadlineExceeded, and New may
 // differ from Old if git had already moved HEAD (e.g. a hook hung). A merge
 // failure due to divergence that appeared after the precheck (a concurrent
-// Fetch) is reported as PullSkippedDiverged.
+// fetch) is reported as PullSkippedDiverged.
 func FastForward(ctx context.Context, dir string) PullResult {
 	return FastForwardWithOptions(ctx, dir, FastForwardOptions{})
 }
@@ -292,7 +241,7 @@ var afterMergeHook func()
 
 // FetchAll runs `git fetch --prune --all` in dir: it fetches every remote
 // of the repository (work tree or bare) and deletes remote-tracking refs
-// whose remote branch no longer exists. Like Fetch, callers serialize it per
+// whose remote branch no longer exists. Like FetchRemote, callers serialize it per
 // repository. It is cancellable through ctx.
 func FetchAll(ctx context.Context, dir string) error {
 	_, err := run(ctx, netOpts(ctx), dir, "fetch", "--quiet", "--prune", "--all")

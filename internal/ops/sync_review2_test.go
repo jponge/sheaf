@@ -134,7 +134,7 @@ func TestSyncSingleOrgFlagsPossiblyMovedRepos(t *testing.T) {
 	if r.Proposals[1].PossiblyMoved != "" {
 		t.Fatalf("fresh = %+v", r.Proposals[1])
 	}
-	s := SyncAddNew(context.Background(), f.w, []Proposal{r.Proposals[0], r.Proposals[2]}, 1, Discard)
+	s := SyncAddNewWithOptions(context.Background(), f.w, []Proposal{r.Proposals[0], r.Proposals[2]}, CloneOptions{}, 1, Discard)
 	if got := statuses(s); !mapsEqual(got, map[string]Status{"a": StatusSkipped, "renamed": StatusSkipped}) {
 		t.Fatalf("summary = %+v", s)
 	}
