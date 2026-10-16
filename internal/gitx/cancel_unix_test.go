@@ -477,8 +477,10 @@ func TestFastForwardWithOptionsForceAlreadyClosed(t *testing.T) {
 	if r.Outcome != PullFailed || !errors.Is(r.Err, ErrForceKilled) {
 		t.Errorf("result = %v, err %v, want failed with ErrForceKilled", r.Outcome, r.Err)
 	}
-	// The smudge helper may or may not have started before the kill.
-	if _, err := os.Stat(pidfile); err == nil {
+	// The smudge helper may or may not have started before the kill. It may
+	// also have been killed after its shell created the pidfile (`>>`) but
+	// before writing its PID: an empty file means no process to check.
+	if fi, err := os.Stat(pidfile); err == nil && fi.Size() > 0 {
 		wantProcessesGone(t, pidfile)
 	}
 }
