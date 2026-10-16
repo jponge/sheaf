@@ -613,3 +613,20 @@ func FuzzNormalizeBranch(f *testing.F) {
 		}
 	})
 }
+
+// A name starting with '-' would be read as an option in the commands
+// sheaf prints (e.g. `sheaf adopt -x`) and by git and gh.
+func TestValidateRepoNameRejectsLeadingDash(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"-x", "--all", "-"} {
+		err := ValidateRepoName(name)
+		if err == nil || !strings.Contains(err.Error(), "must not start with '-'") {
+			t.Errorf("ValidateRepoName(%q) = %v, want a refusal of the leading '-'", name, err)
+		}
+	}
+	for _, name := range []string{"x-", "a-b", "x"} {
+		if err := ValidateRepoName(name); err != nil {
+			t.Errorf("ValidateRepoName(%q) = %v", name, err)
+		}
+	}
+}

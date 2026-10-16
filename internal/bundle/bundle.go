@@ -127,13 +127,17 @@ func ValidateHost(h string) error {
 
 // ValidateRepoName checks that name is usable as a directory name directly
 // under the bundle root: non-empty, characters in [A-Za-z0-9._-], not
-// starting with '.', and not the bundle file name (case-insensitively).
+// starting with '.' or '-' (it would be read as an option by the commands
+// sheaf prints, git and gh), and not the bundle file name
+// (case-insensitively).
 func ValidateRepoName(name string) error {
 	switch {
 	case name == "":
 		return errors.New("repository name must not be empty")
 	case strings.HasPrefix(name, "."):
 		return fmt.Errorf("invalid repository name %q: must not start with '.'", name)
+	case strings.HasPrefix(name, "-"):
+		return fmt.Errorf("invalid repository name %q: must not start with '-' (use --as <dir> to choose another name)", name)
 	case strings.EqualFold(name, FileName):
 		return fmt.Errorf("invalid repository name %q: reserved for the bundle file", name)
 	case !validSlugPart(name):

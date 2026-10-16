@@ -120,7 +120,7 @@ design; a second process waits for the first.
 ```
 
 - **Repository directory** `<bundle>/<repo>/`. Its name is the repository
-  name (letters, digits, `.`, `_`, `-`; not starting with `.`). Two
+  name (letters, digits, `.`, `_`, `-`; not starting with `.` or `-`). Two
   repositories with the same name from different owners clash: use
   `add --as <dir>`.
 - **Primary checkout** `<bundle>/<repo>/<default-branch>/`. This is a
