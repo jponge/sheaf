@@ -42,6 +42,15 @@ Requirements:
   `fetch`, `update`, `run`, `wt add/list/rm`, `path`, `prune`, `remove`) do
   not need gh.
 
+With Go installed:
+
+```sh
+go install github.com/jponge/sheaf/cmd/sheaf@latest    # or @v0.1.0 for a given release
+```
+
+This installs into `$(go env GOBIN)`, or `$(go env GOPATH)/bin` by default,
+and `sheaf version` prints the release.
+
 From a clone of this repository:
 
 ```sh

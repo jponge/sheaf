@@ -199,7 +199,7 @@ What to do differently
 | B5 | Windows: declare unsupported (docs + clear startup error) rather than half-support | done (a4a8745: refused at startup) |
 | B6 | Cross-step end-to-end review: inconsistencies, dead code, leftovers from design changes (e.g. adopt's old switching logic) | done (b315805) |
 | B7 | Dogfooding on the user's Mac (real bundles, GitHub error texts, ssh prompts, terminal emulator, macOS fish/zsh) | later, user-driven |
-| B8 | Release packaging (GoReleaser/Homebrew: new tool, needs approval) | later |
+| B8 | Release packaging (GoReleaser/Homebrew: new tool, needs approval) | decided 2026-10-16 (user): `go install ...@<tag>` only (README); no release tooling |
 | B9 | Housekeeping: goals.md, cobra-fish-issue.md (file upstream, then delete) | user |
 | B10 | Remaining bash scd completion gaps (single quote inside open single quote, `$'…'`, `!` in double quotes); cobra zsh open-quote (upstream); fish < 3.7 `-o` fallback untested | decided 2026-10-16 (user): documented as known limits in README |
 | B11 | `sheaf version` falls back to Go build info (go install builds print `dev` today); Makefile `install` target | done: build-info fallback + make install |
