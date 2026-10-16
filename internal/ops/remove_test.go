@@ -341,3 +341,29 @@ func TestRemoveStaleLockOnFetch(t *testing.T) {
 		t.Fatalf("refusal message lacks the lock path %s and a hint to delete it:\n%s", lock, msg)
 	}
 }
+
+// The post-confirmation re-check ignores informational changes.
+func TestRemoveRecheckIgnoresInformationalChanges(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	primary, _ := f.clonedRepo(t, "a")
+	writeFile(t, filepath.Join(primary, ".git", "info", "exclude"), "*.log\n")
+	writeFile(t, filepath.Join(primary, "a.log"), "x")
+	if _, err := f.remove(t, "a", false, func(RemovePlan) bool {
+		writeFile(t, filepath.Join(primary, "b.log"), "build output appeared meanwhile")
+		return true
+	}); err != nil {
+		t.Fatalf("remove aborted by an informational change: %v", err)
+	}
+}
+
+// The working directory comes from the caller.
+func TestRemoveUsesGivenWorkingDir(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	primary, _ := f.clonedRepo(t, "a")
+	_, err := f.removeOpts(t, "a", RemoveOptions{Force: true, Confirm: yes, WorkingDir: filepath.Join(primary, "sub")})
+	if err == nil || !strings.Contains(err.Error(), "working directory") {
+		t.Fatalf("err = %v, want refusal about the working directory", err)
+	}
+}

@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+var _ Hosting = (*GH)(nil)
+
 const (
 	listArgs = "repo list smallrye --limit 1001 --json name,owner,url,sshUrl,defaultBranchRef,isArchived,isFork,description"
 	viewArgs = "repo view jponge/boiler-vroom --json name,owner,url,sshUrl,defaultBranchRef,isArchived,isFork,description"

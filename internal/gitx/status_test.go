@@ -204,7 +204,7 @@ func TestParseStatusRejectsGarbage(t *testing.T) {
 	}
 }
 
-// S2: configuration that hides changes must not hide them from Status.
+// Configuration that hides changes must not hide them from Status.
 func TestStatusIgnoresConfigHidingUntrackedFiles(t *testing.T) {
 	t.Run("repo config", func(t *testing.T) {
 		_, dir := cloneOrigin(t, testutil.OriginOpts{})

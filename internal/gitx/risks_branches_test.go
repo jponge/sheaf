@@ -8,7 +8,7 @@ import (
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
-// B6 S1: refusals name the branches that carry unpushed commits (not only
+// Refusals name the branches that carry unpushed commits (not only
 // the checked-out one).
 func TestUnpushedBranches(t *testing.T) {
 	t.Parallel()

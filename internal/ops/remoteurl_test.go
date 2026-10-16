@@ -40,3 +40,18 @@ func TestParseRemoteURLSlug(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRemoteURLGitHubAliasesAndSSHConfigHosts(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"ssh://git@ssh.github.com:443/o/x.git": "github.com",
+		"https://www.github.com/o/x":           "github.com",
+		"git@github_work:o/x.git":              "github_work", // SSH config alias: recorded as-is
+		"git@github-work:o/x.git":              "github-work",
+	} {
+		h, s, err := ParseRemoteURL(in)
+		if err != nil || h != want || s != "o/x" {
+			t.Errorf("ParseRemoteURL(%q) = %q, %q, %v; want host %q", in, h, s, err, want)
+		}
+	}
+}

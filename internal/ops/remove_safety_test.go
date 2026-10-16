@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -19,7 +20,7 @@ func (f *fixture) removeOpts(t *testing.T, name string, opts RemoveOptions) ([]E
 	return evs, err
 }
 
-// B2: a repository nested in an ignored directory is only "ignored files"
+// A repository nested in an ignored directory is only "ignored files"
 // for git status; remove must refuse to delete it without --force.
 func TestRemoveRefusesNestedCloneInIgnoredDir(t *testing.T) {
 	t.Parallel()
@@ -73,7 +74,7 @@ func TestRemoveRefusesNestedWorktreeOfAnotherRepo(t *testing.T) {
 	}
 }
 
-// S2: no or several primary checkouts are hard problems, even with --force.
+// No or several primary checkouts are hard problems, even with --force.
 func TestRemoveAmbiguousOrMissingPrimaryIsHard(t *testing.T) {
 	t.Parallel()
 	t.Run("several primaries", func(t *testing.T) {
@@ -124,7 +125,7 @@ func TestRemoveAmbiguousOrMissingPrimaryIsHard(t *testing.T) {
 	})
 }
 
-// S3: anything done while Confirm is pending is checked again.
+// Anything done while Confirm is pending is checked again.
 func TestRemoveRechecksAfterConfirm(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -142,7 +143,7 @@ func TestRemoveRechecksAfterConfirm(t *testing.T) {
 	}
 }
 
-// S6: OS junk is not an unknown entry.
+// OS junk is not an unknown entry.
 func TestRemoveIgnoresOSJunk(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -155,7 +156,7 @@ func TestRemoveIgnoresOSJunk(t *testing.T) {
 	}
 }
 
-// S6: a failed fetch is refused with a hint to use --offline, which --force
+// A failed fetch is refused with a hint to use --offline, which --force
 // does not replace; --offline skips the fetch with a warning, but still
 // checks local data.
 func TestRemoveOffline(t *testing.T) {
@@ -194,7 +195,7 @@ func TestRemoveOffline(t *testing.T) {
 	}
 }
 
-// NIT: never delete the process's working directory.
+// Never delete the process's working directory.
 func TestRemoveRefusesWhenWorkingDirectoryInside(t *testing.T) {
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
@@ -206,5 +207,32 @@ func TestRemoveRefusesWhenWorkingDirectoryInside(t *testing.T) {
 	}
 	if !exists(primary) {
 		t.Fatal("removed")
+	}
+}
+
+// An unreadable directory in an ignored tree cannot be
+// checked; even a forced remove must fail rather than delete unchecked.
+func TestRemoveUnreadableIgnoredDirFailsSafely(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() == 0 {
+		t.Skip("SKIP: root can read everything")
+	}
+	f := newFixture(t)
+	primary, _ := f.clonedRepo(t, "a")
+	writeFile(t, filepath.Join(primary, ".git", "info", "exclude"), "build/\n")
+	locked := filepath.Join(primary, "build", "locked")
+	if err := os.MkdirAll(filepath.Join(locked, "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	_, err := Remove(context.Background(), f.w, "a", RemoveOptions{Offline: true, Force: true, Confirm: yes}, noEmit)
+	if err == nil {
+		t.Fatal("forced remove succeeded although part of the tree could not be checked")
+	}
+	if !exists(primary) {
+		t.Fatal("deleted")
 	}
 }

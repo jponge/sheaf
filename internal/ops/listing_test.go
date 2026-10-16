@@ -15,9 +15,9 @@ import (
 
 // Tests of the two listings of a repository's checkouts, ListWorktrees (wt
 // commands) and ListCheckouts (checkout commands), on the cases where they
-// differed before backlog B3 unified them.
+// differed before they shared enumerateRepo.
 
-func wtListing(infos []WorktreeInfo) []string {
+func worktreeListing(infos []WorktreeInfo) []string {
 	var out []string
 	for _, in := range infos {
 		s := in.Repo + "/" + in.Dir + " " + in.Path
@@ -67,7 +67,7 @@ func TestListingsOutsideWorktreeOrder(t *testing.T) {
 		t.Fatal(err, fails)
 	}
 	want := []string{"alpha/main " + alpha + " primary", "alpha/feat " + feat, "alpha/zz " + zz, "alpha/ " + far + " outside"}
-	if got := wtListing(infos); !slices.Equal(got, want) {
+	if got := worktreeListing(infos); !slices.Equal(got, want) {
 		t.Errorf("ListWorktrees =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 
@@ -99,7 +99,7 @@ func TestListingsWorktreeOfAnotherRepository(t *testing.T) {
 		t.Fatal(err, fails)
 	}
 	want := []string{"alpha/main " + alpha + " primary"}
-	if got := wtListing(infos); !slices.Equal(got, want) {
+	if got := worktreeListing(infos); !slices.Equal(got, want) {
 		t.Errorf("ListWorktrees =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 
@@ -173,7 +173,7 @@ func TestListingsWorktreeThroughSymlinkedParent(t *testing.T) {
 		t.Fatal(err, fails)
 	}
 	want := []string{"alpha/main " + alpha + " primary", "alpha/ " + x + " outside"}
-	if got := wtListing(infos); !slices.Equal(got, want) {
+	if got := worktreeListing(infos); !slices.Equal(got, want) {
 		t.Errorf("ListWorktrees =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 
@@ -193,7 +193,7 @@ func listingFailures(t *testing.T, f *fixture) (wt, co []string) {
 	t.Helper()
 	infos, fails, err := ListWorktrees(context.Background(), f.w, "")
 	if err != nil || len(infos) != 0 {
-		t.Fatalf("ListWorktrees: %v, %v", err, wtListing(infos))
+		t.Fatalf("ListWorktrees: %v, %v", err, worktreeListing(infos))
 	}
 	for _, e := range fails {
 		wt = append(wt, e.Error())
@@ -313,7 +313,7 @@ func TestListWorktreesReportsWorktreeWithoutGit(t *testing.T) {
 	if err != nil || len(fails) != 1 || fails[0].Error() != want {
 		t.Fatalf("err %v, failures %q, want %q", err, fails, want)
 	}
-	if got := wtListing(infos); !slices.Equal(got, []string{"alpha/main " + alpha + " primary"}) {
+	if got := worktreeListing(infos); !slices.Equal(got, []string{"alpha/main " + alpha + " primary"}) {
 		t.Errorf("ListWorktrees = %q", got)
 	}
 }
@@ -347,7 +347,7 @@ func TestPRWorktreeRefusesWorktreeOfAnotherRepository(t *testing.T) {
 		_, o := f.clonedRepo(t, "a")
 		head := pushPullRef(t, o, 7, "main", "fork.txt")
 		f.fake.AddPR("o", "a", hosting.PR{Number: 7, HeadBranch: "x", HeadOwner: "someone", HeadRepo: "a", IsCrossRepository: true})
-		res, err := f.wtPR(t, "a", 7)
+		res, err := f.addPRWorktree(t, "a", 7)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -357,7 +357,7 @@ func TestPRWorktreeRefusesWorktreeOfAnotherRepository(t *testing.T) {
 		plainClone(t, o, res.Path)
 		before := testutil.Git(t, res.Path, "rev-parse", "HEAD")
 		pushPullRef(t, o, 7, head, "fork2.txt")
-		_, err = f.wtPR(t, "a", 7)
+		_, err = f.addPRWorktree(t, "a", 7)
 		if err == nil || !strings.Contains(err.Error(), "worktree of another repository (") {
 			t.Errorf("err = %v", err)
 		}
@@ -370,7 +370,7 @@ func TestPRWorktreeRefusesWorktreeOfAnotherRepository(t *testing.T) {
 		f := newFixture(t)
 		_, o := f.clonedRepo(t, "a")
 		f.fake.AddPR("o", "a", hosting.PR{Number: 3, HeadBranch: "feat", HeadOwner: "o", HeadRepo: "a"})
-		res, err := f.wtPR(t, "a", 3)
+		res, err := f.addPRWorktree(t, "a", 3)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -378,7 +378,7 @@ func TestPRWorktreeRefusesWorktreeOfAnotherRepository(t *testing.T) {
 			t.Fatal(err)
 		}
 		plainClone(t, o, res.Path)
-		if _, err = f.wtPR(t, "a", 3); err == nil || !strings.Contains(err.Error(), "worktree of another repository (") {
+		if _, err = f.addPRWorktree(t, "a", 3); err == nil || !strings.Contains(err.Error(), "worktree of another repository (") {
 			t.Errorf("err = %v", err)
 		}
 	})
@@ -442,7 +442,7 @@ func TestListingsSymlinkInRepoDirToWorktreeElsewhere(t *testing.T) {
 		t.Fatal(err, fails)
 	}
 	want := []string{"alpha/main " + alpha + " primary", "alpha/ " + sym + " outside"}
-	if got := wtListing(infos); !slices.Equal(got, want) {
+	if got := worktreeListing(infos); !slices.Equal(got, want) {
 		t.Errorf("ListWorktrees =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	cs, probs, err := ListCheckouts(context.Background(), f.w, CheckoutFilter{}, 1)
@@ -532,5 +532,24 @@ func TestEnumerateRepoRequiresPrimaryFirst(t *testing.T) {
 	}
 	if _, err := enumerateRepo(context.Background(), alpha, gitDir, enumPolicy{}); !errors.Is(err, errNotMainWorkTree) {
 		t.Fatalf("err = %v, want %v", err, errNotMainWorkTree)
+	}
+}
+
+// Linked worktrees outside <bundle>/<repo>/ are listed, marked Outside.
+func TestListCheckoutsMarksOutsideWorktrees(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	_, alpha := addRepoWith(t, f, "alpha", "feat", "far")
+	addWorktree(t, alpha, "feat", "feat", true)
+	far := filepath.Join(t.TempDir(), "far")
+	testutil.Git(t, alpha, "worktree", "add", "-q", "--track", "-b", "far", far, "origin/far")
+	cs, probs, err := ListCheckouts(context.Background(), f.w, CheckoutFilter{}, 1)
+	if err != nil || len(probs) != 0 || len(cs) != 3 {
+		t.Fatalf("%v %v %+v", err, probs, cs)
+	}
+	for _, c := range cs {
+		if want := c.Dir == "far"; c.Outside != want {
+			t.Errorf("%s: Outside = %v, want %v", c.Name(), c.Outside, want)
+		}
 	}
 }

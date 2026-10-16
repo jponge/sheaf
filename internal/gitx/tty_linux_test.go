@@ -68,7 +68,7 @@ func TestTTYHelperProcess(t *testing.T) {
 	_ = FetchRemote(context.Background(), dir, "origin") // the fake ssh always fails
 }
 
-// S1: git (and the ssh it spawns) must not be able to open the controlling
+// Git (and the ssh it spawns) must not be able to open the controlling
 // terminal of sheaf: an ssh password or host-key prompt on /dev/tty would
 // corrupt the TUI and block forever.
 func TestGitCannotOpenControllingTerminal(t *testing.T) {

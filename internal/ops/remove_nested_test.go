@@ -39,7 +39,7 @@ func staleNestedClone(t *testing.T, parent string) string {
 	return n
 }
 
-// B1: nested repositories are fetched before being assessed.
+// Nested repositories are fetched before being assessed.
 func TestRemoveFetchesNestedRepositories(t *testing.T) {
 	t.Parallel()
 	f, primary := nestedSetup(t)
@@ -80,7 +80,7 @@ func TestRemoveOfflineDoesNotFetchNested(t *testing.T) {
 	}
 }
 
-// S1: a bare repository in the tree, and a nested repository whose only
+// A bare repository in the tree, and a nested repository whose only
 // remote is inside the tree, block.
 func TestRemoveNestedBareAndInsideRemoteBlock(t *testing.T) {
 	t.Parallel()
@@ -109,7 +109,9 @@ func TestRemoveNestedBareAndInsideRemoteBlock(t *testing.T) {
 	})
 }
 
-// Review 6 probes kept as guards.
+// A nested repository whose state cannot be established (never fetched with
+// an unreachable remote, or a dangling .git file) blocks removal, online or
+// offline.
 func TestRemoveNestedEdgeCasesBlock(t *testing.T) {
 	t.Parallel()
 	for name, setup := range map[string]func(t *testing.T, n string){
@@ -142,7 +144,7 @@ func TestRemoveNestedEdgeCasesBlock(t *testing.T) {
 	}
 }
 
-// NIT: a cancellation once the directory is being deleted does not leave
+// A cancellation once the directory is being deleted does not leave
 // its entry behind in sheaf.yaml (the unregistration runs under the bundle
 // lock taken before the deletion, and cannot be cancelled).
 func TestRemoveCancelledDuringDeletionUnregisters(t *testing.T) {

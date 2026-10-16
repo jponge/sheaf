@@ -3,9 +3,12 @@ package ops
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jponge/sheaf/internal/bundle"
@@ -169,5 +172,120 @@ func TestCandidatesExcludeRegistered(t *testing.T) {
 	cands, err := Candidates(context.Background(), root, b)
 	if err != nil || len(cands) != 0 {
 		t.Fatalf("candidates = %+v, %v; want none", cands, err)
+	}
+}
+
+// Create refuses nested bundles but allows a work tree.
+func TestCreateRefusesNestedBundle(t *testing.T) {
+	t.Parallel()
+	testutil.IsolateGit(t)
+	outer, err := Create(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Create(filepath.Join(outer, "inner")); err == nil || !strings.Contains(err.Error(), outer) {
+		t.Fatalf("err = %v, want refusal naming %s", err, outer)
+	}
+	if exists(filepath.Join(outer, "inner", bundle.FileName)) {
+		t.Fatal("nested sheaf.yaml written")
+	}
+	clone := filepath.Join(t.TempDir(), "c")
+	plainClone(t, testutil.NewOrigin(t, testutil.OriginOpts{}), clone)
+	if _, err := Create(filepath.Join(clone, "fresh")); err != nil {
+		t.Fatalf("create inside a work tree: %v", err)
+	}
+}
+
+// Two Workspaces on the same bundle (two sheaf processes) must not lose
+// each other's updates.
+func TestTwoWorkspacesDoNotLoseUpdates(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	w2, err := OpenWorkspace(f.w.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.repo(t, "o", "one", "main", false)
+	f.repo(t, "o", "two", "main", false)
+	if _, err := Add(context.Background(), f.w, f.fake, AddRequest{Slugs: []string{"o/one"}}, 1, Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Add(context.Background(), w2, f.fake, AddRequest{Slugs: []string{"o/two"}}, 1, Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := repoNames(f.onDisk(t)); len(got) != 2 {
+		t.Fatalf("sheaf.yaml lists %v, want one and two", got)
+	}
+
+	// Concurrent updates through independent Workspaces.
+	var ws []*Workspace
+	for range 4 {
+		w, err := OpenWorkspace(f.w.Root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ws = append(ws, w)
+	}
+	var wg sync.WaitGroup
+	for i, w := range ws {
+		for j := range 10 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := w.update(func(b *bundle.Bundle) error { return b.AddSource(fmt.Sprintf("org%d-%d", i, j)) }); err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+	}
+	wg.Wait()
+	if n := len(f.onDisk(t).Sources); n != 40 {
+		t.Fatalf("%d sources on disk, want 40", n)
+	}
+}
+
+// Init refuses inside a work tree or another bundle, and writes
+// nothing when detection fails.
+func TestInitRefusals(t *testing.T) {
+	t.Parallel()
+	testutil.IsolateGit(t)
+	o := testutil.NewOrigin(t, testutil.OriginOpts{})
+	clone := filepath.Join(t.TempDir(), "c")
+	plainClone(t, o, clone)
+	sub := filepath.Join(clone, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{clone, sub} {
+		if _, _, err := Init(context.Background(), d); err == nil || !strings.Contains(err.Error(), "work tree") {
+			t.Errorf("Init(%s) err = %v, want refusal inside a work tree", d, err)
+		}
+		if exists(filepath.Join(d, bundle.FileName)) {
+			t.Errorf("sheaf.yaml written in %s", d)
+		}
+	}
+
+	outer, err := Create(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner := filepath.Join(outer, "inner")
+	if err := os.Mkdir(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Init(context.Background(), inner); err == nil || !strings.Contains(err.Error(), outer) {
+		t.Errorf("Init inside a bundle err = %v, want refusal naming %s", err, outer)
+	}
+
+	unreadable := filepath.Join(t.TempDir(), "u")
+	if err := os.Mkdir(unreadable, 0o300); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(unreadable, 0o755) })
+	if _, _, err := Init(context.Background(), unreadable); err == nil {
+		t.Error("Init on an unreadable directory succeeded")
+	}
+	if _, err := os.Lstat(filepath.Join(unreadable, bundle.FileName)); err == nil {
+		t.Error("sheaf.yaml written although detection failed")
 	}
 }

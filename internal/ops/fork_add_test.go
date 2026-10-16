@@ -10,6 +10,7 @@ import (
 	"github.com/jponge/sheaf/internal/bundle"
 	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/hosting"
+	"github.com/jponge/sheaf/internal/hosting/hostingtest"
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
@@ -133,10 +134,10 @@ func TestAddForkListingFailureWarnsAndContinues(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name string
-		set  func(*hosting.Fake)
+		set  func(*hostingtest.Fake)
 	}{
-		{"user", func(h *hosting.Fake) { h.UserErr = errors.New("gh: not logged in") }},
-		{"forks", func(h *hosting.Fake) { h.ForksErr = errors.New("HTTP 502") }},
+		{"user", func(h *hostingtest.Fake) { h.UserErr = errors.New("gh: not logged in") }},
+		{"forks", func(h *hostingtest.Fake) { h.ForksErr = errors.New("HTTP 502") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

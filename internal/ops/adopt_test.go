@@ -241,3 +241,38 @@ func TestAdoptAllRunsTasks(t *testing.T) {
 		t.Fatalf("registered = %v", got)
 	}
 }
+
+func TestAdoptHostAliasAndOverride(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	o := testutil.NewOrigin(t, testutil.OriginOpts{})
+	alias := filepath.Join(f.w.Root, "alias")
+	plainClone(t, o, alias)
+	testutil.Git(t, alias, "remote", "set-url", "origin", "git@github_work:o/alias.git")
+	if _, err := adopt(t, f, alias, AdoptOptions{DefaultBranch: "main"}); err != nil {
+		t.Fatalf("adopt with an SSH alias: %v", err)
+	}
+	over := filepath.Join(f.w.Root, "over")
+	plainClone(t, o, over)
+	testutil.Git(t, over, "remote", "set-url", "origin", "git@github_work:o/over.git")
+	if _, err := adopt(t, f, over, AdoptOptions{DefaultBranch: "main", Host: "github.com"}); err != nil {
+		t.Fatalf("adopt --host github.com: %v", err)
+	}
+	b := f.onDisk(t)
+	if r, _ := b.Repository("alias"); r == nil || r.Host != "github_work" || r.IsGitHub() {
+		t.Fatalf("alias = %+v, want host github_work", r)
+	}
+	if r, _ := b.Repository("over"); r == nil || r.Host != "" || !r.IsGitHub() {
+		t.Fatalf("over = %+v, want github.com (stored empty)", r)
+	}
+
+	bad := filepath.Join(f.w.Root, "bad")
+	plainClone(t, o, bad)
+	_, err := adopt(t, f, bad, AdoptOptions{Host: "bad host"})
+	if err == nil || !strings.Contains(err.Error(), "bad host") {
+		t.Fatalf("err = %v, want invalid host refusal", err)
+	}
+	if !exists(filepath.Join(bad, ".git")) {
+		t.Fatal("moved despite an invalid host")
+	}
+}

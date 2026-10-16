@@ -31,7 +31,7 @@ type repoEntry struct {
 // enumPolicy holds what the two views built on enumerateRepo need
 // differently: listRepo (worktree commands, WorktreeInfo) and listRepoCheckouts
 // (checkout commands, Checkout). Their other differences are in the views
-// themselves (backlog B3): the fields (Checkout.Dir is set for an outside
+// themselves: the fields (Checkout.Dir is set for an outside
 // worktree and Checkout.Path of the primary is the bundle path, while
 // WorktreeInfo has Dir empty when outside, git's path and OffDefault), the
 // failures (Problem with a path, RepoError per repository) and the

@@ -110,7 +110,7 @@ func TestFastForwardSkips(t *testing.T) {
 	})
 }
 
-// B2: user configuration asking for merge commits (pull.ff=false,
+// User configuration asking for merge commits (pull.ff=false,
 // merge.ff=false, branch.<b>.mergeOptions=--no-ff) must never produce a merge
 // commit; a diverged branch must never move.
 func TestFastForwardIgnoresNoFFConfig(t *testing.T) {
@@ -177,7 +177,7 @@ func TestFastForwardRefusesToOverwriteUntrackedFile(t *testing.T) {
 	}
 }
 
-// Review 2, item 2: Fetch fetches origin even when the current branch's
+// Fetch fetches origin even when the current branch's
 // upstream is a local branch (branch.<b>.remote = .).
 func TestFetchFetchesOriginWhenUpstreamIsLocal(t *testing.T) {
 	t.Parallel()
@@ -192,7 +192,7 @@ func TestFetchFetchesOriginWhenUpstreamIsLocal(t *testing.T) {
 	}
 }
 
-// Review 2, NIT: a cancellation right after the merge completed must not turn
+// A cancellation right after the merge completed must not turn
 // the completed fast-forward into a failure (HEAD re-read and ancestry check
 // run on a context without cancellation).
 func TestFastForwardIgnoresCancellationAfterMerge(t *testing.T) {

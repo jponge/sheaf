@@ -3,21 +3,24 @@ package ops
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jponge/sheaf/internal/bundle"
 	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/hosting"
+	"github.com/jponge/sheaf/internal/hosting/hostingtest"
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
 type fixture struct {
 	w    *Workspace
-	fake *hosting.Fake
+	fake *hostingtest.Fake
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -31,7 +34,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &fixture{w: w, fake: hosting.NewFake()}
+	return &fixture{w: w, fake: hostingtest.NewFake()}
 }
 
 // openFixture returns a fixture for the existing bundle root (a copy of a
@@ -43,7 +46,7 @@ func openFixture(t *testing.T, root string) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &fixture{w: w, fake: hosting.NewFake()}
+	return &fixture{w: w, fake: hostingtest.NewFake()}
 }
 
 // repo registers owner/name in the fake, backed by a fresh bare origin.
@@ -326,4 +329,125 @@ func TestAddCancelledMidwayLeavesNothingBehind(t *testing.T) {
 
 func hostingRepo(owner, name, url string) hosting.Repo {
 	return hosting.Repo{Owner: owner, Name: name, CloneURL: url, DefaultBranch: "main"}
+}
+
+// The org is tracked only when the request did not entirely fail.
+func TestAddOrgSourceRecordedUnlessEverythingFailed(t *testing.T) {
+	t.Parallel()
+	t.Run("all clones failed", func(t *testing.T) {
+		f := newFixture(t)
+		f.fake.AddRepo(hosting.Repo{Owner: "o", Name: "broken", CloneURL: "file:///nonexistent/b.git", DefaultBranch: "main"})
+		s, err := f.add(t, AddRequest{Org: "o", All: true})
+		if err != nil || s.Count(StatusFailed) != 1 {
+			t.Fatalf("%+v, %v", s, err)
+		}
+		if n := len(f.onDisk(t).Sources); n != 0 {
+			t.Fatalf("%d sources recorded, want 0", n)
+		}
+	})
+	t.Run("empty org with --all", func(t *testing.T) {
+		f := newFixture(t)
+		f.fake.AddOwner("o")
+		if _, err := f.add(t, AddRequest{Org: "o", All: true}); err != nil {
+			t.Fatal(err)
+		}
+		if n := len(f.onDisk(t).Sources); n != 1 {
+			t.Fatalf("%d sources, want 1 (explicit --all on an empty org)", n)
+		}
+	})
+	t.Run("everything already present", func(t *testing.T) {
+		f := newFixture(t)
+		f.repo(t, "o", "a", "main", false)
+		if _, err := f.add(t, AddRequest{Slugs: []string{"o/a"}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.add(t, AddRequest{Org: "o", All: true}); err != nil {
+			t.Fatal(err)
+		}
+		if n := len(f.onDisk(t).Sources); n != 1 {
+			t.Fatalf("%d sources, want 1", n)
+		}
+	})
+}
+
+// A truncated listing still lets named repositories be added.
+func TestAddOrgTruncatedListing(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.repo(t, "o", "a", "main", false)
+	f.fake.ListErr["o"] = fmt.Errorf("listing o: %w", hosting.ErrPossiblyTruncated)
+	s, err := f.add(t, AddRequest{Org: "o", Repos: []string{"a"}})
+	if err != nil || s.Count(StatusDone) != 1 {
+		t.Fatalf("add --repo with truncated listing: %+v, %v", s, err)
+	}
+	if _, err := f.add(t, AddRequest{Org: "o", All: true}); !errors.Is(err, hosting.ErrPossiblyTruncated) {
+		t.Fatalf("add --all with truncated listing: err = %v, want ErrPossiblyTruncated", err)
+	}
+}
+
+// Cancelling a clone that is really running removes the partial
+// directory and leaves sheaf.yaml unchanged. upload-pack runs pack-objects
+// through uploadpack.packObjectsHook (only honoured from protected
+// configuration: here the test's isolated global config file, since git
+// strips GIT_CONFIG_* from the environment of a local upload-pack), a
+// script that signals it started and sleeps; cancellation kills git's whole
+// process group.
+func TestAddCancelKillsRunningClone(t *testing.T) {
+	testutil.IsolateGitPerTest(t) // writable global configuration
+	f := newFixture(t)
+	f.repo(t, "o", "a", "main", false)
+	scripts := t.TempDir()
+	marker := filepath.Join(scripts, "started")
+	slow := filepath.Join(scripts, "slow-pack-objects")
+	if err := os.WriteFile(slow, []byte("#!/bin/sh\ntouch '"+marker+"'\nsleep 30\nexec \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := os.OpenFile(os.Getenv("GIT_CONFIG_GLOBAL"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Fprintf(cfg, "[uploadpack]\n\tpackObjectsHook = %s\n", slow); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Close()
+	before, err := os.ReadFile(filepath.Join(f.w.Root, bundle.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		for {
+			if _, err := os.Stat(marker); err == nil {
+				cancel()
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}()
+	start := time.Now()
+	s, err := Add(ctx, f.w, f.fake, AddRequest{Slugs: []string{"o/a"}}, 1, Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, serr := os.Stat(marker); serr != nil {
+		t.Fatal("the slow upload-pack never ran; the test proves nothing")
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Fatalf("Add returned after %v", d)
+	}
+	if len(s.Results) != 1 || !errors.Is(s.Results[0].Err, context.Canceled) {
+		t.Fatalf("results = %+v, want cancellation", s.Results)
+	}
+	if exists(filepath.Join(f.w.Root, "a")) {
+		t.Fatal("partial clone left behind")
+	}
+	after, _ := os.ReadFile(filepath.Join(f.w.Root, bundle.FileName))
+	if string(after) != string(before) {
+		t.Fatalf("sheaf.yaml changed:\n%s", after)
+	}
 }

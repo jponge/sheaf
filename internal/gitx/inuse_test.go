@@ -84,7 +84,7 @@ func TestBranchesInUse(t *testing.T) {
 	}
 }
 
-// N1: in a reftable repository HEAD files hold "ref: refs/heads/.invalid";
+// In a reftable repository HEAD files hold "ref: refs/heads/.invalid";
 // checked-out branches come from `git worktree list`.
 func TestBranchesInUseReftable(t *testing.T) {
 	t.Parallel()
@@ -110,7 +110,7 @@ func TestBranchesInUseReftable(t *testing.T) {
 	}
 }
 
-// NIT: a relative gitdir file (worktree.useRelativePaths, git >= 2.48) is
+// A relative gitdir file (worktree.useRelativePaths, git >= 2.48) is
 // resolved against the directory holding it.
 func TestBranchesInUseRelativeGitdir(t *testing.T) {
 	t.Parallel()

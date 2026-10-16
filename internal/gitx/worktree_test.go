@@ -250,7 +250,7 @@ func wantNoBranch(t *testing.T, dir, branch string) {
 	}
 }
 
-// S5: a non-empty or non-directory target path is refused before anything is
+// A non-empty or non-directory target path is refused before anything is
 // created, whatever the mode.
 func TestWorktreeAddRefusesOccupiedPath(t *testing.T) {
 	t.Parallel()
@@ -286,7 +286,7 @@ func TestWorktreeAddAcceptsEmptyDirectory(t *testing.T) {
 	mustAdd(t, primary, path, "in-empty", WorktreeAddOpts{}, WorktreeNewBranch)
 }
 
-// S5: when git fails after creating the branch, the branch is deleted.
+// When git fails after creating the branch, the branch is deleted.
 func TestWorktreeAddDeletesBranchCreatedByFailedAdd(t *testing.T) {
 	t.Parallel()
 	if os.Geteuid() == 0 {
@@ -348,7 +348,7 @@ func TestWorktreeAddReportsUpstream(t *testing.T) {
 	}
 }
 
-// Review 2, item 4: the cleanup after a failed `worktree add -b` deletes the
+// The cleanup after a failed `worktree add -b` deletes the
 // branch only if this call created it and it still points at the start point.
 func TestCleanupCreatedBranchSparesBranchesItDidNotCreate(t *testing.T) {
 	t.Parallel()
@@ -396,7 +396,7 @@ func TestCleanupCreatedBranchSparesBranchesItDidNotCreate(t *testing.T) {
 	}
 }
 
-// Review 2c, item 6: the start point of a new branch is the commit resolved
+// The start point of a new branch is the commit resolved
 // before the add (pinned by id), so a base that moves in between cannot leak
 // into the branch. The branch reflog records the start point git was given.
 func TestWorktreeAddNewBranchIsCreatedFromResolvedStartPoint(t *testing.T) {

@@ -119,42 +119,6 @@ func TestGHListForksTruncatedAndErrors(t *testing.T) {
 	})
 }
 
-func TestFakeForks(t *testing.T) {
-	t.Parallel()
-	f := NewFake()
-	ctx := context.Background()
-	login, err := f.CurrentUser(ctx)
-	if err != nil || login == "" {
-		t.Fatalf("default CurrentUser = %q, %v", login, err)
-	}
-	if forks, err := f.ListForks(ctx, login); err != nil || len(forks) != 0 {
-		t.Fatalf("no forks registered: %v, %v", forks, err)
-	}
-	f.User = "jponge"
-	fk := Fork{Repo: Repo{Owner: "jponge", Name: "x-renamed", CloneURL: "file:///f.git", Fork: true}, ParentOwner: "up", ParentName: "x"}
-	f.AddFork(fk)
-	forks, err := f.ListForks(ctx, "JPonge")
-	if err != nil || len(forks) != 1 || forks[0] != fk {
-		t.Fatalf("ListForks = %+v, %v", forks, err)
-	}
-	forks[0].Name = "mutated"
-	if again, _ := f.ListForks(ctx, "jponge"); again[0].Name != "x-renamed" {
-		t.Fatal("ListForks must return a copy")
-	}
-	boom := errors.New("boom")
-	f.UserErr = boom
-	if _, err := f.CurrentUser(ctx); !errors.Is(err, boom) {
-		t.Fatalf("err = %v", err)
-	}
-	f.ForksErr = boom
-	if _, err := f.ListForks(ctx, "jponge"); !errors.Is(err, boom) {
-		t.Fatalf("err = %v", err)
-	}
-	if f.ForkCalls() != 4 {
-		t.Fatalf("ForkCalls = %d", f.ForkCalls())
-	}
-}
-
 func TestGHRealRepoViewNonForkHasNoParent(t *testing.T) {
 	// Not parallel: writes an executable stub (ETXTBSY with concurrent forks).
 	path, _ := stubGH(t, map[string]resp{"repo view": {fixture: "real_repo_view_nonfork.json"}})

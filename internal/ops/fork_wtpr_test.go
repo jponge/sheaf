@@ -17,7 +17,7 @@ func TestPRWorktreeForkSameRepositoryPRTracksUpstream(t *testing.T) {
 	// A stale branch of the same name on the fork must not be used.
 	testutil.Git(t, fo.Fork.Path, "branch", "feat", "main")
 	f.fake.AddPR("up", "x", hosting.PR{Number: 3, HeadBranch: "feat", HeadOwner: "up", HeadRepo: "x"})
-	res, err := f.wtPR(t, "x", 3)
+	res, err := f.addPRWorktree(t, "x", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestPRWorktreeForkPRFromYourForkTracksOrigin(t *testing.T) {
 	testutil.Git(t, fo.Fork.Path, "branch", "topic", "main")
 	testutil.AdvanceOrigin(t, fo.Fork, "topic", "t.txt", "t\n", "topic on the fork")
 	f.fake.AddPR("up", "x", hosting.PR{Number: 5, HeadBranch: "topic", HeadOwner: "ME", HeadRepo: "x", IsCrossRepository: true})
-	res, err := f.wtPR(t, "x", 5)
+	res, err := f.addPRWorktree(t, "x", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestPRWorktreeForkPRFromOtherForkUsesUpstreamPullRef(t *testing.T) {
 	fo, primary := f.addForked(t, "x", testutil.OriginOpts{})
 	oid := pushPullRef(t, fo.Upstream, 7, "main", "other.txt")
 	f.fake.AddPR("up", "x", hosting.PR{Number: 7, HeadBranch: "main", HeadOwner: "someone", HeadRepo: "x", IsCrossRepository: true})
-	res, err := f.wtPR(t, "x", 7)
+	res, err := f.addPRWorktree(t, "x", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestPRWorktreeForkPRFromOtherForkUsesUpstreamPullRef(t *testing.T) {
 	}
 	// Refreshing works against upstream too.
 	oid2 := pushPullRef(t, fo.Upstream, 7, oid, "more.txt")
-	if _, err := f.wtPR(t, "x", 7); err != nil {
+	if _, err := f.addPRWorktree(t, "x", 7); err != nil {
 		t.Fatal(err)
 	}
 	if head(t, res.Path, "HEAD") != oid2 {
@@ -83,7 +83,7 @@ func TestPRWorktreeForkPRFromYourForkWithDeletedBranchUsesPullRef(t *testing.T) 
 	fo, _ := f.addForked(t, "x", testutil.OriginOpts{})
 	oid := pushPullRef(t, fo.Upstream, 8, "main", "gone.txt")
 	f.fake.AddPR("up", "x", hosting.PR{Number: 8, HeadBranch: "deleted", HeadOwner: "me", HeadRepo: "x", IsCrossRepository: true})
-	res, err := f.wtPR(t, "x", 8)
+	res, err := f.addPRWorktree(t, "x", 8)
 	if err != nil {
 		t.Fatal(err)
 	}

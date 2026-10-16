@@ -32,14 +32,14 @@ func racingGit(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// N2: the existing pr/7 is fast-forwarded to PR 7's head, not to whatever a
+// The existing pr/7 is fast-forwarded to PR 7's head, not to whatever a
 // concurrent fetch left in FETCH_HEAD.
-func TestR10PRHeadNotFromSharedFetchHead(t *testing.T) {
+func TestPRHeadNotFromSharedFetchHead(t *testing.T) {
 	f, primary, o, head := forkPR7(t, false)
 	next7 := pushPullRef(t, o, 7, head, "seven.txt")
 	pushPullRef(t, o, 8, next7, "eight.txt") // descends from pr/7 too
 	racingGit(t)
-	res, err := f.wtPR(t, "a", 7)
+	res, err := f.addPRWorktree(t, "a", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestR10PRHeadNotFromSharedFetchHead(t *testing.T) {
 	// Refresh of the checked-out worktree: same.
 	next7b := pushPullRef(t, o, 7, next7, "seven-b.txt")
 	pushPullRef(t, o, 8, next7b, "eight-b.txt")
-	if _, err := f.wtPR(t, "a", 7); err != nil {
+	if _, err := f.addPRWorktree(t, "a", 7); err != nil {
 		t.Fatal(err)
 	}
 	if got := testutil.Git(t, res.Path, "rev-parse", "HEAD"); got != next7b {
@@ -61,7 +61,7 @@ func TestR10PRHeadNotFromSharedFetchHead(t *testing.T) {
 	}
 }
 
-// B13: the PR head of an existing, not checked-out pr/7 is fetched without
+// The PR head of an existing, not checked-out pr/7 is fetched without
 // holding .sheaf.lock (a credential prompt must not block other sheaf
 // processes), and the head is still recorded as refs/sheaf/pull/7.
 func TestPRFetchOutsideBundleLock(t *testing.T) {
@@ -81,7 +81,7 @@ func TestPRFetchOutsideBundleLock(t *testing.T) {
 		}
 		unlock()
 	}
-	res, err := f.wtPR(t, "a", 7)
+	res, err := f.addPRWorktree(t, "a", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestPRFetchOutsideBundleLock(t *testing.T) {
 	}
 }
 
-// B13: pr/7 moved by someone else while its PR head was being fetched (e.g.
+// Branch pr/7 moved by someone else while its PR head was being fetched (e.g.
 // a concurrent `sheaf wt pr` that fetched a newer head): nothing is changed,
 // no worktree is created, and the message says what happened instead of
 // comparing pr/7 with a fetch result that may be stale.
@@ -110,7 +110,7 @@ func TestPRBranchChangedDuringFetch(t *testing.T) {
 	prFetchHook = func(dir string) {
 		testutil.Git(t, dir, "update-ref", "refs/heads/pr/7", moved)
 	}
-	_, err := f.wtPR(t, "a", 7)
+	_, err := f.addPRWorktree(t, "a", 7)
 	if err == nil || !strings.Contains(err.Error(), "pr/7 changed while") || !strings.Contains(err.Error(), "run this command again") {
 		t.Fatalf("err = %v", err)
 	}

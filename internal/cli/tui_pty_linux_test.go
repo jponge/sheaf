@@ -159,7 +159,7 @@ func (s *ptyShell) nextLine() string {
 // readNext is the end of the scripts: the shell reads one line.
 const readNext = `; IFS= read -r line; printf 'GOT=[%s]END\n' "$line"`
 
-// B1: bubbletea v2 queries the terminal at startup (DECRQM 2026/2027) and
+// Bubble Tea v2 queries the terminal at startup (DECRQM 2026/2027) and
 // on the first frame (kitty keyboard flags). A command that ends quickly
 // must not leave the replies in the terminal input, where the shell reads
 // them as typed text.

@@ -174,7 +174,7 @@ func TestRiskKindString(t *testing.T) {
 	}
 }
 
-// Review 2, item 5: tags are normally fetched from origin; a commit reachable
+// Tags are normally fetched from origin; a commit reachable
 // only from such a tag must not make a fresh clone unsafe to delete.
 func TestDeletionRisksFetchedTagOnlyCommitIsInformational(t *testing.T) {
 	t.Parallel()
@@ -196,7 +196,7 @@ func TestDeletionRisksFetchedTagOnlyCommitIsInformational(t *testing.T) {
 	}
 }
 
-// Review 2, item 6: modifications of files flagged skip-worktree or
+// Modifications of files flagged skip-worktree or
 // assume-unchanged are hidden from status but lost on deletion.
 func TestDeletionRisksHiddenModifications(t *testing.T) {
 	t.Parallel()
@@ -241,7 +241,9 @@ func TestDeletionRisksHiddenModifications(t *testing.T) {
 	}
 }
 
-// Review 2, item 8: risk scope.
+// Stashes, unpushed branch commits and tag-only commits are repository-wide.
+// Those and ignored files do not block removing one worktree but do block
+// deleting the repository; any other risk blocks removing the worktree.
 func TestRiskScopeAndSafeToRemoveWorktree(t *testing.T) {
 	t.Parallel()
 	repoWide := map[RiskKind]bool{

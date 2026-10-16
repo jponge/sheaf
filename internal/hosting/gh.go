@@ -204,7 +204,7 @@ func (r ghRepo) toRepo(proto string) Repo {
 
 // ListRepos lists the repositories owned by owner (a user or an organization).
 func (g *GH) ListRepos(ctx context.Context, owner string) ([]Repo, error) {
-	if err := validateOwner(owner); err != nil {
+	if err := ValidateOwner(owner); err != nil {
 		return nil, err
 	}
 	proto, err := g.protocol(ctx)
@@ -232,7 +232,7 @@ func (g *GH) ListRepos(ctx context.Context, owner string) ([]Repo, error) {
 
 // Repo fetches one repository.
 func (g *GH) Repo(ctx context.Context, owner, name string) (Repo, error) {
-	if err := validateRepo(owner, name); err != nil {
+	if err := ValidateRepo(owner, name); err != nil {
 		return Repo{}, err
 	}
 	proto, err := g.protocol(ctx)
@@ -252,7 +252,7 @@ func (g *GH) Repo(ctx context.Context, owner, name string) (Repo, error) {
 
 // PR fetches the head information of a pull request.
 func (g *GH) PR(ctx context.Context, owner, name string, number int) (PR, error) {
-	if err := validatePR(owner, name, number); err != nil {
+	if err := ValidatePR(owner, name, number); err != nil {
 		return PR{}, err
 	}
 	out, err := g.run(ctx, "pr", "view", strconv.Itoa(number), "--repo", owner+"/"+name, "--json", prFields)
@@ -297,7 +297,7 @@ func (g *GH) CurrentUser(ctx context.Context) (string, error) {
 	if login == "" {
 		return "", errors.New("gh api user: empty login")
 	}
-	if err := validateOwner(login); err != nil {
+	if err := ValidateOwner(login); err != nil {
 		return "", fmt.Errorf("gh api user: %w", err)
 	}
 	return login, nil
@@ -308,7 +308,7 @@ func (g *GH) CurrentUser(ctx context.Context) (string, error) {
 // are left out. Like ListRepos, more than Limit forks yields the trimmed
 // list together with ErrPossiblyTruncated.
 func (g *GH) ListForks(ctx context.Context, owner string) ([]Fork, error) {
-	if err := validateOwner(owner); err != nil {
+	if err := ValidateOwner(owner); err != nil {
 		return nil, err
 	}
 	proto, err := g.protocol(ctx)

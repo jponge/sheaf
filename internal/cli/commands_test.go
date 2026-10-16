@@ -11,18 +11,19 @@ import (
 
 	"github.com/jponge/sheaf/internal/bundle"
 	"github.com/jponge/sheaf/internal/hosting"
+	"github.com/jponge/sheaf/internal/hosting/hostingtest"
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
 type env struct {
-	fake *hosting.Fake
+	fake *hostingtest.Fake
 	cwd  string
 }
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	testutil.IsolateGit(t)
-	return &env{fake: hosting.NewFake(), cwd: t.TempDir()}
+	return &env{fake: hostingtest.NewFake(), cwd: t.TempDir()}
 }
 
 func (e *env) deps() Deps {

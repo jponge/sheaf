@@ -240,7 +240,7 @@ func killRecorded(t *testing.T, pidfile string) {
 	})
 }
 
-// Review 2, item 1: a hook that backgrounds a process inheriting stderr keeps
+// A hook that backgrounds a process inheriting stderr keeps
 // the pipe open after git exited 0; exec then reports ErrWaitDelay. The
 // fast-forward did happen, so it must not be reported as a failure.
 func TestFastForwardSucceedsWhenHookBackgroundsProcessHoldingStderr(t *testing.T) {
@@ -312,7 +312,7 @@ func wantCleanFastForward(t *testing.T, dir string, r PullResult) {
 	}
 }
 
-// Review 2, item 3 (decision a): once the merge has started, cancellation is
+// Once the merge has started, cancellation is
 // not honoured; the fast-forward completes and is reported as such.
 func TestFastForwardCompletesWhenCancelledDuringCheckout(t *testing.T) {
 	dir, marker := slowCheckoutClone(t, "1")
@@ -359,7 +359,7 @@ func wantForceKilled(t *testing.T, elapsed time.Duration, r PullResult, pidfile 
 	wantProcessesGone(t, pidfile)
 }
 
-// Review 2c, item 5: closing Force kills the merge's process group at once.
+// Closing Force kills the merge's process group at once.
 func TestFastForwardWithOptionsForceKillsMergeMidCheckout(t *testing.T) {
 	dir, pidfile := slowSmudgeClone(t)
 	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {

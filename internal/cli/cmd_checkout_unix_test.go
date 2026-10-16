@@ -177,7 +177,7 @@ func TestSheafProcessHelper(t *testing.T) {
 	os.Exit(Execute(strings.Split(args, "\x1f"), Streams{In: os.Stdin, Out: os.Stdout, Err: os.Stderr}))
 }
 
-// N1: `sheaf run ... | head`: when stdout's reader goes away, sheaf is not
+// `sheaf run ... | head`: when stdout's reader goes away, sheaf is not
 // killed by SIGPIPE; the broken pipe cancels the run (commands terminated)
 // and sheaf exits with 141 after its cleanup.
 func TestRunBrokenStdoutPipe(t *testing.T) {

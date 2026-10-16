@@ -10,7 +10,7 @@ import (
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
-// B6 S1: commits reachable from the head of a pull request checked out by
+// Commits reachable from the head of a pull request checked out by
 // `sheaf wt pr` (branch pr/<n> tracking refs/pull/<n>/head, which has no
 // remote-tracking ref) count as published; only commits beyond it are at
 // risk.
@@ -24,7 +24,7 @@ func prRepo(t *testing.T) (f *fixture, primary string, o testutil.Origin, wt, he
 	primary, o = f.clonedRepo(t, "a")
 	head = pushPullRef(t, o, 7, "main", "fork.txt")
 	f.fake.AddPR("o", "a", hosting.PR{Number: 7, HeadBranch: "topic", HeadOwner: "someone", HeadRepo: "a", IsCrossRepository: true})
-	res, err := f.wtPR(t, "a", 7)
+	res, err := f.addPRWorktree(t, "a", 7)
 	if err != nil || res.Branch != "pr/7" {
 		t.Fatalf("wt pr: %+v, %v", res, err)
 	}
@@ -39,7 +39,7 @@ func TestWtPRRecordsThePullRequestHead(t *testing.T) {
 	}
 	// Refreshing the worktree records the new head.
 	next := pushPullRef(t, o, 7, head, "more.txt")
-	if _, err := f.wtPR(t, "a", 7); err != nil {
+	if _, err := f.addPRWorktree(t, "a", 7); err != nil {
 		t.Fatal(err)
 	}
 	if got := testutil.Git(t, wt, "rev-parse", "refs/sheaf/pull/7"); got != next {

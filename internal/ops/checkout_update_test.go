@@ -256,3 +256,27 @@ func TestUpdateForceKillsInProgressFastForward(t *testing.T) {
 		t.Fatal("force did not stop the merge")
 	}
 }
+
+// An untracked file in the way of the fast-forward is a skip with the file
+// list, not a failure; the full git error is kept.
+func TestUpdateUntrackedFilesInTheWayIsSkipped(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	o, alpha := addRepoWith(t, f, "alpha")
+	testutil.AdvanceOrigin(t, o, "main", "r.txt", "remote\n", "remote")
+	writeFile(t, filepath.Join(alpha, "r.txt"), "local untracked\n")
+	r, err := Update(context.Background(), f.w, UpdateOptions{Jobs: 1}, Discard)
+	if err != nil || len(r.Checkouts) != 1 {
+		t.Fatalf("%v %+v", err, r)
+	}
+	u := r.Checkouts[0]
+	if !u.Skipped() || !strings.Contains(u.Reason, "untracked files in the way") || !strings.Contains(u.Reason, "r.txt") {
+		t.Fatalf("update = %+v, want skipped: untracked files in the way (r.txt)", u)
+	}
+	if u.Err == nil || !strings.Contains(u.Err.Error(), "would be overwritten") {
+		t.Errorf("full git error not kept: %v", u.Err)
+	}
+	if readFile(t, filepath.Join(alpha, "r.txt")) != "local untracked\n" {
+		t.Error("untracked file changed")
+	}
+}

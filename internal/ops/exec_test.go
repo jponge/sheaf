@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -217,5 +218,19 @@ func TestExecuteCancellation(t *testing.T) {
 	}
 	if got := rec.kinds("z0"); !slices.Equal(got, []Kind{KindFailed}) {
 		t.Fatalf("unstarted task events = %v, want [failed]", got)
+	}
+}
+
+func TestExecuteRecoversPanics(t *testing.T) {
+	t.Parallel()
+	s := Execute(context.Background(), 2, []Task{
+		{Repo: "a", Run: func(context.Context, func(Event)) (string, error) { panic("kaboom") }},
+		{Repo: "b", Run: func(context.Context, func(Event)) (string, error) { return "", nil }},
+	}, Discard)
+	if s.Results[0].Status != StatusFailed || !strings.Contains(s.Results[0].Err.Error(), "kaboom") || !strings.Contains(s.Results[0].Err.Error(), "goroutine") {
+		t.Fatalf("a = %+v, want failure with panic value and stack", s.Results[0])
+	}
+	if s.Results[1].Status != StatusDone {
+		t.Fatalf("b = %+v", s.Results[1])
 	}
 }

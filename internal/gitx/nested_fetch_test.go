@@ -96,7 +96,7 @@ func TestFetchAllPrunesEveryRemote(t *testing.T) {
 	}
 }
 
-// S1: bare repositories inside the checkout are nested repositories.
+// Bare repositories inside the checkout are nested repositories.
 func TestDeletionRisksNestedBareRepository(t *testing.T) {
 	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
@@ -115,7 +115,7 @@ func TestDeletionRisksNestedBareRepository(t *testing.T) {
 	}
 }
 
-// S1: a remote inside the tree being deleted is no remote.
+// A remote inside the tree being deleted is no remote.
 func TestDeletionRisksRemoteInsideDeletedTree(t *testing.T) {
 	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})

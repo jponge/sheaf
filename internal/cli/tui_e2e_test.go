@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jponge/sheaf/internal/hosting"
+	"github.com/jponge/sheaf/internal/hosting/hostingtest"
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
@@ -232,7 +233,7 @@ func goneB(t *testing.T) (*env, string) {
 	e, root := syncBundle(t)
 	e.mustRun(t, "add", "--org", "o", "--repo", "b")
 	a, _ := load(t, root).Repository("a")
-	e.fake = hosting.NewFake()
+	e.fake = hostingtest.NewFake()
 	e.fake.AddRepo(hosting.Repo{Owner: "o", Name: "a", CloneURL: a.URL, DefaultBranch: "main"})
 	e.origin(t, "o", "c", false)
 	return e, root

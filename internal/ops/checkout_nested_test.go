@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jponge/sheaf/internal/hosting"
+	"github.com/jponge/sheaf/internal/hosting/hostingtest"
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
@@ -41,7 +41,7 @@ func nestedBundleIntact(t *testing.T, name string) (*fixture, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{w: w, fake: hosting.NewFake()}
+	f := &fixture{w: w, fake: hostingtest.NewFake()}
 	_, primary := addRepoWith(t, f, name, "feat")
 	return f, outer, primary
 }
@@ -53,7 +53,7 @@ func wantNotWorkTree(t *testing.T, what string, probs []Problem, primary string)
 	}
 }
 
-// B1: a primary without .git inside an enclosing work tree must not be
+// A primary without .git inside an enclosing work tree must not be
 // mistaken for the enclosing repository.
 func TestCheckoutsPrimaryWithoutGitInsideOuterRepo(t *testing.T) {
 	t.Parallel()
@@ -124,7 +124,7 @@ func TestCheckoutsPrimaryThatIsALinkedWorktree(t *testing.T) {
 
 func checkoutNamesOf(cs []Checkout) []string { return checkoutNames(cs) }
 
-// B1': a linked worktree that lost its .git file inside an enclosing work
+// A linked worktree that lost its .git file inside an enclosing work
 // tree is a problem, never the enclosing repository; the primary is still
 // processed.
 func TestCheckoutsLinkedWorktreeWithoutGitInsideOuterRepo(t *testing.T) {

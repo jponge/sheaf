@@ -64,20 +64,22 @@ func badChars(s string) bool {
 	})
 }
 
-// validateOwner: non-empty, no leading '-', no '/', whitespace or control
+// ValidateOwner returns an error wrapping ErrInvalidInput unless owner is
+// non-empty, has no leading '-', and has no '/', whitespace or control
 // characters. '_' is allowed (enterprise managed user logins).
-func validateOwner(owner string) error {
+func ValidateOwner(owner string) error {
 	if owner == "" || owner[0] == '-' || badChars(owner) {
 		return fmt.Errorf("%w: owner %q", ErrInvalidInput, owner)
 	}
 	return nil
 }
 
-// validateRepo: the name is non-empty, free of '/', whitespace and control
-// characters, and not "." or "..". A leading '.' or '-' is allowed (".github")
-// because the name is only ever passed after "owner/".
-func validateRepo(owner, name string) error {
-	if err := validateOwner(owner); err != nil {
+// ValidateRepo validates owner like ValidateOwner, then requires name to be
+// non-empty, free of '/', whitespace and control characters, and not "." or
+// "..". A leading '.' or '-' is allowed (".github") because the name is only
+// ever passed after "owner/".
+func ValidateRepo(owner, name string) error {
+	if err := ValidateOwner(owner); err != nil {
 		return err
 	}
 	if name == "" || name == "." || name == ".." || badChars(name) {
@@ -86,8 +88,10 @@ func validateRepo(owner, name string) error {
 	return nil
 }
 
-func validatePR(owner, name string, number int) error {
-	if err := validateRepo(owner, name); err != nil {
+// ValidatePR validates owner and name like ValidateRepo, then requires a
+// positive pull request number.
+func ValidatePR(owner, name string, number int) error {
+	if err := ValidateRepo(owner, name); err != nil {
 		return err
 	}
 	if number <= 0 {

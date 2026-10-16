@@ -164,7 +164,7 @@ func homeBranch(c ops.CheckoutStatus) string {
 	case c.Tag != "":
 		return tagLabel(c.Tag, c.TagMovedTo)
 	case c.Detached && c.Status != nil:
-		return "(detached " + abbrevHead(c.Status.Head) + ")"
+		return "(detached " + shortHead(c.Status.Head) + ")"
 	case c.Detached:
 		return "(detached)"
 	case c.Status != nil && c.Status.Unborn:

@@ -197,7 +197,7 @@ func slowUploadPackClone(t *testing.T) (dir, pidfile string) {
 	return dir, pidfile
 }
 
-// S4: cancelling an interactive fetch also stops git's descendants (here an
+// Cancelling an interactive fetch also stops git's descendants (here an
 // upload-pack and its child, both ignoring SIGTERM), not just git.
 func TestInteractiveFetchCancelStopsDescendants(t *testing.T) {
 	setDuration(t, &waitDelay, 500*time.Millisecond)

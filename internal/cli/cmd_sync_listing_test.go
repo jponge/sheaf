@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/jponge/sheaf/internal/hosting"
+	"github.com/jponge/sheaf/internal/hosting/hostingtest"
 )
 
 // runWith runs the CLI with another hosting implementation.
@@ -27,7 +28,7 @@ func (e *env) runWith(t *testing.T, h hosting.Hosting, args ...string) (stdout, 
 // redirecting answers lookups of moved repositories with their current
 // identity, like GitHub does after a transfer.
 type redirecting struct {
-	*hosting.Fake
+	*hostingtest.Fake
 	moved map[string]hosting.Repo // lower-case old slug -> current repo
 }
 
@@ -38,7 +39,7 @@ func (h redirecting) Repo(ctx context.Context, owner, name string) (hosting.Repo
 	return h.Fake.Repo(ctx, owner, name)
 }
 
-// B1: the org deleted a; its remote no longer exists, the clone may be the
+// The org deleted a; its remote no longer exists, the clone may be the
 // last copy.
 func TestSyncRemoveGoneDeletedRemote(t *testing.T) {
 	t.Parallel()
@@ -53,7 +54,7 @@ func TestSyncRemoveGoneDeletedRemote(t *testing.T) {
 	if err := os.RemoveAll(o.Path); err != nil {
 		t.Fatal(err)
 	}
-	e.fake = hosting.NewFake()
+	e.fake = hostingtest.NewFake()
 	e.origin(t, "o", "b", false)
 
 	out, errs, code := e.run(t, "sync", "--remove-gone", "--yes")
@@ -73,14 +74,14 @@ func TestSyncRemoveGoneDeletedRemote(t *testing.T) {
 	}
 }
 
-// S1: an empty but successful listing (e.g. a token without access to
+// An empty but successful listing (e.g. a token without access to
 // private repositories) must not remove everything.
 func TestSyncEmptyListingNeedsAllowMassRemoval(t *testing.T) {
 	t.Parallel()
 	e, root := syncBundle(t)
 	e.mustRun(t, "add", "--org", "o", "--repo", "b")
 	e.mustRun(t, "add", "--org", "o", "--repo", "c")
-	e.fake = hosting.NewFake()
+	e.fake = hostingtest.NewFake()
 	e.fake.AddOwner("o")
 	out, errs, code := e.run(t, "sync")
 	if code != 0 || !strings.Contains(out, "--allow-mass-removal") {
@@ -108,7 +109,7 @@ func TestSyncEmptyListingNeedsAllowMassRemoval(t *testing.T) {
 	}
 }
 
-// S3: empty repositories are skipped, not failed.
+// Empty repositories are skipped, not failed.
 func TestSyncAddNewSkipsEmptyRepository(t *testing.T) {
 	t.Parallel()
 	e, root := syncBundle(t)
@@ -122,7 +123,7 @@ func TestSyncAddNewSkipsEmptyRepository(t *testing.T) {
 	}
 }
 
-// S4: a transfer between two tracked organizations is reported, never
+// A transfer between two tracked organizations is reported, never
 // removed nor added again.
 func TestSyncTransferBetweenTrackedOrgs(t *testing.T) {
 	t.Parallel()
@@ -130,7 +131,7 @@ func TestSyncTransferBetweenTrackedOrgs(t *testing.T) {
 	e.origin(t, "p", "z", false)
 	e.mustRun(t, "add", "--org", "p", "--repo", "z")
 	a, _ := load(t, root).Repository("a")
-	e.fake = hosting.NewFake()
+	e.fake = hostingtest.NewFake()
 	e.origin(t, "o", "b", false)
 	e.fake.AddRepo(hosting.Repo{Owner: "p", Name: "z", CloneURL: a.URL, DefaultBranch: "main"})
 	moved := hosting.Repo{Owner: "p", Name: "a", CloneURL: a.URL, DefaultBranch: "main"}
@@ -169,7 +170,7 @@ func TestSyncExcludeErrorsExplainWhy(t *testing.T) {
 func twoOrgs(t *testing.T) (*env, string) {
 	t.Helper()
 	e, root := syncBundle(t)
-	e.fake = hosting.NewFake()
+	e.fake = hostingtest.NewFake()
 	e.origin(t, "o", "a", false)
 	e.origin(t, "o", "x", false)
 	e.origin(t, "p", "x", false)
@@ -209,7 +210,7 @@ func TestSyncJSONReviewDetails(t *testing.T) {
 	t.Parallel()
 	e, root := syncBundle(t)
 	a, _ := load(t, root).Repository("a")
-	e.fake = hosting.NewFake()
+	e.fake = hostingtest.NewFake()
 	e.origin(t, "o", "b", false)
 	out := e.mustRun(t, "sync", "--json")
 	var doc struct {
@@ -258,7 +259,7 @@ func TestSyncJSONReviewDetails(t *testing.T) {
 func TestSyncTruncatedWarningPluralization(t *testing.T) {
 	t.Parallel()
 	e, _ := syncBundle(t)
-	e.fake = hosting.NewFake()
+	e.fake = hostingtest.NewFake()
 	e.origin(t, "o", "a", false)
 	_, errs, code := e.runWith(t, truncatedHosting{e.fake}, "sync")
 	if code != 0 || !strings.Contains(errs, "(1 repository listed)") {
@@ -267,7 +268,7 @@ func TestSyncTruncatedWarningPluralization(t *testing.T) {
 }
 
 // failingLookup lists normally but every lookup fails (e.g. rate limit).
-type failingLookup struct{ *hosting.Fake }
+type failingLookup struct{ *hostingtest.Fake }
 
 func (h failingLookup) Repo(context.Context, string, string) (hosting.Repo, error) {
 	return hosting.Repo{}, errors.New("HTTP 403: API rate limit exceeded")
@@ -276,7 +277,7 @@ func (h failingLookup) Repo(context.Context, string, string) (hosting.Repo, erro
 func TestSyncUnconfirmedGoneExitsNonZero(t *testing.T) {
 	t.Parallel()
 	e, root := syncBundle(t)
-	e.fake = hosting.NewFake()
+	e.fake = hostingtest.NewFake()
 	e.origin(t, "o", "b", false) // a is a gone candidate, its lookup fails
 	before := readYAML(t, root)
 	out, errs, code := e.runWith(t, failingLookup{e.fake}, "sync", "--json")

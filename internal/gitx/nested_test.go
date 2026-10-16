@@ -83,7 +83,7 @@ func TestDeletionRisksNestedWorktreeOfAnotherRepo(t *testing.T) {
 	wantBlockingNested(t, mustRisks(t, dir), filepath.Join("tmp", "wt"))
 }
 
-// R1 (a): a repository embedded as a gitlink without .gitmodules.
+// A repository embedded as a gitlink without .gitmodules.
 func TestDeletionRisksEmbeddedGitlink(t *testing.T) {
 	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
@@ -96,7 +96,7 @@ func TestDeletionRisksEmbeddedGitlink(t *testing.T) {
 	wantBlockingNested(t, mustRisks(t, dir), "lib")
 }
 
-// R1 (b): an old-style submodule (.git directory inside its work tree).
+// An old-style submodule (.git directory inside its work tree).
 func TestDeletionRisksOldStyleSubmoduleUnpushed(t *testing.T) {
 	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
@@ -113,7 +113,7 @@ func TestDeletionRisksOldStyleSubmoduleUnpushed(t *testing.T) {
 	wantBlockingNested(t, mustRisks(t, dir), "lib")
 }
 
-// R1 (b'): a modern submodule (gitdir under .git/modules) with an unpushed
+// A modern submodule (gitdir under .git/modules) with an unpushed
 // commit.
 func TestDeletionRisksModernSubmoduleUnpushed(t *testing.T) {
 	t.Parallel()
@@ -128,7 +128,7 @@ func TestDeletionRisksModernSubmoduleUnpushed(t *testing.T) {
 	wantBlockingNested(t, mustRisks(t, dir), "sub")
 }
 
-// R1 (c): a repository nested in a tracked directory.
+// A repository nested in a tracked directory.
 func TestDeletionRisksNestedRepoInTrackedDir(t *testing.T) {
 	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})

@@ -13,7 +13,7 @@ import (
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
-// B1: a name that is the branch of one worktree and the directory of another
+// A name that is the branch of one worktree and the directory of another
 // is ambiguous; --dir/--branch select explicitly.
 func TestWorktreeTargetAmbiguity(t *testing.T) {
 	t.Parallel()
@@ -58,7 +58,7 @@ func TestWorktreeTargetAmbiguity(t *testing.T) {
 	}
 }
 
-// B2: a branch whose upstream is itself is not "merged into its upstream".
+// A branch whose upstream is itself is not "merged into its upstream".
 func TestDeleteBranchIgnoresSelfUpstream(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -77,7 +77,7 @@ func TestDeleteBranchIgnoresSelfUpstream(t *testing.T) {
 	}
 }
 
-// S1: git requires --force for a worktree with an initialized submodule;
+// Git requires --force for a worktree with an initialized submodule;
 // a clean, pushed submodule is vetted by sheaf, so no --force is needed.
 func TestRemoveWorktreeWithCleanSubmodule(t *testing.T) {
 	t.Parallel()
@@ -95,7 +95,7 @@ func TestRemoveWorktreeWithCleanSubmodule(t *testing.T) {
 	}
 }
 
-// S3: two concurrent adds whose directory names collide case-insensitively
+// Two concurrent adds whose directory names collide case-insensitively
 // cannot both succeed.
 func TestAddWorktreeConcurrentCollision(t *testing.T) {
 	f := newFixture(t)

@@ -15,7 +15,7 @@ import (
 	"github.com/jponge/sheaf/internal/bundle"
 )
 
-// B6 S6: the re-check after confirmation and the deletion run under
+// The re-check after confirmation and the deletion run under
 // .sheaf.lock, like wt rm and prune: while another sheaf process holds it,
 // nothing is deleted.
 func TestRemoveRechecksAndDeletesUnderTheBundleLock(t *testing.T) {
@@ -45,7 +45,7 @@ func TestRemoveRechecksAndDeletesUnderTheBundleLock(t *testing.T) {
 	}
 }
 
-// Review of B6: a directory of an unknown entry that cannot be read cannot
+// A directory of an unknown entry that cannot be read cannot
 // be checked for worktrees of other repositories: a hard refusal that says
 // so (not a raw "permission denied").
 func TestRemoveUnreadableDirectoryInUnknownEntry(t *testing.T) {
@@ -74,7 +74,7 @@ func TestRemoveUnreadableDirectoryInUnknownEntry(t *testing.T) {
 	}
 }
 
-// Review of B6 S6: the bundle lock is always taken before Workspace.mu.
+// The bundle lock is always taken before Workspace.mu.
 // While Remove holds the lock (deleting), another task's sheaf.yaml update
 // must wait for the lock without holding mu, or Remove's own final update
 // (which needs mu) would deadlock with it. Bounded: the update gives up

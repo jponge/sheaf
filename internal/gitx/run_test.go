@@ -145,7 +145,7 @@ func TestStrippedEnvCoversGitLocalEnvVars(t *testing.T) {
 	}
 }
 
-// Review 2, item 7: a stale lock file (e.g. left by a killed fetch) is
+// A stale lock file (e.g. left by a killed fetch) is
 // recognized and its path exposed.
 func TestStaleLockPath(t *testing.T) {
 	t.Parallel()

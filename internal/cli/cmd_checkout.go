@@ -211,13 +211,6 @@ func newStatusCmd(d Deps) *cobra.Command {
 	return cmd
 }
 
-func abbrevHead(h string) string {
-	if len(h) > 7 {
-		return h[:7]
-	}
-	return h
-}
-
 func writeStatusTable(out io.Writer, r ops.StatusReport, color bool) {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "REPO\tDIR\tBRANCH\tUPSTREAM\tAHEAD\tBEHIND\tSTAGED\tUNSTAGED\tUNTRACKED\tCONFLICTS\tSTASHES\tSTATE")
@@ -242,7 +235,7 @@ func writeStatusTable(out io.Writer, r ops.StatusReport, color bool) {
 		if c.Tag != "" {
 			branch = tagLabel(c.Tag, c.TagMovedTo)
 		} else if c.Detached {
-			branch = "(detached " + abbrevHead(s.Head) + ")"
+			branch = "(detached " + shortHead(s.Head) + ")"
 		} else if s.Unborn {
 			branch += " (unborn)"
 		}

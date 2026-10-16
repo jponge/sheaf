@@ -34,7 +34,7 @@ func noLeftovers(t *testing.T, root string) {
 	}
 }
 
-// S1: linked worktrees nested inside the moved clone are repaired.
+// Linked worktrees nested inside the moved clone are repaired.
 func TestAdoptRepairsWorktreesNestedInTheClone(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -60,7 +60,7 @@ func TestAdoptRepairsWorktreesNestedInTheClone(t *testing.T) {
 	}
 }
 
-// S5: an undeterminable default branch is refused unless given.
+// An undeterminable default branch is refused unless given.
 func TestAdoptUnknownDefaultBranch(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -88,7 +88,7 @@ func TestAdoptUnknownDefaultBranch(t *testing.T) {
 	}
 }
 
-// R7: the same directory given twice is adopted once.
+// The same directory given twice is adopted once.
 func TestAdoptAllDeduplicatesDirectories(t *testing.T) {
 	t.Parallel()
 	for i := range 5 {
@@ -106,7 +106,7 @@ func TestAdoptAllDeduplicatesDirectories(t *testing.T) {
 	}
 }
 
-// S7: adopt records the host of the origin.
+// Adopt records the host of the origin.
 func TestAdoptRecordsHost(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -148,7 +148,7 @@ func TestParseRemoteURLHost(t *testing.T) {
 	}
 }
 
-// NIT: a panic during adoption is reported, and the clone restored.
+// A panic during adoption is reported, and the clone restored.
 func TestAdoptAllRecoversPanicAndRestores(t *testing.T) {
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat"}})
@@ -168,7 +168,7 @@ func TestAdoptAllRecoversPanicAndRestores(t *testing.T) {
 	noLeftovers(t, f.w.Root)
 }
 
-// Test gap: failure branches of moveIntoSubdir.
+// Failure branches of moveIntoSubdir.
 func TestMoveIntoSubdirFailuresRestore(t *testing.T) {
 	boom := errors.New("injected")
 	for _, c := range []struct {
@@ -215,7 +215,7 @@ func TestMoveIntoSubdirFailuresRestore(t *testing.T) {
 	}
 }
 
-// Review 5, N12 (adapted to the rename-only laid-out adoption): a failure
+// A failure
 // after renaming p/dev to p/main restores p/dev and its sibling worktree,
 // and a second attempt leaves no prunable worktree.
 func TestAdoptLaidOutRenameRollbackWithSibling(t *testing.T) {
@@ -248,32 +248,5 @@ func TestAdoptLaidOutRenameRollbackWithSibling(t *testing.T) {
 	}
 	if out := testutil.Git(t, filepath.Join(f.w.Root, "p", "main"), "worktree", "list", "--porcelain"); strings.Contains(out, "prunable") {
 		t.Fatalf("prunable worktree after laid-out switch:\n%s", out)
-	}
-}
-
-// Review 5, N4: an unreadable directory in an ignored tree cannot be
-// checked; even a forced remove must fail rather than delete unchecked.
-func TestRemoveUnreadableIgnoredDirFailsSafely(t *testing.T) {
-	t.Parallel()
-	if os.Geteuid() == 0 {
-		t.Skip("SKIP: root can read everything")
-	}
-	f := newFixture(t)
-	primary, _ := f.clonedRepo(t, "a")
-	writeFile(t, filepath.Join(primary, ".git", "info", "exclude"), "build/\n")
-	locked := filepath.Join(primary, "build", "locked")
-	if err := os.MkdirAll(filepath.Join(locked, "x"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(locked, 0); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chmod(locked, 0o755) })
-	_, err := Remove(context.Background(), f.w, "a", RemoveOptions{Offline: true, Force: true, Confirm: yes}, noEmit)
-	if err == nil {
-		t.Fatal("forced remove succeeded although part of the tree could not be checked")
-	}
-	if !exists(primary) {
-		t.Fatal("deleted")
 	}
 }

@@ -18,7 +18,7 @@ func forkPR7(t *testing.T, localCommit bool) (*fixture, string, testutil.Origin,
 	primary, o := f.clonedRepo(t, "a")
 	head := pushPullRef(t, o, 7, "main", "fork.txt")
 	f.fake.AddPR("o", "a", hosting.PR{Number: 7, HeadBranch: "x", IsCrossRepository: true})
-	res, err := f.wtPR(t, "a", 7)
+	res, err := f.addPRWorktree(t, "a", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,12 +31,12 @@ func forkPR7(t *testing.T, localCommit bool) (*fixture, string, testutil.Origin,
 	return f, primary, o, head
 }
 
-// S1: pr/7 ahead of the PR head: the worktree is added on the local branch.
-func TestR10PRLocalAhead(t *testing.T) {
+// Branch pr/7 ahead of the PR head: the worktree is added on the local branch.
+func TestPRLocalAhead(t *testing.T) {
 	t.Parallel()
 	f, primary, _, _ := forkPR7(t, true)
 	local := testutil.Git(t, primary, "rev-parse", "pr/7")
-	res, err := f.wtPR(t, "a", 7)
+	res, err := f.addPRWorktree(t, "a", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,12 +45,12 @@ func TestR10PRLocalAhead(t *testing.T) {
 	}
 }
 
-// S1: pr/7 behind the PR head: fast-forwarded, then added.
-func TestR10PRLocalBehind(t *testing.T) {
+// Branch pr/7 behind the PR head: fast-forwarded, then added.
+func TestPRLocalBehind(t *testing.T) {
 	t.Parallel()
 	f, _, o, head := forkPR7(t, false)
 	next := pushPullRef(t, o, 7, head, "fork2.txt")
-	res, err := f.wtPR(t, "a", 7)
+	res, err := f.addPRWorktree(t, "a", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,15 +59,15 @@ func TestR10PRLocalBehind(t *testing.T) {
 	}
 }
 
-// S1: pr/7 diverged (local commit, PR force-pushed): refused, nothing moves,
+// Branch pr/7 diverged (local commit, PR force-pushed): refused, nothing moves,
 // and the message says that local commits would be lost (2: the previous
 // PR head commit and the local fixup are both only on pr/7 now).
-func TestR10PRLocalDiverged(t *testing.T) {
+func TestPRLocalDiverged(t *testing.T) {
 	t.Parallel()
 	f, primary, o, _ := forkPR7(t, true)
 	local := testutil.Git(t, primary, "rev-parse", "pr/7")
 	pushPullRef(t, o, 7, "main", "rewritten.txt")
-	_, err := f.wtPR(t, "a", 7)
+	_, err := f.addPRWorktree(t, "a", 7)
 	if err == nil || !strings.Contains(err.Error(), "diverged") || !strings.Contains(err.Error(), "pr/7 has 2 commits that are not in the pull request") || !strings.Contains(err.Error(), "lost") {
 		t.Fatalf("err = %v", err)
 	}
@@ -87,13 +87,13 @@ func samePR3(t *testing.T) (*fixture, string, testutil.Origin) {
 	return f, primary, o
 }
 
-// S2: a local head branch strictly behind origin is fast-forwarded first.
-func TestR10SameRepoStaleLocal(t *testing.T) {
+// A local head branch strictly behind origin is fast-forwarded first.
+func TestSameRepoStaleLocal(t *testing.T) {
 	t.Parallel()
 	f, primary, o := samePR3(t)
 	testutil.Git(t, primary, "branch", "--track", "feat", "origin/feat")
 	testutil.AdvanceOrigin(t, o, "feat", "new.txt", "new\n", "pr update")
-	res, err := f.wtPR(t, "a", 3)
+	res, err := f.addPRWorktree(t, "a", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,8 +102,8 @@ func TestR10SameRepoStaleLocal(t *testing.T) {
 	}
 }
 
-// S2: a diverged local head branch is checked out as is, with a warning.
-func TestR10SameRepoDivergedLocal(t *testing.T) {
+// A diverged local head branch is checked out as is, with a warning.
+func TestSameRepoDivergedLocal(t *testing.T) {
 	t.Parallel()
 	f, primary, o := samePR3(t)
 	testutil.Git(t, primary, "branch", "--track", "feat", "origin/feat")
@@ -112,7 +112,7 @@ func TestR10SameRepoDivergedLocal(t *testing.T) {
 	local := testutil.Git(t, primary, "rev-parse", "HEAD")
 	testutil.Git(t, primary, "switch", "-q", "main")
 	testutil.AdvanceOrigin(t, o, "feat", "new.txt", "new\n", "pr update")
-	res, err := f.wtPR(t, "a", 3)
+	res, err := f.addPRWorktree(t, "a", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,14 +121,14 @@ func TestR10SameRepoDivergedLocal(t *testing.T) {
 	}
 }
 
-// S2: already checked out and behind: warned, not modified.
-func TestR10SameRepoCheckedOutBehind(t *testing.T) {
+// Already checked out and behind: warned, not modified.
+func TestSameRepoCheckedOutBehind(t *testing.T) {
 	t.Parallel()
 	f, _, o := samePR3(t)
 	wt := f.mustAddWT(t, "a", "feat")
 	before := testutil.Git(t, wt.Path, "rev-parse", "HEAD")
 	testutil.AdvanceOrigin(t, o, "feat", "new.txt", "new\n", "pr update")
-	res, err := f.wtPR(t, "a", 3)
+	res, err := f.addPRWorktree(t, "a", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,8 +137,8 @@ func TestR10SameRepoCheckedOutBehind(t *testing.T) {
 	}
 }
 
-// NIT: SSH aliases of github.com (as add treats them) are accepted.
-func TestR10PRAliasHost(t *testing.T) {
+// SSH aliases of github.com (as add treats them) are accepted.
+func TestPRAliasHost(t *testing.T) {
 	t.Parallel()
 	f, _, _ := samePR3(t)
 	if err := f.w.update(func(b *bundle.Bundle) error {
@@ -147,20 +147,7 @@ func TestR10PRAliasHost(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.wtPR(t, "a", 3); err != nil {
+	if _, err := f.addPRWorktree(t, "a", 3); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// NIT: no trailing space for a lock without reason.
-func TestR10DoctorLockedWithoutReason(t *testing.T) {
-	t.Parallel()
-	f := newFixture(t)
-	primary, _ := f.clonedRepo(t, "a")
-	wt := f.mustAddWT(t, "a", "feat")
-	testutil.Git(t, primary, "worktree", "lock", wt.Path)
-	c := wantCheck(t, f.doctor(t, DoctorOptions{}), CheckInfo, "worktree", "a", "locked")
-	if strings.HasSuffix(c.Message, " ") {
-		t.Fatalf("trailing space: %q", c.Message)
 	}
 }

@@ -31,7 +31,7 @@ func pushPullRef(t *testing.T, o testutil.Origin, n int, parent, file string) st
 	return testutil.Git(t, work, "rev-parse", "HEAD")
 }
 
-func (f *fixture) wtPR(t *testing.T, repo string, n int) (PRWorktreeResult, error) {
+func (f *fixture) addPRWorktree(t *testing.T, repo string, n int) (PRWorktreeResult, error) {
 	t.Helper()
 	return AddPRWorktree(context.Background(), f.w, f.fake, repo, n, noEmit)
 }
@@ -41,7 +41,7 @@ func TestPRWorktreeSameRepository(t *testing.T) {
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
 	f.fake.AddPR("o", "a", hosting.PR{Number: 3, HeadBranch: "feat", HeadOwner: "o", HeadRepo: "a"})
-	res, err := f.wtPR(t, "a", 3)
+	res, err := f.addPRWorktree(t, "a", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestPRWorktreeSameRepository(t *testing.T) {
 		t.Fatalf("upstream %q", up)
 	}
 	// Again: the existing worktree is returned.
-	res, err = f.wtPR(t, "a", 3)
+	res, err = f.addPRWorktree(t, "a", 3)
 	if err != nil || res.Path != want || res.Created {
 		t.Fatalf("again: %+v, %v", res, err)
 	}
@@ -67,7 +67,7 @@ func TestPRWorktreeFromFork(t *testing.T) {
 	// The fork's head branch is named like the default branch: it must not
 	// be confused with origin/main.
 	f.fake.AddPR("o", "a", hosting.PR{Number: 7, HeadBranch: "main", HeadOwner: "someone", HeadRepo: "a", IsCrossRepository: true})
-	res, err := f.wtPR(t, "a", 7)
+	res, err := f.addPRWorktree(t, "a", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestPRWorktreeDeletedForkAndDeletedHeadBranch(t *testing.T) {
 	_, o := f.clonedRepo(t, "a")
 	head := pushPullRef(t, o, 8, "main", "gone-fork.txt")
 	f.fake.AddPR("o", "a", hosting.PR{Number: 8, HeadBranch: "fix", IsCrossRepository: true})
-	res, err := f.wtPR(t, "a", 8)
+	res, err := f.addPRWorktree(t, "a", 8)
 	if err != nil || res.Branch != "pr/8" || testutil.Git(t, res.Path, "rev-parse", "HEAD") != head {
 		t.Fatalf("deleted fork: %+v, %v", res, err)
 	}
@@ -106,7 +106,7 @@ func TestPRWorktreeDeletedForkAndDeletedHeadBranch(t *testing.T) {
 	// pull ref is used instead of creating a new branch from main.
 	head9 := pushPullRef(t, o, 9, "main", "deleted-branch.txt")
 	f.fake.AddPR("o", "a", hosting.PR{Number: 9, HeadBranch: "deleted-branch", HeadOwner: "o", HeadRepo: "a"})
-	res, err = f.wtPR(t, "a", 9)
+	res, err = f.addPRWorktree(t, "a", 9)
 	if err != nil || res.Branch != "pr/9" || testutil.Git(t, res.Path, "rev-parse", "HEAD") != head9 || len(res.Warnings) == 0 {
 		t.Fatalf("deleted head branch: %+v, %v", res, err)
 	}
@@ -118,17 +118,17 @@ func TestPRWorktreeRefresh(t *testing.T) {
 	_, o := f.clonedRepo(t, "a")
 	head := pushPullRef(t, o, 7, "main", "fork.txt")
 	f.fake.AddPR("o", "a", hosting.PR{Number: 7, HeadBranch: "x", HeadOwner: "someone", HeadRepo: "a", IsCrossRepository: true})
-	res, err := f.wtPR(t, "a", 7)
+	res, err := f.addPRWorktree(t, "a", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Up to date.
-	if res, err = f.wtPR(t, "a", 7); err != nil || res.Created || !strings.Contains(res.Message, "up to date") {
+	if res, err = f.addPRWorktree(t, "a", 7); err != nil || res.Created || !strings.Contains(res.Message, "up to date") {
 		t.Fatalf("up to date: %+v, %v", res, err)
 	}
 	// New commits on the PR: fast-forwarded.
 	next := pushPullRef(t, o, 7, head, "fork2.txt")
-	if res, err = f.wtPR(t, "a", 7); err != nil || res.Created || !strings.Contains(res.Message, "fast-forwarded") {
+	if res, err = f.addPRWorktree(t, "a", 7); err != nil || res.Created || !strings.Contains(res.Message, "fast-forwarded") {
 		t.Fatalf("fast-forward: %+v, %v", res, err)
 	}
 	if got := testutil.Git(t, res.Path, "rev-parse", "HEAD"); got != next {
@@ -137,7 +137,7 @@ func TestPRWorktreeRefresh(t *testing.T) {
 	// Dirty worktree: refused, nothing moves.
 	pushPullRef(t, o, 7, next, "fork3.txt")
 	writeFile(t, filepath.Join(res.Path, "fork.txt"), "local change\n")
-	if _, err = f.wtPR(t, "a", 7); err == nil || !strings.Contains(err.Error(), "uncommitted") {
+	if _, err = f.addPRWorktree(t, "a", 7); err == nil || !strings.Contains(err.Error(), "uncommitted") {
 		t.Fatalf("dirty: %v", err)
 	}
 	if got := testutil.Git(t, res.Path, "rev-parse", "HEAD"); got != next {
@@ -146,7 +146,7 @@ func TestPRWorktreeRefresh(t *testing.T) {
 	testutil.Git(t, res.Path, "checkout", "--", "fork.txt")
 	// Force-pushed PR (not a fast-forward): refused, nothing moves.
 	pushPullRef(t, o, 7, "main", "rewritten.txt")
-	if _, err = f.wtPR(t, "a", 7); err == nil || !strings.Contains(err.Error(), "fast-forward") {
+	if _, err = f.addPRWorktree(t, "a", 7); err == nil || !strings.Contains(err.Error(), "fast-forward") {
 		t.Fatalf("force-pushed: %v", err)
 	}
 	if got := testutil.Git(t, res.Path, "rev-parse", "HEAD"); got != next {
@@ -161,7 +161,7 @@ func TestPRWorktreeRefusesForeignLocalBranch(t *testing.T) {
 	pushPullRef(t, o, 7, "main", "fork.txt")
 	f.fake.AddPR("o", "a", hosting.PR{Number: 7, HeadBranch: "x", IsCrossRepository: true})
 	testutil.Git(t, primary, "branch", "pr/7")
-	if _, err := f.wtPR(t, "a", 7); err == nil || !strings.Contains(err.Error(), "pr/7") {
+	if _, err := f.addPRWorktree(t, "a", 7); err == nil || !strings.Contains(err.Error(), "pr/7") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -170,15 +170,15 @@ func TestPRWorktreeErrors(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	f.clonedRepo(t, "a")
-	if _, err := f.wtPR(t, "a", 42); !errors.Is(err, hosting.ErrNotFound) {
+	if _, err := f.addPRWorktree(t, "a", 42); !errors.Is(err, hosting.ErrNotFound) {
 		t.Fatalf("unknown PR: %v", err)
 	}
-	if _, err := f.wtPR(t, "nope", 1); err == nil || !strings.Contains(err.Error(), "nope") {
+	if _, err := f.addPRWorktree(t, "nope", 1); err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("unknown repo: %v", err)
 	}
 	// The pull ref is missing on origin.
 	f.fake.AddPR("o", "a", hosting.PR{Number: 5, HeadBranch: "x", IsCrossRepository: true})
-	if _, err := f.wtPR(t, "a", 5); err == nil || !strings.Contains(err.Error(), "refs/pull/5/head") {
+	if _, err := f.addPRWorktree(t, "a", 5); err == nil || !strings.Contains(err.Error(), "refs/pull/5/head") {
 		t.Fatalf("missing pull ref: %v", err)
 	}
 	if err := f.w.update(func(b *bundle.Bundle) error {
@@ -188,7 +188,7 @@ func TestPRWorktreeErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.fake.AddPR("o", "a", hosting.PR{Number: 3, HeadBranch: "feat", HeadOwner: "o", HeadRepo: "a"})
-	if _, err := f.wtPR(t, "a", 3); err == nil || !strings.Contains(err.Error(), "GitHub") {
+	if _, err := f.addPRWorktree(t, "a", 3); err == nil || !strings.Contains(err.Error(), "GitHub") {
 		t.Fatalf("non-GitHub: %v", err)
 	}
 }
@@ -199,7 +199,7 @@ func TestUpdateReportsPullRequestBranches(t *testing.T) {
 	_, o := f.clonedRepo(t, "a")
 	pushPullRef(t, o, 7, "main", "fork.txt")
 	f.fake.AddPR("o", "a", hosting.PR{Number: 7, HeadBranch: "x", IsCrossRepository: true})
-	if _, err := f.wtPR(t, "a", 7); err != nil {
+	if _, err := f.addPRWorktree(t, "a", 7); err != nil {
 		t.Fatal(err)
 	}
 	rep, err := Update(context.Background(), f.w, UpdateOptions{Jobs: 1}, Discard)

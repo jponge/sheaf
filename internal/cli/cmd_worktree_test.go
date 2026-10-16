@@ -11,8 +11,8 @@ import (
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
-// wtBundle creates a bundle with repositories o/a and o/b and returns its root.
-func wtBundle(t *testing.T) (*env, string) {
+// worktreeBundle creates a bundle with repositories o/a and o/b and returns its root.
+func worktreeBundle(t *testing.T) (*env, string) {
 	t.Helper()
 	e := newEnv(t)
 	e.origin(t, "o", "a", false)
@@ -29,7 +29,7 @@ func wtBundle(t *testing.T) (*env, string) {
 
 func TestWorktreeAddPrintsOnlyThePath(t *testing.T) {
 	t.Parallel()
-	e, root := wtBundle(t)
+	e, root := worktreeBundle(t)
 	out, errs, code := e.run(t, "wt", "add", "a", "feat/x", "--no-fetch")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errs)
@@ -58,7 +58,7 @@ func TestWorktreeAddPrintsOnlyThePath(t *testing.T) {
 }
 
 func TestWorktreeListAndPath(t *testing.T) {
-	e, root := wtBundle(t)
+	e, root := worktreeBundle(t)
 	e.mustRun(t, "wt", "add", "a", "feat/x", "--no-fetch")
 	a, ax, b := filepath.Join(root, "a", "main"), filepath.Join(root, "a", "feat-x"), filepath.Join(root, "b", "main")
 
@@ -114,7 +114,7 @@ func TestWorktreeListAndPath(t *testing.T) {
 
 func TestWorktreeRemoveNeedsYes(t *testing.T) {
 	t.Parallel()
-	e, root := wtBundle(t)
+	e, root := worktreeBundle(t)
 	p := filepath.Join(root, "a", "feat-x")
 	e.mustRun(t, "wt", "add", "a", "feat/x", "--no-fetch")
 
@@ -137,7 +137,7 @@ func TestWorktreeRemoveNeedsYes(t *testing.T) {
 
 func TestWorktreeRemoveUnmergedBranchNeedsD(t *testing.T) {
 	t.Parallel()
-	e, root := wtBundle(t)
+	e, root := worktreeBundle(t)
 	p := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "work", "--no-fetch"))
 	testutil.CommitFile(t, p, "w.txt", "w\n", "work")
 	for _, extra := range [][]string{{"-d"}, {"-d", "--force"}} {
@@ -156,7 +156,7 @@ func TestWorktreeRemoveUnmergedBranchNeedsD(t *testing.T) {
 }
 
 func TestWorktreeListPartialFailure(t *testing.T) {
-	e, root := wtBundle(t)
+	e, root := worktreeBundle(t)
 	if err := os.RemoveAll(filepath.Join(root, "b")); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestWorktreeListPartialFailure(t *testing.T) {
 // makes the exit status 1.
 func TestWorktreeListJSONUnusableWorktree(t *testing.T) {
 	t.Parallel()
-	e, root := wtBundle(t)
+	e, root := worktreeBundle(t)
 	p := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "feat", "--no-fetch"))
 	if err := os.RemoveAll(p); err != nil {
 		t.Fatal(err)
@@ -199,5 +199,60 @@ func TestWorktreeListJSONUnusableWorktree(t *testing.T) {
 	want := map[string]any{"repo": "a", "path": p, "error": "worktree of another repository (" + filepath.Join(p, ".git") + ")"}
 	if code != 1 || len(doc.Worktrees) != 2 || len(doc.Errors) != 1 || !maps.Equal(doc.Errors[0], want) {
 		t.Fatalf("exit %d, errors %v, want [%v], worktrees %v", code, doc.Errors, want, doc.Worktrees)
+	}
+}
+
+// `wt add --offline` is an alias of --no-fetch, like --offline of the
+// other commands (--no-fetch keeps working).
+func TestWorktreeAddOffline(t *testing.T) {
+	t.Parallel()
+	e, root := worktreeBundle(t)
+	primary := filepath.Join(root, "a", "main")
+	testutil.Git(t, primary, "tag", "v1")
+	testutil.Git(t, primary, "config", "remote.origin.url", "file://"+filepath.Join(t.TempDir(), "gone.git"))
+	if _, errs, code := e.run(t, "wt", "add", "a", "feat/y"); code == 0 {
+		t.Fatalf("a fetch from the missing origin succeeded:\n%s", errs)
+	}
+	for _, args := range [][]string{
+		{"wt", "add", "--offline", "a", "feat/y"},
+		{"wt", "add", "--no-fetch", "a", "feat/z"},
+		{"wt", "add", "--offline", "a", "--tag", "v1"},
+	} {
+		if out, errs, code := e.run(t, args...); code != 0 || strings.Contains(errs, "fetching") || out == "" {
+			t.Errorf("%v: exit %d, stdout %q, stderr:\n%s", args, code, out, errs)
+		}
+	}
+}
+
+// `wt rm` without argument inside a checkout says what is missing, not
+// the hint about single arguments outside a checkout.
+func TestWorktreeRemoveWithoutArgumentInsideACheckout(t *testing.T) {
+	t.Parallel()
+	e, root := worktreeBundle(t)
+	e.cwd = filepath.Join(root, "a", "main")
+	_, errs, code := e.run(t, "wt", "rm", "--yes")
+	if want := "missing <branch-or-dir> for repository a (inferred from the working directory)"; code == 0 || !strings.Contains(errs, want) || strings.Contains(errs, "outside a checkout") {
+		t.Fatalf("exit %d, stderr lacks %q (or has the outside hint):\n%s", code, want, errs)
+	}
+}
+
+// When only worktrees fail, the error header does not speak of
+// repositories.
+func TestWorktreeListErrorHeader(t *testing.T) {
+	t.Parallel()
+	e, root := worktreeBundle(t)
+	p := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "feat", "--no-fetch"))
+	if err := os.Remove(filepath.Join(p, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	_, errs, code := e.run(t, "wt", "list")
+	if code != 1 || !strings.Contains(errs, "1 worktree could not be listed:\n  a: "+p+": ") {
+		t.Fatalf("exit %d, stderr:\n%s", code, errs)
+	}
+	if err := os.Rename(filepath.Join(root, "b", "main"), filepath.Join(root, "b", "elsewhere")); err != nil {
+		t.Fatal(err)
+	}
+	if _, errs, _ := e.run(t, "wt", "list"); !strings.Contains(errs, "1 repository and 1 worktree could not be listed:") {
+		t.Fatalf("stderr:\n%s", errs)
 	}
 }

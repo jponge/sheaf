@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// B6 S4: repository names are matched exactly (case-sensitively) by every
+// Repository names are matched exactly (case-sensitively) by every
 // command, which all report a miss with the same message; a name that only
 // differs by case gets a hint.
 func TestRepositoryNamesAreExactEverywhere(t *testing.T) {
@@ -82,7 +82,7 @@ func TestAdoptMissingDirectory(t *testing.T) {
 	}
 }
 
-// Review of B6: re-examining a name that is neither registered nor a
+// Re-examining a name that is neither registered nor a
 // directory does not suggest adopting it.
 func TestRecheckOfUnknownMissingName(t *testing.T) {
 	t.Parallel()

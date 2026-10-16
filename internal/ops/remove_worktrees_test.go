@@ -10,7 +10,7 @@ import (
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
-// B6 S2: a locked worktree is a hard refusal, like in wt rm: --force does
+// A locked worktree is a hard refusal, like in wt rm: --force does
 // not delete it.
 func TestRemoveRefusesLockedWorktreeEvenWithForce(t *testing.T) {
 	t.Parallel()
@@ -35,7 +35,7 @@ func TestRemoveRefusesLockedWorktreeEvenWithForce(t *testing.T) {
 	}
 }
 
-// B6 S3: a worktree of another repository directly inside the repository
+// A worktree of another repository directly inside the repository
 // directory is a hard refusal (deleting it would lose its changes and leave
 // the other repository's administrative files dangling), like a worktree of
 // this repository outside it.
@@ -87,7 +87,7 @@ func TestRemoveOwnUnlistedWorktreeIsForceable(t *testing.T) {
 	}
 }
 
-// B6: remove and wt rm word their hard refusals alike.
+// Remove and wt rm word their hard refusals alike.
 func TestWorktreeRemoveHardRefusalWording(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -110,7 +110,7 @@ func otherRepoWorktree(t *testing.T, wt string) {
 	writeFile(t, filepath.Join(wt, "wip.txt"), "wip\n")
 }
 
-// Review of B6 S3: worktrees of other repositories are hard refusals
+// Worktrees of other repositories are hard refusals
 // wherever they are in the repository directory: below a repository
 // embedded in an unknown entry, and inside the primary checkout or a linked
 // worktree (e.g. in an ignored directory).
@@ -167,7 +167,7 @@ func TestRemoveWorktreeOfEmbeddedRepositoryIsForceable(t *testing.T) {
 	}
 }
 
-// Review of B6 S2: when `git worktree remove` fails (here: the worktree was
+// When `git worktree remove` fails (here: the worktree was
 // locked after the re-check), the deletion stops with an error; the
 // repository directory is never deleted anyway.
 func TestRemoveDeletionStopsWhenAWorktreeCannotBeRemoved(t *testing.T) {

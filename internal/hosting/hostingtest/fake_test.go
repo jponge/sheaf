@@ -1,18 +1,19 @@
-package hosting
+package hostingtest
 
 import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/jponge/sheaf/internal/hosting"
 )
 
-var _ Hosting = (*Fake)(nil)
-var _ Hosting = (*GH)(nil)
+var _ hosting.Hosting = (*Fake)(nil)
 
 func TestFakeListAndRepo(t *testing.T) {
 	f := NewFake()
-	f.AddRepo(Repo{Owner: "o", Name: "r1", CloneURL: "file:///tmp/r1.git", DefaultBranch: "main"})
-	f.AddRepo(Repo{Owner: "o", Name: "r2", Archived: true})
+	f.AddRepo(hosting.Repo{Owner: "o", Name: "r1", CloneURL: "file:///tmp/r1.git", DefaultBranch: "main"})
+	f.AddRepo(hosting.Repo{Owner: "o", Name: "r2", Archived: true})
 	ctx := context.Background()
 
 	rs, err := f.ListRepos(ctx, "o")
@@ -32,20 +33,20 @@ func TestFakeListAndRepo(t *testing.T) {
 func TestFakeNotFound(t *testing.T) {
 	f := NewFake()
 	ctx := context.Background()
-	if _, err := f.ListRepos(ctx, "nobody"); !errors.Is(err, ErrNotFound) {
+	if _, err := f.ListRepos(ctx, "nobody"); !errors.Is(err, hosting.ErrNotFound) {
 		t.Fatalf("ListRepos err = %v", err)
 	}
-	if _, err := f.Repo(ctx, "o", "x"); !errors.Is(err, ErrNotFound) {
+	if _, err := f.Repo(ctx, "o", "x"); !errors.Is(err, hosting.ErrNotFound) {
 		t.Fatalf("Repo err = %v", err)
 	}
-	if _, err := f.PR(ctx, "o", "x", 1); !errors.Is(err, ErrNotFound) {
+	if _, err := f.PR(ctx, "o", "x", 1); !errors.Is(err, hosting.ErrNotFound) {
 		t.Fatalf("PR err = %v", err)
 	}
 }
 
 func TestFakePR(t *testing.T) {
 	f := NewFake()
-	f.AddPR("o", "r", PR{Number: 3, HeadBranch: "b"})
+	f.AddPR("o", "r", hosting.PR{Number: 3, HeadBranch: "b"})
 	p, err := f.PR(context.Background(), "o", "r", 3)
 	if err != nil || p.HeadBranch != "b" {
 		t.Fatalf("PR = %v, %v", p, err)
@@ -55,7 +56,7 @@ func TestFakePR(t *testing.T) {
 func TestFakeInjectedErrors(t *testing.T) {
 	boom := errors.New("boom")
 	f := NewFake()
-	f.AddRepo(Repo{Owner: "o", Name: "r"})
+	f.AddRepo(hosting.Repo{Owner: "o", Name: "r"})
 	f.ListErr["o"] = boom
 	f.RepoErr["o/r"] = boom
 	f.PRErr["o/r"] = boom
@@ -82,8 +83,8 @@ func TestFakeEmptyOwnerIsNotAnError(t *testing.T) {
 
 func TestFakeCaseInsensitiveReturnsCanonical(t *testing.T) {
 	f := NewFake()
-	f.AddRepo(Repo{Owner: "SmallRye", Name: "Boiler-Vroom"})
-	f.AddPR("SmallRye", "Boiler-Vroom", PR{Number: 1})
+	f.AddRepo(hosting.Repo{Owner: "SmallRye", Name: "Boiler-Vroom"})
+	f.AddPR("SmallRye", "Boiler-Vroom", hosting.PR{Number: 1})
 	ctx := context.Background()
 	rs, err := f.ListRepos(ctx, "smallrye")
 	if err != nil || len(rs) != 1 || rs[0].Owner != "SmallRye" {
@@ -105,21 +106,21 @@ func TestFakeCaseInsensitiveReturnsCanonical(t *testing.T) {
 func TestFakeValidatesInputLikeGH(t *testing.T) {
 	f := NewFake()
 	ctx := context.Background()
-	if _, err := f.ListRepos(ctx, "-x"); !errors.Is(err, ErrInvalidInput) {
+	if _, err := f.ListRepos(ctx, "-x"); !errors.Is(err, hosting.ErrInvalidInput) {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := f.Repo(ctx, "o", ".."); !errors.Is(err, ErrInvalidInput) {
+	if _, err := f.Repo(ctx, "o", ".."); !errors.Is(err, hosting.ErrInvalidInput) {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := f.PR(ctx, "o", "r", 0); !errors.Is(err, ErrInvalidInput) {
+	if _, err := f.PR(ctx, "o", "r", 0); !errors.Is(err, hosting.ErrInvalidInput) {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestFakeAcceptsDotGithubAndUnderscoreOwner(t *testing.T) {
 	f := NewFake()
-	f.AddRepo(Repo{Owner: "smallrye", Name: ".github"})
-	f.AddRepo(Repo{Owner: "name_shortcode", Name: "-odd"})
+	f.AddRepo(hosting.Repo{Owner: "smallrye", Name: ".github"})
+	f.AddRepo(hosting.Repo{Owner: "name_shortcode", Name: "-odd"})
 	ctx := context.Background()
 	if _, err := f.Repo(ctx, "smallrye", ".github"); err != nil {
 		t.Fatal(err)
@@ -135,7 +136,7 @@ func TestFakeAcceptsDotGithubAndUnderscoreOwner(t *testing.T) {
 func TestFakeMixedCaseErrorKeys(t *testing.T) {
 	boom := errors.New("boom")
 	f := NewFake()
-	f.AddRepo(Repo{Owner: "SmallRye", Name: "X"})
+	f.AddRepo(hosting.Repo{Owner: "SmallRye", Name: "X"})
 	f.ListErr["SmallRye"] = boom
 	f.RepoErr["SmallRye/X"] = boom
 	f.PRErr["SmallRye/X"] = boom
@@ -148,5 +149,41 @@ func TestFakeMixedCaseErrorKeys(t *testing.T) {
 	}
 	if _, err := f.PR(ctx, "smallrye", "x", 1); !errors.Is(err, boom) {
 		t.Fatalf("PR err = %v", err)
+	}
+}
+
+func TestFakeForks(t *testing.T) {
+	t.Parallel()
+	f := NewFake()
+	ctx := context.Background()
+	login, err := f.CurrentUser(ctx)
+	if err != nil || login == "" {
+		t.Fatalf("default CurrentUser = %q, %v", login, err)
+	}
+	if forks, err := f.ListForks(ctx, login); err != nil || len(forks) != 0 {
+		t.Fatalf("no forks registered: %v, %v", forks, err)
+	}
+	f.User = "jponge"
+	fk := hosting.Fork{Repo: hosting.Repo{Owner: "jponge", Name: "x-renamed", CloneURL: "file:///f.git", Fork: true}, ParentOwner: "up", ParentName: "x"}
+	f.AddFork(fk)
+	forks, err := f.ListForks(ctx, "JPonge")
+	if err != nil || len(forks) != 1 || forks[0] != fk {
+		t.Fatalf("ListForks = %+v, %v", forks, err)
+	}
+	forks[0].Name = "mutated"
+	if again, _ := f.ListForks(ctx, "jponge"); again[0].Name != "x-renamed" {
+		t.Fatal("ListForks must return a copy")
+	}
+	boom := errors.New("boom")
+	f.UserErr = boom
+	if _, err := f.CurrentUser(ctx); !errors.Is(err, boom) {
+		t.Fatalf("err = %v", err)
+	}
+	f.ForksErr = boom
+	if _, err := f.ListForks(ctx, "jponge"); !errors.Is(err, boom) {
+		t.Fatalf("err = %v", err)
+	}
+	if f.ForkCalls() != 4 {
+		t.Fatalf("ForkCalls = %d", f.ForkCalls())
 	}
 }

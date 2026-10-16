@@ -42,7 +42,7 @@ func siblingCheckouts(t *testing.T, n int) (primary string, checkouts, branches 
 	return primary, checkouts, branches, advance
 }
 
-// B2: fetching once per repository, then fast-forwarding all sibling
+// Fetching once per repository, then fast-forwarding all sibling
 // worktrees in parallel, never races on shared refs.
 func TestFetchOnceThenParallelFastForwardOnSiblingWorktrees(t *testing.T) {
 	t.Parallel()

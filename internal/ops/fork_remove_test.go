@@ -137,7 +137,7 @@ func TestRemoveForkGoneUnpushedCommitsAreNotForkOnly(t *testing.T) {
 	}
 }
 
-// B1: a commit that exists only on a stale remote-tracking ref of the gone
+// A commit that exists only on a stale remote-tracking ref of the gone
 // fork (its local branch was deleted) would be lost with the clone.
 func TestRemoveForkGoneCommitOnlyOnStaleForkRefIsADataRisk(t *testing.T) {
 	t.Parallel()

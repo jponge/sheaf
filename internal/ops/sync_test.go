@@ -12,6 +12,7 @@ import (
 
 	"github.com/jponge/sheaf/internal/bundle"
 	"github.com/jponge/sheaf/internal/hosting"
+	"github.com/jponge/sheaf/internal/hosting/hostingtest"
 )
 
 // syncRecord writes repository entries and sources straight into sheaf.yaml
@@ -152,7 +153,7 @@ func TestSyncProposesGoneOrgRepos(t *testing.T) {
 
 // truncating lists like the gh adapter does past its limit: the repositories
 // it got together with hosting.ErrPossiblyTruncated.
-type truncating struct{ *hosting.Fake }
+type truncating struct{ *hostingtest.Fake }
 
 func (h truncating) ListRepos(ctx context.Context, owner string) ([]hosting.Repo, error) {
 	rs, err := h.Fake.ListRepos(ctx, owner)
@@ -302,7 +303,7 @@ func TestSyncRemoveGoneKeepsSafetyOfRemove(t *testing.T) {
 		}
 	}
 	stays := f.mustRepo(t, "o", "stays")
-	f.fake = hosting.NewFake()
+	f.fake = hostingtest.NewFake()
 	f.fake.AddRepo(stays)
 	r := syncNow(t, f, f.fake, SyncOptions{})
 	wantProposals(t, r, "gone o/clean", "gone o/risky")

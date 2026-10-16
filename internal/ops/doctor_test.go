@@ -216,3 +216,16 @@ func TestDoctorUnregisteredDirectories(t *testing.T) {
 		t.Fatalf("failed:\n%s", dump(cs))
 	}
 }
+
+// No trailing space for a lock without reason.
+func TestDoctorLockedWithoutReason(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	primary, _ := f.clonedRepo(t, "a")
+	wt := f.mustAddWT(t, "a", "feat")
+	testutil.Git(t, primary, "worktree", "lock", wt.Path)
+	c := wantCheck(t, f.doctor(t, DoctorOptions{}), CheckInfo, "worktree", "a", "locked")
+	if strings.HasSuffix(c.Message, " ") {
+		t.Fatalf("trailing space: %q", c.Message)
+	}
+}

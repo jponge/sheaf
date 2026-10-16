@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// S1: a second Ctrl-C (KillCommands) during the grace period after SIGTERM
+// A second Ctrl-C (KillCommands) during the grace period after SIGTERM
 // must kill what is left of the command's process group, even after the
 // group leader exited.
 func TestKillCommandsDuringGraceKillsLeftovers(t *testing.T) {
@@ -59,7 +59,7 @@ func TestKillCommandsDuringGraceKillsLeftovers(t *testing.T) {
 	}
 }
 
-// S2: a command that exits 0 but leaves a background process holding its
+// A command that exits 0 but leaves a background process holding its
 // output succeeds, with a note; the leftover process group is terminated.
 func TestRunCommandBackgroundChildHoldingOutput(t *testing.T) {
 	for _, jobs := range []int{1, 2} {
@@ -125,7 +125,7 @@ func (s *sizeSink) Write(p []byte) (int, error) {
 
 func (s *sizeSink) End(RunResult) {}
 
-// S3: large captured outputs are spilled to temporary files (removed
+// Large captured outputs are spilled to temporary files (removed
 // afterwards) instead of being held in memory, and come out intact.
 func TestRunCommandSpillsLargeOutput(t *testing.T) {
 	f, _ := threeCheckouts(t)
@@ -184,7 +184,7 @@ func TestRunCommandTerminatesLeftoverGroupAfterExit(t *testing.T) {
 	}
 }
 
-// N2: an emergency exit (second Ctrl-C: os.Exit, no deferred cleanup) must
+// An emergency exit (second Ctrl-C: os.Exit, no deferred cleanup) must
 // not leave spilled outputs behind: on Unix the temporary files are unlinked
 // as soon as they are created (the open descriptor keeps the data).
 func TestRunCommandSpillFilesNeverVisible(t *testing.T) {

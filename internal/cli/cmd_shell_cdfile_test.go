@@ -30,7 +30,7 @@ func shellCmd(t *testing.T, shell, script string, args ...string) *exec.Cmd {
 	}
 }
 
-// S1: SHEAF_CD_FILE is meant for sheaf only: the commands of `sheaf run`
+// SHEAF_CD_FILE is meant for sheaf only: the commands of `sheaf run`
 // (like git hooks or editors) must not see it, or they could make the
 // shell function change the directory.
 func TestShellFunctionIgnoresChildrenWritingTheCDFile(t *testing.T) {
@@ -61,7 +61,7 @@ func TestShellFunctionIgnoresChildrenWritingTheCDFile(t *testing.T) {
 	}
 }
 
-// S1, in the process: Execute takes SHEAF_CD_FILE out of the environment
+// In the process: Execute takes SHEAF_CD_FILE out of the environment
 // before running anything, so children do not inherit it.
 func TestExecuteHidesTheCDFileFromChildren(t *testing.T) {
 	e := newBundleEnv(t)
@@ -81,7 +81,7 @@ func TestExecuteHidesTheCDFileFromChildren(t *testing.T) {
 	}
 }
 
-// S3: with errexit (bash set -e, zsh -e), a failing sheaf must not end the
+// With errexit (bash set -e, zsh -e), a failing sheaf must not end the
 // shell before the function has removed its temporary file.
 func TestShellFunctionCleansUpUnderErrexit(t *testing.T) {
 	t.Parallel()
@@ -102,7 +102,7 @@ func TestShellFunctionCleansUpUnderErrexit(t *testing.T) {
 	}
 }
 
-// N1: when the temporary file cannot be created, the function runs sheaf
+// When the temporary file cannot be created, the function runs sheaf
 // without it, silently, and keeps its exit status.
 func TestShellFunctionFallsBackWithoutTempFile(t *testing.T) {
 	t.Parallel()

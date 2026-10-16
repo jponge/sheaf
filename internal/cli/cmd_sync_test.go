@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/jponge/sheaf/internal/hosting"
+	"github.com/jponge/sheaf/internal/hosting/hostingtest"
 )
 
 // syncBundle creates a bundle tracking organization o with repository a
@@ -143,7 +144,7 @@ func TestSyncRemoveGone(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	e.fake = hosting.NewFake()
+	e.fake = hostingtest.NewFake()
 	e.origin(t, "o", "c", false)
 
 	out := e.mustRun(t, "sync")
@@ -176,7 +177,7 @@ func TestSyncRemoveGone(t *testing.T) {
 }
 
 // truncatedHosting reports every listing as possibly truncated.
-type truncatedHosting struct{ *hosting.Fake }
+type truncatedHosting struct{ *hostingtest.Fake }
 
 func (h truncatedHosting) ListRepos(ctx context.Context, owner string) ([]hosting.Repo, error) {
 	rs, err := h.Fake.ListRepos(ctx, owner)
@@ -189,7 +190,7 @@ func (h truncatedHosting) ListRepos(ctx context.Context, owner string) ([]hostin
 func TestSyncTruncatedAndFailedListings(t *testing.T) {
 	t.Parallel()
 	e, root := syncBundle(t)
-	e.fake = hosting.NewFake()
+	e.fake = hostingtest.NewFake()
 	e.origin(t, "o", "c", false) // a looks gone, but the listing may be truncated
 	d := e.deps()
 	d.Hosting = func() hosting.Hosting { return truncatedHosting{e.fake} }

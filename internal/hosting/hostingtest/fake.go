@@ -1,4 +1,5 @@
-package hosting
+// Package hostingtest provides an in-memory hosting.Hosting for tests.
+package hostingtest
 
 import (
 	"context"
@@ -6,9 +7,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/jponge/sheaf/internal/hosting"
 )
 
-// Fake is an in-memory Hosting for tests of other packages. Set CloneURL on
+// Fake is an in-memory hosting.Hosting for tests of other packages. Set CloneURL on
 // the repos you add (for instance to file:// URLs of local bare repositories).
 // It is not safe for concurrent mutation; concurrent reads are fine.
 type Fake struct {
@@ -27,18 +30,18 @@ type Fake struct {
 	ForksErr error
 
 	mu        sync.Mutex
-	forks     []Fork
+	forks     []hosting.Fork
 	forkCalls int
 
-	owners map[string][]Repo
-	prs    map[string]PR
+	owners map[string][]hosting.Repo
+	prs    map[string]hosting.PR
 }
 
 // NewFake returns an empty Fake.
 func NewFake() *Fake {
 	return &Fake{
 		ListErr: map[string]error{}, RepoErr: map[string]error{}, PRErr: map[string]error{},
-		owners: map[string][]Repo{}, prs: map[string]PR{},
+		owners: map[string][]hosting.Repo{}, prs: map[string]hosting.PR{},
 	}
 }
 
@@ -51,7 +54,7 @@ func (f *Fake) AddOwner(owner string) {
 }
 
 // AddRepo registers r under r.Owner, replacing any repo with the same name.
-func (f *Fake) AddRepo(r Repo) {
+func (f *Fake) AddRepo(r hosting.Repo) {
 	key := strings.ToLower(r.Owner)
 	rs := f.owners[key]
 	for i := range rs {
@@ -64,7 +67,7 @@ func (f *Fake) AddRepo(r Repo) {
 }
 
 // AddPR registers a pull request of owner/name, keyed by p.Number.
-func (f *Fake) AddPR(owner, name string, p PR) {
+func (f *Fake) AddPR(owner, name string, p hosting.PR) {
 	f.prs[prKey(owner, name, p.Number)] = p
 }
 
@@ -83,8 +86,8 @@ func prKey(owner, name string, n int) string {
 }
 
 // ListRepos returns a copy of the owner's repos in insertion order.
-func (f *Fake) ListRepos(_ context.Context, owner string) ([]Repo, error) {
-	if err := validateOwner(owner); err != nil {
+func (f *Fake) ListRepos(_ context.Context, owner string) ([]hosting.Repo, error) {
+	if err := hosting.ValidateOwner(owner); err != nil {
 		return nil, err
 	}
 	if err := lookupErr(f.ListErr, owner); err != nil {
@@ -92,46 +95,46 @@ func (f *Fake) ListRepos(_ context.Context, owner string) ([]Repo, error) {
 	}
 	rs, ok := f.owners[strings.ToLower(owner)]
 	if !ok {
-		return nil, fmt.Errorf("owner %q: %w", owner, ErrNotFound)
+		return nil, fmt.Errorf("owner %q: %w", owner, hosting.ErrNotFound)
 	}
-	return append([]Repo{}, rs...), nil
+	return append([]hosting.Repo{}, rs...), nil
 }
 
 // Repo returns one repository.
-func (f *Fake) Repo(_ context.Context, owner, name string) (Repo, error) {
-	if err := validateRepo(owner, name); err != nil {
-		return Repo{}, err
+func (f *Fake) Repo(_ context.Context, owner, name string) (hosting.Repo, error) {
+	if err := hosting.ValidateRepo(owner, name); err != nil {
+		return hosting.Repo{}, err
 	}
 	if err := lookupErr(f.RepoErr, owner+"/"+name); err != nil {
-		return Repo{}, err
+		return hosting.Repo{}, err
 	}
 	for _, r := range f.owners[strings.ToLower(owner)] {
 		if strings.EqualFold(r.Name, name) {
 			return r, nil
 		}
 	}
-	return Repo{}, fmt.Errorf("repository %s/%s: %w", owner, name, ErrNotFound)
+	return hosting.Repo{}, fmt.Errorf("repository %s/%s: %w", owner, name, hosting.ErrNotFound)
 }
 
 // PR returns one pull request.
-func (f *Fake) PR(_ context.Context, owner, name string, number int) (PR, error) {
-	if err := validatePR(owner, name, number); err != nil {
-		return PR{}, err
+func (f *Fake) PR(_ context.Context, owner, name string, number int) (hosting.PR, error) {
+	if err := hosting.ValidatePR(owner, name, number); err != nil {
+		return hosting.PR{}, err
 	}
 	if err := lookupErr(f.PRErr, owner+"/"+name); err != nil {
-		return PR{}, err
+		return hosting.PR{}, err
 	}
 	if p, ok := f.prs[prKey(owner, name, number)]; ok {
 		return p, nil
 	}
-	return PR{}, fmt.Errorf("pull request %s/%s#%d: %w", owner, name, number, ErrNotFound)
+	return hosting.PR{}, fmt.Errorf("pull request %s/%s#%d: %w", owner, name, number, hosting.ErrNotFound)
 }
 
 // FakeUser is the login returned by Fake.CurrentUser when User is empty.
 const FakeUser = "sheaf-fake-user"
 
 // AddFork registers a fork, listed by ListForks(f.Owner).
-func (f *Fake) AddFork(fk Fork) {
+func (f *Fake) AddFork(fk hosting.Fork) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.forks = append(f.forks, fk)
@@ -157,8 +160,8 @@ func (f *Fake) CurrentUser(context.Context) (string, error) {
 
 // ListForks returns ForksErr, or a copy of the forks owned by owner (an
 // owner without forks gets an empty list).
-func (f *Fake) ListForks(_ context.Context, owner string) ([]Fork, error) {
-	if err := validateOwner(owner); err != nil {
+func (f *Fake) ListForks(_ context.Context, owner string) ([]hosting.Fork, error) {
+	if err := hosting.ValidateOwner(owner); err != nil {
 		return nil, err
 	}
 	f.mu.Lock()
@@ -167,7 +170,7 @@ func (f *Fake) ListForks(_ context.Context, owner string) ([]Fork, error) {
 	if f.ForksErr != nil {
 		return nil, f.ForksErr
 	}
-	out := []Fork{}
+	out := []hosting.Fork{}
 	for _, fk := range f.forks {
 		if strings.EqualFold(fk.Owner, owner) {
 			out = append(out, fk)

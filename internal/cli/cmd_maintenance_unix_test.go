@@ -25,7 +25,7 @@ func stubGH(t *testing.T, body string) string {
 	return p
 }
 
-func TestR10GHAuthStatusStub(t *testing.T) {
+func TestGHAuthStatusStub(t *testing.T) {
 	ctx := context.Background()
 	args := filepath.Join(t.TempDir(), "args")
 	ok := stubGH(t, `echo "$@" > '`+args+`'; exit 0`)
@@ -53,7 +53,7 @@ func TestR10GHAuthStatusStub(t *testing.T) {
 	}
 }
 
-func TestR10DefaultGHProbeWithoutGH(t *testing.T) {
+func TestDefaultGHProbeWithoutGH(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if err := defaultGHProbe(context.Background()); !errors.Is(err, hosting.ErrGHNotFound) {
 		t.Fatalf("err = %v", err)

@@ -72,7 +72,7 @@ func TestVersionAndCheckVersionWithInstalledGit(t *testing.T) {
 	}
 }
 
-// Review 2, NIT: CheckVersion must not depend on TMPDIR pointing to an
+// CheckVersion must not depend on TMPDIR pointing to an
 // existing directory.
 func TestCheckVersionWithMissingTMPDIR(t *testing.T) {
 	t.Setenv("TMPDIR", "/nonexistent-sheaf-test-dir")

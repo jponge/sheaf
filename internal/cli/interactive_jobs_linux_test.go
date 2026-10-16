@@ -12,7 +12,7 @@ import (
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
-// B6 S5: the single-repository commands (remove, wt add, wt add --tag,
+// The single-repository commands (remove, wt add, wt add --tag,
 // wt rm, wt pr) run git interactively in CLI mode with stdin on a terminal,
 // whatever -j: they never run git invocations in parallel.
 func TestSingleRepoCommandsInteractiveGitModeIgnoreJobs(t *testing.T) {
