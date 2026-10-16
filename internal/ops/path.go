@@ -19,6 +19,7 @@ import (
 //
 // Missing (prunable) checkouts are errors.
 func ResolvePath(ctx context.Context, w *Workspace, q PathQuery) (string, error) {
+	ctx = withCommandCache(ctx)
 	args, sel, cwd := q.Args, q.Sel, q.Cwd
 	if q.Repo != "" {
 		maxArgs := 1

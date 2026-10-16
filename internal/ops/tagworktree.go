@@ -27,6 +27,7 @@ import (
 // tag may be annotated or lightweight; it must point to a commit. opts.Base
 // does not apply and is refused.
 func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts WorktreeAddOptions, emit func(Event)) (WorktreeAddResult, error) {
+	ctx = withCommandCache(ctx)
 	b := w.Bundle()
 	r, ok := lookupRepo(b, repo)
 	if !ok {
@@ -73,7 +74,7 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 		}
 		warnings = keptTagWarnings(kept, tag, ref)
 	}
-	unlock, err := lockBundle(ctx, w.Root, func() {
+	ctx, unlock, err := lockBundleFresh(ctx, w.Root, func() {
 		report(PhaseWorktree, "waiting for "+lockFileName+" (another sheaf process is working on the bundle)")
 	})
 	if err != nil {

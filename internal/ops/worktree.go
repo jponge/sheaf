@@ -123,6 +123,7 @@ type WorktreeInfo struct {
 // failed repository. The error is reserved for an unknown repo and
 // cancellation.
 func ListWorktrees(ctx context.Context, w *Workspace, repo string) ([]WorktreeInfo, []RepoError, error) {
+	ctx = withCommandCache(ctx)
 	b := w.Bundle()
 	var repos []bundle.Repository
 	if repo != "" {
@@ -373,6 +374,7 @@ type WorktreeAddResult struct {
 // than origin/<branch>, or without upstream although origin/<branch>
 // exists, yields a warning.
 func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts WorktreeAddOptions, emit func(Event)) (WorktreeAddResult, error) {
+	ctx = withCommandCache(ctx)
 	b := w.Bundle()
 	r, ok := lookupRepo(b, repo)
 	if !ok {
@@ -440,7 +442,7 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 	}
 	// Serialize the check and the creation with other sheaf processes and
 	// tasks, so two adds whose directories collide cannot both succeed.
-	unlock, err := lockBundle(ctx, w.Root, func() {
+	ctx, unlock, err := lockBundleFresh(ctx, w.Root, func() {
 		report(PhaseWorktree, "waiting for "+lockFileName+" (another sheaf process is working on the bundle)")
 	})
 	if err != nil {
@@ -779,6 +781,7 @@ func (e *WorktreeRefusedError) Error() string {
 // when opts.Force overrode blocking risks; RemoveWorktree then checks that
 // the directory is gone.
 func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt WorktreeTarget, opts WorktreeRemoveOptions, emit func(Event)) (string, error) {
+	ctx = withCommandCache(ctx)
 	b := w.Bundle()
 	r, ok := lookupRepo(b, repo)
 	if !ok {
@@ -870,7 +873,7 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 	}
 	// Serialize the final check and the removal with other sheaf processes
 	// and tasks (e.g. a concurrent add of the same branch).
-	unlock, err := lockBundle(ctx, w.Root, func() {
+	ctx, unlock, err := lockBundleFresh(ctx, w.Root, func() {
 		ev(PhaseWorktree, "waiting for "+lockFileName+" (another sheaf process is working on the bundle)")
 	})
 	if err != nil {

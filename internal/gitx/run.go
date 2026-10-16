@@ -106,10 +106,18 @@ type runOpts struct {
 	interactive bool
 }
 
+// run runs git like Run, with the options o, through the query cache of ctx
+// if any (see WithQueryCache).
 func run(ctx context.Context, o runOpts, dir string, args ...string) (string, error) {
 	if dir == "" {
 		return "", errors.New("gitx: empty working directory")
 	}
+	return runCached(ctx, o, dir, args)
+}
+
+// runProcess starts one git process (see Run).
+func runProcess(ctx context.Context, o runOpts, dir string, args ...string) (string, error) {
+	recordCall(ctx, dir, args)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	if o.interactive {

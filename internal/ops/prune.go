@@ -111,6 +111,7 @@ type PrunePlan struct {
 // (AddTagWorktree) are never proposed and always listed in Skipped
 // (PruneSkip.Tag). The error is only set for an invalid repository filter.
 func PlanPrune(ctx context.Context, w *Workspace, opts PruneOptions, rep Reporter) (PrunePlan, error) {
+	ctx = withCommandCache(ctx)
 	repos, err := coSelectRepos(w.Bundle(), opts.Repos)
 	if err != nil {
 		return PrunePlan{}, err
@@ -358,6 +359,9 @@ type PruneResult struct {
 // deleted under the same condition, only if it still points at the planned
 // commit and is not checked out (compare-and-swap).
 func ApplyPrune(ctx context.Context, w *Workspace, plan PrunePlan, opts PruneOptions, rep Reporter) []PruneResult {
+	// Every read re-checks the plan: never answered from a cache the caller
+	// may share with the planning.
+	ctx = gitx.WithFreshReads(ctx)
 	report := coSerialize(rep)
 	wd := opts.WorkingDir
 	if wd == "" {
@@ -468,7 +472,9 @@ func pruneBranch(ctx context.Context, w *Workspace, c PruneCandidate, distrust f
 	if !isPrimaryCheckout(ctx, primary) {
 		return failed(fmt.Errorf("%s: no primary checkout at %s", r.Name, primary))
 	}
-	unlock, err := lockBundle(ctx, w.Root, func() {})
+	// ApplyPrune already reads fresh; lockBundleFresh keeps this correct on
+	// its own (defence in depth).
+	ctx, unlock, err := lockBundleFresh(ctx, w.Root, func() {})
 	if err != nil {
 		return failed(fmt.Errorf("locking %s: %w", bundle.FileName, err))
 	}

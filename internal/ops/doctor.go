@@ -92,6 +92,7 @@ const DefaultStaleLockAge = 10 * time.Minute
 // nothing is fetched or changed. Checks are returned in a stable order:
 // environment, bundle, repositories by name, unregistered directories.
 func Doctor(ctx context.Context, opts DoctorOptions) []Check {
+	ctx = withCommandCache(ctx)
 	var cs []Check
 	add := func(l CheckLevel, check, repo, msg, hint string) {
 		cs = append(cs, Check{Level: l, Check: check, Repo: repo, Message: msg, Hint: hint})

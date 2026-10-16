@@ -146,6 +146,7 @@ func (e *RisksError) Error() string {
 // The risk check and the deletion are not atomic: changes made in between
 // are lost.
 func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, emit func(Event)) (string, error) {
+	ctx = withCommandCache(ctx)
 	entry, ok := w.Bundle().Repository(name)
 	if !ok {
 		return "", fmt.Errorf("no repository named %q in the bundle", name)
@@ -226,6 +227,9 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 	if opts.Confirm == nil || !opts.Confirm(plan) {
 		return "", fmt.Errorf("%w: %s", ErrNotConfirmed, name)
 	}
+	// From here on (re-check and deletion), git is read afresh: nothing
+	// cached before or while Confirm was pending is trusted.
+	ctx = gitx.WithFreshReads(ctx)
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}

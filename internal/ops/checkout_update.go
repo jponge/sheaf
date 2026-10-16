@@ -113,6 +113,7 @@ func (f *coInflight) onCancel() {
 // KindSkipped or KindFailed PhaseUpdate event per checkout (Worktree set to
 // its directory name). The error is only set for an invalid filter.
 func Update(ctx context.Context, w *Workspace, opts UpdateOptions, rep Reporter) (UpdateReport, error) {
+	ctx = withCommandCache(ctx)
 	sets, probs, err := coEnumerate(ctx, w, opts.Filter, opts.Jobs)
 	if err != nil {
 		return UpdateReport{}, err

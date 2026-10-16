@@ -397,6 +397,7 @@ type FetchOptions struct {
 // A missing primary checkout fails that repository. The error is only set for
 // an invalid filter.
 func FetchRepos(ctx context.Context, w *Workspace, opts FetchOptions, rep Reporter) (Summary, error) {
+	ctx = withCommandCache(ctx)
 	repos, err := coSelectRepos(w.Bundle(), opts.Repos)
 	if err != nil {
 		return Summary{}, err

@@ -304,7 +304,10 @@ func cleanupCreatedBranch(ctx context.Context, repoDir, branch, startOID string,
 	if errors.As(addErr, &ge) && strings.Contains(ge.Stderr, "a branch named '"+branch+"' already exists") {
 		return
 	}
-	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rereadTimeout)
+	// Fresh reads: this check guards a deletion (see WithFreshReads). Defence
+	// in depth: the failed `worktree add` before it is a mutation, which has
+	// already invalidated this repository's cached answers.
+	cctx, cancel := context.WithTimeout(WithFreshReads(context.WithoutCancel(ctx)), rereadTimeout)
 	defer cancel()
 	wts, err := WorktreeList(cctx, repoDir)
 	if err != nil {

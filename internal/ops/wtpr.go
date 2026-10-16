@@ -157,8 +157,11 @@ func sameRepoPR(ctx context.Context, w *Workspace, r bundle.Repository, head, he
 		return PRWorktreeResult{}, err
 	} else if ok {
 		// The in-use check and the ref update run under the bundle lock, like
-		// the worktree operations they must not interleave with.
-		unlock, err := lockBundle(ctx, w.Root, func() {
+		// the worktree operations they must not interleave with. (wt pr has
+		// no query cache today, so the fresh context only matters if a
+		// caller ever passes one: defence in depth. The AddWorktree call
+		// below, after the lock is released, uses the outer context.)
+		ctx, unlock, err := lockBundleFresh(ctx, w.Root, func() {
 			emit(Event{Repo: r.Name, Phase: PhasePR, Kind: KindProgress, Message: "waiting for " + lockFileName + " (another sheaf process is working on the bundle)"})
 		})
 		if err != nil {
@@ -301,7 +304,8 @@ func pullRefPR(ctx context.Context, w *Workspace, r bundle.Repository, primary s
 // ahead (the returned note says so), refused when diverged or in use.
 func updatePRBranch(ctx context.Context, root string, r bundle.Repository, primary, branch, pullRef string, n int, emit func(Event)) (string, error) {
 	// Under the bundle lock (released before AddWorktree, which takes it).
-	unlock, err := lockBundle(ctx, root, func() {
+	// Fresh reads are defence in depth: wt pr has no query cache today.
+	ctx, unlock, err := lockBundleFresh(ctx, root, func() {
 		emit(Event{Repo: r.Name, Phase: PhasePR, Kind: KindProgress, Message: "waiting for " + lockFileName + " (another sheaf process is working on the bundle)"})
 	})
 	if err != nil {

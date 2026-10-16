@@ -102,6 +102,7 @@ func coSortProblems(ps []Problem) {
 // It reports fetch events only (with Fetch). The error is only set for an
 // invalid filter.
 func CollectStatus(ctx context.Context, w *Workspace, opts StatusOptions, rep Reporter) (StatusReport, error) {
+	ctx = withCommandCache(ctx)
 	sets, probs, err := coEnumerate(ctx, w, opts.Filter, opts.Jobs)
 	if err != nil {
 		return StatusReport{}, err

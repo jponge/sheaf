@@ -247,15 +247,16 @@ func DeletionRisksWithOptions(ctx context.Context, dir string, opts DeletionRisk
 	if opts.DeletedRoot != "" {
 		no.root = resolvePath(opts.DeletedRoot)
 	}
-	return deletionRisks(ctx, dir, maxNestingDepth, no)
+	return deletionRisks(ctx, dir, top, maxNestingDepth, no)
 }
 
 // maxNestingDepth bounds the recursion into nested repositories.
 const maxNestingDepth = 4
 
-// deletionRisks is DeletionRisks with the remaining nesting depth and the
-// resolved top levels already inspected (cycle safety).
-func deletionRisks(ctx context.Context, dir string, depth int, no *nestOpts) ([]Risk, error) {
+// deletionRisks is DeletionRisks with the top level of the work tree
+// containing dir (as reported by TopLevel), the remaining nesting depth and
+// the resolved top levels already inspected (cycle safety).
+func deletionRisks(ctx context.Context, dir, top string, depth int, no *nestOpts) ([]Risk, error) {
 	st, err := status(ctx, dir, "--ignored=traditional")
 	if err != nil {
 		return nil, err
@@ -278,11 +279,11 @@ func deletionRisks(ctx context.Context, dir string, depth int, no *nestOpts) ([]
 	if err != nil {
 		return nil, err
 	}
-	hidden, unverifiable, reason, err := hiddenModifications(ctx, dir)
+	hidden, unverifiable, reason, err := hiddenModifications(ctx, top)
 	if err != nil {
 		return nil, err
 	}
-	blocking, clean, err := assessNested(ctx, dir, depth, no)
+	blocking, clean, err := assessNested(ctx, top, depth, no)
 	if err != nil {
 		return nil, err
 	}
@@ -322,16 +323,12 @@ func revCount(ctx context.Context, dir string, args ...string) (int, error) {
 	return n, nil
 }
 
-// hiddenModifications counts index entries of the work tree containing dir
-// that are flagged skip-worktree or assume-unchanged and whose file exists
-// with a type or content different from the index entry. Files whose content
-// could not be compared (a clean filter that fails) are counted separately,
-// with the reason of the first failure.
-func hiddenModifications(ctx context.Context, dir string) (modified, unverifiable int, reason string, err error) {
-	top, err := TopLevel(ctx, dir)
-	if err != nil {
-		return 0, 0, "", err
-	}
+// hiddenModifications counts index entries of the work tree whose top level
+// is top that are flagged skip-worktree or assume-unchanged and whose file
+// exists with a type or content different from the index entry. Files whose
+// content could not be compared (a clean filter that fails) are counted
+// separately, with the reason of the first failure.
+func hiddenModifications(ctx context.Context, top string) (modified, unverifiable int, reason string, err error) {
 	// "<tag> <mode> <oid> <stage>\t<path>": tag 'S' is skip-worktree, a
 	// lowercase tag is assume-unchanged.
 	out, err := Run(ctx, top, "ls-files", "-v", "-s", "-z")
@@ -564,8 +561,8 @@ type nestedRepo struct {
 	bare bool
 }
 
-// nestedRepositories returns, sorted and relative to the top level of the
-// work tree containing dir, the directories holding another repository: a
+// nestedRepositories returns, sorted and relative to top (the top level of
+// a work tree), the directories holding another repository: a
 // .git directory or file, or a bare repository (HEAD, objects/ and refs/,
 // confirmed by git). It looks everywhere a repository can hide:
 //
@@ -582,11 +579,7 @@ type nestedRepo struct {
 // Linked worktrees of the same repository are skipped (callers handle them),
 // as are repositories nested inside another reported one (they are found by
 // inspecting that one).
-func nestedRepositories(ctx context.Context, dir string) ([]nestedRepo, error) {
-	top, err := TopLevel(ctx, dir)
-	if err != nil {
-		return nil, err
-	}
+func nestedRepositories(ctx context.Context, top string) ([]nestedRepo, error) {
 	wts, err := WorktreeList(ctx, top)
 	if err != nil {
 		return nil, err
@@ -701,15 +694,11 @@ func isBareRepo(ctx context.Context, p string) bool {
 	return err == nil && resolvePath(strings.TrimSpace(gd)) == resolvePath(p)
 }
 
-// assessNested inspects each nested repository of the work tree containing
-// dir (see nestedRepositories) and returns the blocking ones ("path
+// assessNested inspects each nested repository of the work tree whose top
+// level is top (see nestedRepositories) and returns the blocking ones ("path
 // (reasons)") and the clean ones (paths).
-func assessNested(ctx context.Context, dir string, depth int, no *nestOpts) (blocking, clean []string, err error) {
-	repos, err := nestedRepositories(ctx, dir)
-	if err != nil {
-		return nil, nil, err
-	}
-	top, err := TopLevel(ctx, dir)
+func assessNested(ctx context.Context, top string, depth int, no *nestOpts) (blocking, clean []string, err error) {
+	repos, err := nestedRepositories(ctx, top)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -740,8 +729,10 @@ func nestedReasons(ctx context.Context, p, resolved string, bare bool, depth int
 	if depth <= 0 {
 		return []string{"nested too deeply to inspect"}, nil
 	}
+	top := ""
 	if !bare {
-		top, err := TopLevel(ctx, p)
+		var err error
+		top, err = TopLevel(ctx, p)
 		if err != nil || resolvePath(top) != resolved {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -788,7 +779,7 @@ func nestedReasons(ctx context.Context, p, resolved string, bare bool, depth int
 		}
 		return reasons, nil
 	}
-	risks, err := deletionRisks(ctx, p, depth-1, no)
+	risks, err := deletionRisks(ctx, p, top, depth-1, no)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
