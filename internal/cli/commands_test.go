@@ -363,3 +363,30 @@ func TestRemoveUsesInjectedWorkingDir(t *testing.T) {
 		t.Fatalf("exit %d\n%s", code, errs)
 	}
 }
+
+func TestAdoptRecheckByRepositoryName(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	root := t.TempDir()
+	e.mustRun(t, "create", root)
+	root, _ = filepath.EvalSymlinks(root)
+	fo := testutil.NewForkedOrigin(t, testutil.OriginOpts{})
+	dir := filepath.Join(root, "x")
+	testutil.Git(t, root, "clone", "-q", fo.Fork.URL, dir)
+	testutil.Git(t, dir, "remote", "add", "upstream", fo.Upstream.URL)
+	out := e.mustRun(t, "--bundle", root, "adopt", dir)
+	if strings.Contains(out, "recorded as a fork") {
+		t.Fatalf("unexpected fork:\n%s", out)
+	}
+	if out := e.mustRun(t, "--bundle", root, "adopt", dir); !strings.Contains(out, "use --recheck") {
+		t.Fatalf("second adopt:\n%s", out)
+	}
+	testutil.Git(t, filepath.Join(dir, "main"), "fetch", "-q", "upstream")
+	out = e.mustRun(t, "--bundle", root, "adopt", "--recheck", "x") // by name, cwd elsewhere
+	if !strings.Contains(out, "recorded as a fork of upstream/repo") {
+		t.Fatalf("recheck:\n%s", out)
+	}
+	if r, _ := load(t, root).Repository("x"); r == nil || r.Fork.Slug != "fork/repo" || r.Slug != "upstream/repo" {
+		t.Fatalf("entry = %+v", r)
+	}
+}

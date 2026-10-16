@@ -38,6 +38,9 @@ type AdoptOptions struct {
 	// configuration alias such as "github_work" is otherwise recorded
 	// as-is). It must be a valid host (bundle.ValidateHost).
 	Host string
+	// Recheck re-examines the remotes of repositories that are already
+	// registered instead of adopting directories (see Adopt).
+	Recheck bool
 }
 
 // Adopt registers the existing checkout dir, an immediate subdirectory of the
@@ -67,7 +70,8 @@ type AdoptOptions struct {
 // failure, cancellation or panic, up to and including registration, is
 // rolled back.
 //
-// A directory already registered under its name is skipped (Skip error).
+// A directory already registered under its name is skipped (Skip error),
+// unless opts.Recheck is set: see Recheck.
 func Adopt(ctx context.Context, w *Workspace, dir string, opts AdoptOptions, emit func(Event)) (string, error) {
 	dir, name, err := adoptTarget(w, dir)
 	if err != nil {
@@ -76,9 +80,12 @@ func Adopt(ctx context.Context, w *Workspace, dir string, opts AdoptOptions, emi
 	if err := bundle.ValidateHost(opts.Host); err != nil {
 		return "", fmt.Errorf("cannot adopt %s: %w", dir, err)
 	}
+	if opts.Recheck {
+		return recheckEntry(ctx, w, name, opts, emit)
+	}
 	b := w.Bundle()
 	if _, ok := b.Repository(name); ok {
-		return "", Skip(name + " is already registered")
+		return "", Skip(name + " is already registered; use --recheck to re-examine its remotes")
 	}
 	if err := bundle.ValidateRepoName(name); err != nil {
 		return "", fmt.Errorf("cannot adopt %s: %w", dir, err)
@@ -90,7 +97,15 @@ func Adopt(ctx context.Context, w *Workspace, dir string, opts AdoptOptions, emi
 			return "", fmt.Errorf("cannot adopt %s: neither a plain clone nor a laid-out repository: %w", dir, err)
 		}
 	}
-	entry, warnings, err := describeCheckout(ctx, checkout, name, opts.DefaultBranch, opts.Host)
+	// The hints of the warnings are run after the move: they name the final
+	// path of the primary checkout.
+	finalPath := func(def string) string {
+		if n, err := bundle.NormalizeBranch(def); err == nil {
+			return filepath.Join(dir, n)
+		}
+		return checkout
+	}
+	entry, warnings, err := describeCheckout(ctx, checkout, finalPath, name, opts.DefaultBranch, opts.Host)
 	if err != nil {
 		return "", fmt.Errorf("cannot adopt %s: %w", dir, err)
 	}
@@ -321,7 +336,10 @@ func forkUpstream(ctx context.Context, checkout, originURL, originSlug string) (
 // sharedHistory checks that origin/<def> and upstream/<def> both exist in
 // checkout and have a merge base, i.e. that origin plausibly is a fork of
 // upstream. It returns why not ("" when they share history).
-func sharedHistory(ctx context.Context, checkout, def, upstreamSlug string) (string, error) {
+//
+// primary is the path of the primary checkout once the repository is adopted
+// (the one named in hints), name the repository's directory name.
+func sharedHistory(ctx context.Context, checkout, primary, name, def, upstreamSlug string) (string, error) {
 	rs := gitx.ForkRemotes
 	for _, remote := range []string{rs.Reference, rs.Fork} {
 		ok, err := refExists(ctx, checkout, "refs/remotes/"+remote+"/"+def)
@@ -330,7 +348,7 @@ func sharedHistory(ctx context.Context, checkout, def, upstreamSlug string) (str
 		}
 		if !ok {
 			return fmt.Sprintf("%s/%s is missing locally: cannot check that origin is a fork of upstream (%s); recorded as a single-remote repository "+
-				"(to record the fork, run `git -C %s fetch %s` before adopting)", remote, def, upstreamSlug, checkout, remote), nil
+				"(to record the fork, run `git -C %s fetch %s`, then `sheaf adopt --recheck %s`)", remote, def, upstreamSlug, primary, remote, name), nil
 		}
 	}
 	_, err := gitx.Run(ctx, checkout, "merge-base", rs.Fork+"/"+def, rs.Reference+"/"+def)
@@ -350,8 +368,9 @@ func sharedHistory(ctx context.Context, checkout, def, upstreamSlug string) (str
 // naming another repository, see forkUpstream, whose default branch shares
 // history with origin's, see sharedHistory), from upstream with origin
 // recorded as the fork. No hosting service is asked. The warnings explain
-// why an upstream remote was not recorded.
-func describeCheckout(ctx context.Context, checkout, name, defaultBranch, hostOverride string) (bundle.Repository, []string, error) {
+// why an upstream remote was not recorded. finalPath maps the default branch
+// to the path of the primary checkout after adoption (for hints).
+func describeCheckout(ctx context.Context, checkout string, finalPath func(def string) string, name, defaultBranch, hostOverride string) (bundle.Repository, []string, error) {
 	url, err := gitx.RemoteURL(ctx, checkout, "origin")
 	if err != nil {
 		return bundle.Repository{}, nil, fmt.Errorf("no usable origin remote: %w", err)
@@ -379,7 +398,7 @@ func describeCheckout(ctx context.Context, checkout, name, defaultBranch, hostOv
 		if err != nil {
 			return bundle.Repository{}, nil, err
 		}
-		why, err := sharedHistory(ctx, checkout, def, us)
+		why, err := sharedHistory(ctx, checkout, finalPath(def), name, def, us)
 		if err != nil {
 			return bundle.Repository{}, nil, err
 		}
@@ -489,4 +508,66 @@ func AdoptAll(ctx context.Context, w *Workspace, dirs []string, opts AdoptOption
 		}})
 	}
 	return Execute(ctx, jobs, tasks, rep)
+}
+
+// recheckEntry re-examines the remotes of the registered repository name with the
+// recognition rules of Adopt (describeCheckout) and records the fork when
+// they now qualify. It never moves a directory and never changes a branch or
+// its tracking (a default branch not tracking upstream is reported, with the
+// fix). The default branch is the entry's (the primary checkout is named after
+// it, and no remote is asked). An entry that already has a fork is never
+// changed, even when its remotes no longer qualify: that is warned about.
+func recheckEntry(ctx context.Context, w *Workspace, name string, opts AdoptOptions, emit func(Event)) (string, error) {
+	r, ok := w.Bundle().Repository(name)
+	if !ok {
+		return "", fmt.Errorf("cannot re-examine %s: it is not registered in %s (adopt it first: sheaf adopt %s)", name, bundle.FileName, name)
+	}
+	cur := *r
+	primary, _, prob := coCheckPrimary(ctx, w.Root, cur)
+	if prob != nil {
+		return "", fmt.Errorf("cannot re-examine %s: %s: %w", name, prob.Path, prob.Err)
+	}
+	found, warnings, err := describeCheckout(ctx, primary, func(string) string { return primary }, name, cur.DefaultBranch, opts.Host)
+	if err != nil {
+		return "", fmt.Errorf("cannot re-examine %s: %w", name, err)
+	}
+	for _, m := range warnings {
+		emit(Event{Message: "warning: " + m})
+	}
+	final, msg := cur, "unchanged"
+	switch {
+	case cur.Forked() && !found.Forked():
+		emit(Event{Message: fmt.Sprintf("warning: the remotes of %s no longer qualify as a fork of %s (see above); the recorded fork %s is kept", primary, cur.Slug, cur.Fork.Slug)})
+	case cur.Forked() && (found.Slug != cur.Slug || found.URL != cur.URL || found.Fork != cur.Fork || found.HostName() != cur.HostName()):
+		emit(Event{Message: fmt.Sprintf("warning: the remotes of %s describe another fork (%s of %s) than the recorded one (%s of %s); the entry is kept", primary, found.Fork.Slug, found.Slug, cur.Fork.Slug, cur.Slug)})
+	case !cur.Forked() && found.Forked():
+		if e := existingByKey(w.Bundle(), found.Host, found.Slug); e != nil && e.Name != name {
+			return "", fmt.Errorf("cannot record %s as a fork of %s: %s is already in the bundle as %s", name, found.Slug, found.Slug, e.Name)
+		}
+		final = cur
+		final.Slug, final.URL, final.Host, final.Fork = found.Slug, found.URL, found.Host, found.Fork
+		msg = fmt.Sprintf("recorded as a fork of %s (origin = your fork)", final.Slug)
+	}
+	if final != cur {
+		err := w.updateCtx(ctx, emit, func(b *bundle.Bundle) error {
+			e, ok := b.Repository(name)
+			if !ok || *e != cur {
+				return fmt.Errorf("%s changed in %s meanwhile; rerun the command", name, bundle.FileName)
+			}
+			if o := existingByKey(b, final.Host, final.Slug); o != nil && o.Name != name {
+				return fmt.Errorf("cannot record %s as a fork of %s: %s is already in the bundle as %s", name, final.Slug, final.Slug, o.Name)
+			}
+			*e = final
+			return nil
+		})
+		if err != nil {
+			return "", err
+		}
+	}
+	if final.Forked() {
+		checkDefaultTracking(ctx, primary, final, gitx.ForkRemotes, func(m, hint string) {
+			emit(Event{Message: "warning: " + m + "; fix: " + hint})
+		})
+	}
+	return msg, nil
 }

@@ -183,7 +183,13 @@ func newAdoptCmd(d Deps) *cobra.Command {
 			"aliases are recorded as-is unless --host is given. A clone with a remote upstream\n" +
 			"naming another repository whose default branch shares history with origin's is\n" +
 			"recorded as a fork: upstream is the repository, origin your fork (a default branch\n" +
-			"that does not track upstream is reported, with the fix).",
+			"that does not track upstream is reported, with the fix).\n\n" +
+			"With --recheck the arguments are repositories already registered in sheaf.yaml (by name\n" +
+			"or directory). Their primary checkout's remotes are re-examined with the same rules\n" +
+			"(for example after `git fetch upstream`) and the fork is recorded when they now\n" +
+			"qualify, using the recorded default branch (--default-branch is ignored). Nothing is\n" +
+			"moved, checked out or re-tracked. A recorded fork is never dropped or changed (a\n" +
+			"warning says so), and the repository slug only changes when no other repository has it.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			w, err := openWorkspace(c, d)
@@ -192,6 +198,10 @@ func newAdoptCmd(d Deps) *cobra.Command {
 			}
 			var dirs []string
 			for _, a := range args {
+				if _, ok := w.Bundle().Repository(a); ok && opts.Recheck && a == filepath.Base(a) {
+					dirs = append(dirs, filepath.Join(w.Root, a)) // a registered repository, by name
+					continue
+				}
 				p, err := absFrom(d, a)
 				if err != nil {
 					return err
@@ -208,6 +218,7 @@ func newAdoptCmd(d Deps) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.DefaultBranch, "default-branch", "", "the repository's default branch (upstream's for a clone of your fork), when it cannot be determined (applies to every <dir>)")
+	cmd.Flags().BoolVar(&opts.Recheck, "recheck", false, "re-examine the remotes of repositories already registered (record a fork now visible) instead of adopting")
 	cmd.Flags().StringVar(&opts.Host, "host", "", "host to record instead of the one in the origin URL, e.g. github.com for an SSH config alias (applies to every <dir>)")
 	return cmd
 }
