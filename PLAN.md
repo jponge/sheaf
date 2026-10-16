@@ -196,7 +196,7 @@ What to do differently
 | B2 | Bare `sheaf` (no subcommand) opens a TUI home screen (goals.md: "runs as a bubbletea TUI and displays menus") instead of printing help | done (af66acc) |
 | B3 | Merge the duplicated listings `ops.ListWorktrees` (step 6) and `ops.ListCheckouts` (step 5) | done (810b2fd, 975e844) |
 | B4 | CI (GitHub Actions): `make test`, `make test-symlinked-tmp`, `make test-shells` on Linux and macOS | later; the user pushes/enables it |
-| B5 | Windows: declare unsupported (docs + clear startup error) rather than half-support | later |
+| B5 | Windows: declare unsupported (docs + clear startup error) rather than half-support | done (a4a8745: refused at startup) |
 | B6 | Cross-step end-to-end review: inconsistencies, dead code, leftovers from design changes (e.g. adopt's old switching logic) | done (b315805) |
 | B7 | Dogfooding on the user's Mac (real bundles, GitHub error texts, ssh prompts, terminal emulator, macOS fish/zsh) | later, user-driven |
 | B8 | Release packaging (GoReleaser/Homebrew: new tool, needs approval) | later |
@@ -204,8 +204,9 @@ What to do differently
 | B10 | Remaining bash scd completion gaps (single quote inside open single quote, `$'…'`, `!` in double quotes); cobra zsh open-quote (upstream); fish < 3.7 `-o` fallback untested | later |
 | B11 | `sheaf version` falls back to Go build info (go install builds print `dev` today); Makefile `install` target | later (from README review) |
 | B12 | Warn on git older than 2.36 in every command, not only doctor | later (from README review) |
-| B13 | `wt pr` on an existing, not checked-out pr/<n> fetches under .sheaf.lock with interactive git: fetch before locking | later (from B6 re-review) |
-| B14 | Root `--help` does not mention the home screen (kept byte-identical by decision) | needs user decision |
+| B13 | `wt pr` on an existing, not checked-out pr/<n> fetches under .sheaf.lock with interactive git: fetch before locking | done (cf624f3) |
+| B14 | Root `--help` does not mention the home screen (kept byte-identical by decision) | done (a4a8745) |
+| B15 | Check that all Go dependencies are on their latest stable versions; upgrade (user: latest stable OK) | requested 2026-10-16, after B4 |
 
 Order for the high-priority items: B3 → B6 (review sees the merged code) → B2 → B1 (docs describe the final behaviour).
 - Decisions 2026-10-16 (user) for B2: bare `sheaf` in a bundle with a TTY opens an overview (checkouts table from local status, no network at open; multi-select, filter) with actions update/fetch/wt add/wt rm/prune/doctor/sync reusing the per-command TUIs and returning to the overview; enter on a row cds there through the shell-init wrapper (prints the path without it). Outside a bundle: help plus a create/init hint. --no-tui or non-TTY: help, unchanged.
