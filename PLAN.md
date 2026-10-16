@@ -173,3 +173,4 @@ What to do differently
 - Decision 2026-10-16 (user): step 13 — reduce repeated git calls in production code with a per-command cache of read-only git queries; safety re-checks before deletion and re-reads under the lock stay fresh.
 - Step 13 review: no blocking; S1 missing test for tag-add fresh read under lock (shown to matter), repoKey lexical vs physical relative gitdir; proceeding with default (keep cache) pending user's keep/drop answer.
 - Step 13 — per-command query cache + DeletionRisks top-level refactor + git-call budgets. Opus impl, Opus review: no blocking; fixed tag-add lock re-check test, physical relative gitdir resolution, no caching of fatal failures. git calls −12% suite-wide (doctor −19%, fetch −33%, prune −22%, remove −26%); wall unchanged.
+- macOS (user) at ef33315, -race: ops 46.1 s (was 44.5), gitx 31.3 s (was 34.6), cli 17.5 s (was 21.0). Step 13 did not help ops on macOS; further work needs per-test macOS timings.
