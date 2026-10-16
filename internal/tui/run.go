@@ -49,7 +49,9 @@ import (
 //     if the next read arrives within it, ESC followed by a key is alt+key).
 //     Reading starts when the program is created, and the parsed events are
 //     sent to the program (Program.Send) once it runs: the program must be
-//     run or killed.
+//     run or killed. A reader with a method NextSegment() io.Reader holds
+//     the input of successive programs: each program reads the reader that
+//     NextSegment returns when the program is created.
 //
 // The output determines the size: on a terminal, the program receives its
 // size (tea.WindowSizeMsg) as usual. On any other writer, the size is
@@ -78,6 +80,15 @@ func Run(m tea.Model, in io.Reader, out io.Writer, opts ...tea.ProgramOption) (t
 // The startup tea.WindowSizeMsg with this size is filtered out.
 const virtualWidth, virtualHeight = 256, 100
 
+// segmentedInput is an in-memory input (tests) holding the input of several
+// programs in turn. NewProgram claims the next segment when it creates a
+// program, before a later program can exist: the reader of a program keeps
+// reading after the program has quit (until EOF, see feedKeys), and with a
+// shared reader it could take the input meant for the next program.
+type segmentedInput interface {
+	NextSegment() io.Reader
+}
+
 // NewProgram returns the program Run would run, with the same handling of
 // in (including ErrInputNotTerminal) and out, for callers that need the
 // program itself, e.g. to Send it messages from other goroutines while it
@@ -93,6 +104,9 @@ func NewProgram(m tea.Model, in io.Reader, out io.Writer, opts ...tea.ProgramOpt
 	default:
 		if f, ok := r.(term.File); !ok || !term.IsTerminal(f.Fd()) {
 			keys, in = in, nil
+			if s, ok := keys.(segmentedInput); ok {
+				keys = s.NextSegment()
+			}
 		}
 	}
 	base := []tea.ProgramOption{

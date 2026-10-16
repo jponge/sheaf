@@ -226,7 +226,7 @@ func (h *home) actions() []tui.OverviewAction {
 		{Key: "enter", Name: "cd", Help: "cd", Scope: tui.ScopeCurrent, Check: noProblem},
 		{Key: "u", Name: "update", Help: "update", Scope: tui.ScopeRows, Check: noProblem},
 		{Key: "f", Name: "fetch", Help: "fetch", Scope: tui.ScopeRows},
-		{Key: "a", Name: "add", Help: "add worktree", Scope: tui.ScopeCurrent},
+		{Key: "w", Name: "add", Help: "add worktree", Scope: tui.ScopeCurrent},
 		{Key: "r", Name: "remove", Help: "remove worktree", Scope: tui.ScopeRows, Check: removable},
 		{Key: "p", Name: "prune", Help: "prune", Scope: tui.ScopeNone},
 		{Key: "d", Name: "doctor", Help: "doctor", Scope: tui.ScopeNone},

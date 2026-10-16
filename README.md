@@ -202,11 +202,12 @@ when it opens. Checkouts that cannot be inspected are shown as problem rows.
 |---|---|
 | up/down, k/j, pgup/pgdown, home/end | move |
 | space | toggle the selection of the current row |
+| a, n | select / deselect every visible row (rows hidden by the filter keep their selection) |
 | / | filter (case-insensitive substring over the cells; enter keeps it, esc clears it) |
 | enter | change directory to the current checkout and exit (see below) |
 | u | update the selected rows (or the current row) |
 | f | fetch the repositories of the selected rows (or the current row) |
-| a | add a worktree (branch or tag) to the current row's repository |
+| w | add a worktree (branch or tag) to the current row's repository |
 | r | remove the selected worktrees (or the current one); not the primary |
 | p, d, s | `prune`, `doctor`, `sync` on the whole bundle |
 | q, esc | quit with status 0 (esc first clears an applied filter) |

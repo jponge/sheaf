@@ -41,18 +41,30 @@ type key struct {
 }
 
 // scriptIn is the standard input of a forced-TUI run: one segment of keys
-// per bubbletea program the command runs, in order. The read loop of a
-// program consumes its segment and then gets io.EOF (which also makes
-// tui.Run quit when the program is still running), so a program never
-// reads the keys meant for the next one. After the last segment, reads
-// block until the end of the test when blockAtEnd is set (so that the last
-// program, typically the progress view, is not ended by EOF), and return
-// io.EOF otherwise.
+// per bubbletea program the command runs, in order. tui.NewProgram claims
+// the next segment when it creates a program (NextSegment), so a program
+// reads its own segment and then io.EOF (which also makes tui.Run quit when
+// the program is still running), whatever the scheduling of the readers:
+// the reader of a program that has quit may still be reading when the next
+// program starts reading. A program created after the last segment reads
+// io.EOF, or blocks until the end of the test when blockAtEnd is set (so
+// that the last program, typically the progress view, is not ended by
+// EOF). Read, for other readers, consumes the segments in turn.
 type scriptIn struct {
 	mu         sync.Mutex
 	segs       [][]key
 	blockAtEnd bool
 	release    chan struct{}
+
+	// holdFirstEnd, when set, holds the read returning the end (io.EOF) of
+	// the first segment until another read starts, forcing the interleaving
+	// in which the program owning the first segment quits on its last key
+	// before its reader reaches the end of the segment, and the reader of
+	// the next program reads first.
+	holdFirstEnd bool
+	popped       int           // segments consumed
+	holding      bool          // a read of the first end is held
+	arrived      chan struct{} // closed by the read releasing it
 }
 
 func newScript(t *testing.T, blockAtEnd bool, segs ...[]key) *scriptIn {
@@ -61,8 +73,27 @@ func newScript(t *testing.T, blockAtEnd bool, segs ...[]key) *scriptIn {
 	return s
 }
 
+// hold implements holdFirstEnd for a read; firstEnd tells whether it
+// returns the end of the first segment. Called with s.mu held, which it
+// releases while holding.
+func (s *scriptIn) hold(firstEnd bool) {
+	if s.holding {
+		s.holding = false
+		close(s.arrived)
+		return
+	}
+	if firstEnd && s.holdFirstEnd && s.arrived == nil {
+		s.holding, s.arrived = true, make(chan struct{})
+		arrived := s.arrived
+		s.mu.Unlock()
+		<-arrived
+		s.mu.Lock()
+	}
+}
+
 func (s *scriptIn) Read(p []byte) (int, error) {
 	s.mu.Lock()
+	s.hold(s.popped == 0 && len(s.segs) > 0 && len(s.segs[0]) == 0)
 	if len(s.segs) == 0 {
 		s.mu.Unlock()
 		if s.blockAtEnd {
@@ -73,11 +104,54 @@ func (s *scriptIn) Read(p []byte) (int, error) {
 	seg := s.segs[0]
 	if len(seg) == 0 {
 		s.segs = s.segs[1:]
+		s.popped++
 		s.mu.Unlock()
 		return 0, io.EOF
 	}
 	k := seg[0]
 	s.segs[0] = seg[1:]
+	s.mu.Unlock()
+	if k.wait != nil {
+		k.wait()
+	}
+	return copy(p, k.keys), nil
+}
+
+// NextSegment claims the next segment for a program being created (see
+// tui.NewProgram).
+func (s *scriptIn) NextSegment() io.Reader {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.segs) == 0 {
+		return &segmentIn{s: s, past: true}
+	}
+	r := &segmentIn{s: s, keys: s.segs[0], first: s.popped == 0}
+	s.segs = s.segs[1:]
+	s.popped++
+	return r
+}
+
+// segmentIn reads one segment of a scriptIn: its keys, then io.EOF.
+type segmentIn struct {
+	s     *scriptIn
+	keys  []key
+	first bool // the first segment
+	past  bool // claimed after the last segment
+}
+
+func (r *segmentIn) Read(p []byte) (int, error) {
+	s := r.s
+	s.mu.Lock()
+	s.hold(r.first && len(r.keys) == 0)
+	if len(r.keys) == 0 {
+		s.mu.Unlock()
+		if r.past && s.blockAtEnd {
+			<-s.release
+		}
+		return 0, io.EOF
+	}
+	k := r.keys[0]
+	r.keys = r.keys[1:]
 	s.mu.Unlock()
 	if k.wait != nil {
 		k.wait()

@@ -269,8 +269,8 @@ func TestHomeAddWorktreeForBranchAndTag(t *testing.T) {
 	testutil.TagOrigin(t, o, "v1", "main", false)
 	var out syncBuffer
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "a"), keys("t", "o", "p", "i", "c", "/", "y", "\r"),
-		ovKeys(t, &out, "add: done", 1, "a"), keys("v", "1", "\t", "\r"),
+		ovKeys(t, &out, "STATE", 1, "w"), keys("t", "o", "p", "i", "c", "/", "y", "\r"),
+		ovKeys(t, &out, "add: done", 1, "w"), keys("v", "1", "\t", "\r"),
 		ovKeys(t, &out, "add: done", 2, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
@@ -291,8 +291,53 @@ func TestHomeAddWorktreeForBranchAndTag(t *testing.T) {
 	}
 	// esc in the prompt cancels and returns to the overview.
 	out = syncBuffer{}
-	errs, code = runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "a"), keys("x", "\x1b"), ovKeys(t, &out, "add: cancelled", 1, "q")), &out)
+	errs, code = runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("x", "\x1b"), ovKeys(t, &out, "add: cancelled", 1, "q")), &out)
 	if code != 0 || !strings.Contains(out.String(), "add: cancelled") || exists(filepath.Join(repo, "x")) {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+}
+
+// a selects every row (as in every list) and no longer adds a worktree,
+// which w does; n deselects every row. The fetch summaries count the
+// repositories targeted: both after a, the current one after a then n.
+func TestHomeSelectAllAndNoneAndAddWithW(t *testing.T) {
+	t.Parallel()
+	e, alpha, _, _, _ := homeBundle(t)
+	var out syncBuffer
+	in := newScript(t, false,
+		ovKeys(t, &out, "STATE", 1, "a", "f"), keys(),
+		ovKeys(t, &out, "fetch: done", 1, "a", "n", "f"), keys(),
+		ovKeys(t, &out, "fetch: done", 2, "w"), keys("t", "o", "p", "i", "c", "/", "z", "\r"),
+		ovKeys(t, &out, "add: done", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	o := out.String()
+	all := strings.Index(o, "2 done, 0 skipped, 0 failed")
+	none := strings.Index(o, "1 done, 0 skipped, 0 failed")
+	prompt := strings.Index(o, "New worktree of alpha")
+	if all < 0 || none < all || prompt < none {
+		t.Fatalf("a/n did not select all/no rows, or w did not open the prompt after them\nstdout:\n%s\nstderr:\n%s", o, errs)
+	}
+	if !exists(filepath.Join(filepath.Dir(alpha), "topic-z", ".git")) {
+		t.Fatalf("worktree not created\nstdout:\n%s\nstderr:\n%s", o, errs)
+	}
+}
+
+// Each program reads its own segment of the scripted input, whatever the
+// scheduling of the readers: here the overview quits on w before its reader
+// has read the end of its segment, and the prompt's reader reads first.
+func TestHomeScriptSegmentsBelongToTheirProgram(t *testing.T) {
+	t.Parallel()
+	e, alpha, _, _, _ := homeBundle(t)
+	var out syncBuffer
+	q := keys("q")
+	q[0].wait = waitOutput(t, &out, "add: ")
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("x", "y", "\r"), q)
+	in.holdFirstEnd = true
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 || !strings.Contains(out.String(), "add: done") || !exists(filepath.Join(filepath.Dir(alpha), "xy", ".git")) {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 }
@@ -302,7 +347,7 @@ func TestHomeAddWorktreeFailureIsShownAndReturns(t *testing.T) {
 	e, _, _, _, _ := homeBundle(t)
 	var out syncBuffer
 	// main is the primary's branch: wt add refuses it.
-	errs, code := runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "a"), keys("m", "a", "i", "n", "\r"), ovKeys(t, &out, "add failed", 1, "q")), &out)
+	errs, code := runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("m", "a", "i", "n", "\r"), ovKeys(t, &out, "add failed", 1, "q")), &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}

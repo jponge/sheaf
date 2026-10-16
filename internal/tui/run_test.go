@@ -375,3 +375,45 @@ func TestFilterDrainsTerminalRepliesBeforeQuitting(t *testing.T) {
 		t.Fatalf("no drain: %#v", got)
 	}
 }
+
+// segmented is an in-memory input holding one segment per program.
+type segmented struct {
+	segs    []string
+	claimed int
+}
+
+func (s *segmented) Read([]byte) (int, error) { return 0, errors.New("read from the shared input") }
+
+func (s *segmented) NextSegment() io.Reader {
+	r := strings.NewReader(s.segs[s.claimed])
+	s.claimed++
+	return r
+}
+
+// An input with NextSegment gives each program its own segment, claimed
+// when the program is created, so the reader of a program that has quit
+// cannot read the input of the next one.
+func TestNewProgramClaimsInputSegment(t *testing.T) {
+	in := &segmented{segs: []string{" \r", "jj \r"}}
+	p1, err := NewProgram(NewMultiSelect("Pick", abc()), in, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := NewProgram(NewMultiSelect("Pick", abc()), in, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.claimed != 2 {
+		t.Fatalf("%d segments claimed by creating 2 programs, want 2", in.claimed)
+	}
+	m1, err := p1.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m2, err := p2.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, m1, "a")
+	assertKeys(t, m2, "c")
+}

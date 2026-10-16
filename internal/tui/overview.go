@@ -54,10 +54,11 @@ const noRowMessage = "no row to act on"
 // the user.
 //
 // Keys: up/down/k/j, pgup/pgdown, home/end move; space toggles the
-// selection of the current row; / enters filter mode (case-insensitive
-// substring over the cells; editing as in MultiSelect: enter keeps the
-// filter, esc clears it); the keys of the actions choose an action; q, esc
-// and ctrl+c quit. In list mode esc first clears an applied filter and only
+// selection of the current row; a selects and n deselects every visible
+// row (rows hidden by the filter keep their state, as in MultiSelect);
+// / enters filter mode (case-insensitive substring over the cells; editing
+// as in MultiSelect: enter keeps the filter, esc clears it); the keys of
+// the actions choose an action; q, esc and ctrl+c quit. In list mode esc first clears an applied filter and only
 // quits when no filter is set. Key events of several runes and bracketed
 // pastes are ignored in list mode, so pasted text never triggers actions.
 // Text fields are displayed with control characters replaced by U+FFFD.
@@ -219,6 +220,10 @@ func (m Overview) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.selected[k] = true
 			}
 		}
+	case key.Matches(msg, m.keys.All):
+		m.setVisible(true)
+	case key.Matches(msg, m.keys.None):
+		m.setVisible(false)
 	case key.Matches(msg, m.keys.Filter):
 		m.filtering = true
 		m.scrollToCursor() // the filter line takes a row
@@ -226,6 +231,18 @@ func (m Overview) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.move(msg)
 	}
 	return m, nil
+}
+
+// setVisible selects or deselects every visible row.
+func (m *Overview) setVisible(selected bool) {
+	m.selected = cloneSet(m.selected)
+	for _, i := range m.visible {
+		if selected {
+			m.selected[m.rows[i].Key] = true
+		} else {
+			delete(m.selected, m.rows[i].Key)
+		}
+	}
 }
 
 // cloneSet returns a copy of s: models are values in bubbletea, and earlier
@@ -492,7 +509,7 @@ func (m Overview) helpLines() []string {
 	if m.filtering {
 		return []string{m.help.ShortHelpView([]key.Binding{m.keys.ApplyFilter, m.keys.ClearFilter})}
 	}
-	lines := []string{m.help.ShortHelpView([]key.Binding{m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.Filter, m.keys.Cancel})}
+	lines := []string{m.help.ShortHelpView([]key.Binding{m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.All, m.keys.None, m.keys.Filter, m.keys.Cancel})}
 	unbounded := m.help // measures lines without the ellipsis
 	unbounded.SetWidth(0)
 	var line []key.Binding

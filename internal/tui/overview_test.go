@@ -21,7 +21,7 @@ func ovActions() []OverviewAction {
 	return []OverviewAction{
 		{Key: "enter", Name: "cd", Help: "cd", Scope: ScopeCurrent},
 		{Key: "u", Name: "update", Help: "update", Scope: ScopeRows},
-		{Key: "a", Name: "add", Help: "add worktree", Scope: ScopeCurrent},
+		{Key: "w", Name: "add", Help: "add worktree", Scope: ScopeCurrent},
 		{Key: "p", Name: "prune", Help: "prune", Scope: ScopeNone},
 		{Key: "r", Name: "remove", Help: "remove worktree", Scope: ScopeRows, Check: func(targets []string) string {
 			for _, k := range targets {
@@ -152,7 +152,7 @@ func TestOverviewScopeCurrentIgnoresSelection(t *testing.T) {
 	t.Parallel()
 	m, _ := press(newOv(), "space", "down", "enter")
 	assertChosen(t, m, "cd", "/b/a/feat-x")
-	m, _ = press(newOv(), "space", "down", "a")
+	m, _ = press(newOv(), "space", "down", "w")
 	assertChosen(t, m, "add", "/b/a/feat-x")
 }
 
@@ -324,4 +324,99 @@ func TestOverviewSanitizesCells(t *testing.T) {
 	m := NewOverview("t\x1b[2J", []string{"REPO", "DIR"}, rows, nil).WithMessage("m\x07")
 	assertNoInjectedSGR(t, m)
 	assertNoControlChars(t, view(m))
+}
+
+// a selects and n deselects every visible row, like MultiSelect; the
+// targets of a ScopeRows action are then those rows.
+func TestOverviewSelectAllAndNone(t *testing.T) {
+	t.Parallel()
+	m, cmd := press(newOv(), "a")
+	if isQuit(cmd) {
+		t.Fatal("a quit the overview")
+	}
+	if v := view(m); !strings.Contains(v, "3/3 selected") || !strings.Contains(v, "[x] bravo") {
+		t.Fatalf("a did not select every row:\n%s", v)
+	}
+	m2, _ := press(m, "u")
+	assertChosen(t, m2, "update", "/b/a/main", "/b/a/feat-x", "/b/bravo/main")
+	m, _ = press(m, "n")
+	if v := view(m); !strings.Contains(v, "0/3 selected") || strings.Contains(v, "[x]") {
+		t.Fatalf("n did not deselect every row:\n%s", v)
+	}
+	// Without a selection, the action targets the current row again.
+	m, _ = press(m, "down", "u")
+	assertChosen(t, m, "update", "/b/a/feat-x")
+}
+
+// a and n apply to the visible rows only: rows hidden by the filter keep
+// their selection state.
+func TestOverviewSelectAllAndNoneApplyToVisibleRows(t *testing.T) {
+	t.Parallel()
+	// a/main selected, then a on the rows matching "feat" (feat-x only).
+	m, _ := press(newOv(), "space", "/", "f", "e", "a", "t", "enter", "a")
+	if v := view(m); !strings.Contains(v, "2/3 selected · 1 shown") {
+		t.Fatalf("view:\n%s", v)
+	}
+	m, _ = press(m, "esc", "u")
+	assertChosen(t, m, "update", "/b/a/main", "/b/a/feat-x")
+
+	// Everything selected, then n on the rows matching "bravo".
+	m, _ = press(newOv(), "a", "/", "b", "r", "a", "v", "o", "enter", "n")
+	if v := view(m); !strings.Contains(v, "2/3 selected · 1 shown") {
+		t.Fatalf("view:\n%s", v)
+	}
+	m, _ = press(m, "esc", "u")
+	assertChosen(t, m, "update", "/b/a/main", "/b/a/feat-x")
+
+	// No match: a and n change nothing.
+	m, _ = press(newOv(), "space", "/", "z", "z", "enter", "n", "esc", "u")
+	assertChosen(t, m, "update", "/b/a/main")
+	m, _ = press(newOv(), "/", "z", "z", "enter", "a", "esc")
+	if v := view(m); !strings.Contains(v, "0/3 selected") {
+		t.Fatalf("a without visible rows selected some:\n%s", v)
+	}
+}
+
+// Alert rows are selectable with space, so a selects them too.
+func TestOverviewSelectAllIncludesAlertRows(t *testing.T) {
+	t.Parallel()
+	rows := append(ovRows(), Row{Key: "/b/c/main", Cells: []string{"c", "main", "", "problem"}, Alert: true})
+	m, _ := press(NewOverview("t", []string{"REPO", "DIR", "BRANCH", "STATE"}, rows, ovActions()), "a", "u")
+	assertChosen(t, m, "update", "/b/a/main", "/b/a/feat-x", "/b/bravo/main", "/b/c/main")
+}
+
+func TestOverviewSelectAllKeepsEarlierCopies(t *testing.T) {
+	t.Parallel()
+	m1 := newOv()
+	m2, _ := press(m1, "a")
+	if v := view(m1); !strings.Contains(v, "0/3 selected") {
+		t.Fatalf("earlier copy changed:\n%s", v)
+	}
+	if v := view(m2); !strings.Contains(v, "3/3 selected") {
+		t.Fatalf("view:\n%s", v)
+	}
+	m3, _ := press(m2, "n")
+	if v := view(m2); !strings.Contains(v, "3/3 selected") || !strings.Contains(view(m3), "0/3 selected") {
+		t.Fatalf("earlier copy changed:\n%s", v)
+	}
+}
+
+func TestOverviewSelectAllAndNoneWithoutRows(t *testing.T) {
+	t.Parallel()
+	m, cmd := press(NewOverview("t", []string{"REPO"}, nil, ovActions()), "a", "n")
+	if isQuit(cmd) || !strings.Contains(view(m), "0/0 selected") {
+		t.Fatalf("view:\n%s", view(m))
+	}
+}
+
+func TestOverviewHelpShowsSelectAllAndNone(t *testing.T) {
+	t.Parallel()
+	var m tea.Model = newOv()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	v := view(m)
+	for _, want := range []string{"space select", "a all", "n none", "w add worktree"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("help lacks %q:\n%s", want, v)
+		}
+	}
 }
