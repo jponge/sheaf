@@ -121,15 +121,15 @@ var gitCallCommands = []struct {
 		_, err := CollectStatus(ctx, f.w, StatusOptions{Jobs: 4}, Discard)
 		return err
 	}},
-	{"wt list", 10 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"wt list", 20 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		_, _, err := ListWorktrees(ctx, f.w, "")
 		return err
 	}},
-	{"path", 2 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"path", 4 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		_, err := ResolvePath(ctx, f.w, PathQuery{Args: []string{"r3", "feat/b"}, Cwd: f.w.Root})
 		return err
 	}},
-	{"doctor", 21 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"doctor", 31 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		cs := Doctor(ctx, DoctorOptions{Root: f.w.Root, GH: goodGH})
 		if DoctorFailed(cs) {
 			return errors.New(dump(cs))
@@ -165,7 +165,7 @@ var gitCallCommands = []struct {
 		_, err := AddWorktree(ctx, f.w, "r1", "feat/new", WorktreeAddOptions{}, noEmit)
 		return err
 	}},
-	{"wt rm", 20 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"wt rm", 24 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		_, err := RemoveWorktree(ctx, f.w, "r1", WorktreeTarget{Name: "feat/b"}, WorktreeRemoveOptions{WorkingDir: f.w.Root, Confirm: func(WorktreeRemovePlan) bool { return true }}, noEmit)
 		return err
 	}},

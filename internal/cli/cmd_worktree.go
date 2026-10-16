@@ -162,7 +162,9 @@ type worktreeListJSON struct {
 }
 
 type repoErrorJSON struct {
-	Repo  string `json:"repo"`
+	Repo string `json:"repo"`
+	// Path is set for a worktree that cannot be used (wt list).
+	Path  string `json:"path,omitempty"`
 	Error string `json:"error"`
 }
 
@@ -176,9 +178,11 @@ func newWorktreeListCmd(d Deps) *cobra.Command {
 			"(\"(tag <tag>)\" for a worktree pinned at a tag, \"(tag <tag>, moved to <commit>)\"\n" +
 			"once its HEAD left the tag's commit), flags (primary, off-default,\n" +
 			"detached, tag, locked, prunable, outside) and path. Ordered\n" +
-			"by repository, primary first, then by directory. --porcelain prints the paths only\n" +
-			"(-z: NUL-terminated); --json prints {\"version\": 1, \"worktrees\": [...], \"errors\": [...]}.\n" +
-			"Repositories that cannot be listed are reported and make the exit status 1.",
+			"by repository, primary first, then by directory (outside worktrees last). --porcelain\n" +
+			"prints the paths only (-z: NUL-terminated); --json prints {\"version\": 1, \"worktrees\":\n" +
+			"[...], \"errors\": [{\"repo\", \"path\" (for a worktree), \"error\"}]}. Repositories that\n" +
+			"cannot be listed, and worktrees that cannot be used (another repository's, or without\n" +
+			".git; left out of the listing), are reported and make the exit status 1.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			if asJSON && porcelain {
@@ -207,7 +211,7 @@ func newWorktreeListCmd(d Deps) *cobra.Command {
 					doc.Worktrees = []ops.WorktreeInfo{}
 				}
 				for _, f := range fails {
-					doc.Errors = append(doc.Errors, repoErrorJSON{Repo: f.Repo, Error: f.Err.Error()})
+					doc.Errors = append(doc.Errors, repoErrorJSON{Repo: f.Repo, Path: f.Path, Error: f.Err.Error()})
 				}
 				enc := json.NewEncoder(out)
 				enc.SetIndent("", "  ")
@@ -253,7 +257,7 @@ func newWorktreeListCmd(d Deps) *cobra.Command {
 			for _, f := range fails {
 				msgs = append(msgs, f.Error())
 			}
-			return fmt.Errorf("%d of the repositories could not be listed:\n  %s", len(fails), strings.Join(msgs, "\n  "))
+			return fmt.Errorf("%d of the repositories or worktrees could not be listed:\n  %s", len(fails), strings.Join(msgs, "\n  "))
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")

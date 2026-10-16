@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
@@ -142,9 +142,11 @@ func TestFetchReposMissingPrimaryFails(t *testing.T) {
 }
 
 // Two bundle entries resolving to the same repository (here through a
-// symlinked repository directory) must not be fetched concurrently: the
-// remote-tracking ref locks would collide.
+// symlinked repository directory) cannot be fetched concurrently: the
+// symlinked one is refused (see coCheckPrimary), the other is fetched.
+// TestFetchSerializedPerCommonDirWorktrees covers the per-repository lock.
 func TestFetchSerializedPerCommonDir(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, alpha := coAddRepoWith(t, f, "alpha")
 	coAddRepoWith(t, f, "beta")
@@ -155,28 +157,48 @@ func TestFetchSerializedPerCommonDir(t *testing.T) {
 	if err := os.Symlink(filepath.Dir(alpha), beta); err != nil {
 		t.Fatal(err)
 	}
+	s, err := FetchRepos(context.Background(), f.w, FetchOptions{Jobs: 2}, Discard)
+	if err != nil || len(s.Results) != 2 {
+		t.Fatalf("%v %+v", err, s.Results)
+	}
+	if r := s.Results[0]; r.Repo != "alpha" || r.Status != StatusDone {
+		t.Errorf("alpha: %+v", r)
+	}
+	if r := s.Results[1]; r.Repo != "beta" || r.Status != StatusFailed || r.Err == nil || r.Err.Error() != beta+": repository directory is a symbolic link" {
+		t.Errorf("beta: %+v", r)
+	}
+}
+
+// Fetches from two work trees of one repository (its primary checkout and a
+// linked worktree) are serialized: they share the remote-tracking refs.
+func TestFetchSerializedPerCommonDirWorktrees(t *testing.T) {
+	f := newFixture(t)
+	_, alpha := coAddRepoWith(t, f, "alpha", "feat")
+	feat := coAddWorktree(t, alpha, "feat", "feat", true)
 	var mu sync.Mutex
-	active := map[string]int{}
-	var maxActive atomic.Int32
+	active, maxActive := 0, 0
 	old := coFetchHook
 	t.Cleanup(func() { coFetchHook = old })
-	coFetchHook = func(cd string) {
+	coFetchHook = func(string) {
 		mu.Lock()
-		active[cd]++
-		if n := int32(active[cd]); n > maxActive.Load() {
-			maxActive.Store(n)
-		}
+		active++
+		maxActive = max(maxActive, active)
 		mu.Unlock()
 		time.Sleep(150 * time.Millisecond)
 		mu.Lock()
-		active[cd]--
+		active--
 		mu.Unlock()
 	}
-	s, err := FetchRepos(context.Background(), f.w, FetchOptions{Jobs: 2}, Discard)
-	if err != nil || s.Err() != nil {
-		t.Fatalf("%v %v", err, s.Err())
+	errs := make(chan error, 2)
+	for _, dir := range []string{alpha, feat} {
+		go func() { errs <- coFetchRepo(context.Background(), dir, gitx.OriginRemotes) }()
 	}
-	if n := maxActive.Load(); n != 1 {
-		t.Fatalf("%d concurrent fetches into the same repository, want 1", n)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if maxActive != 1 {
+		t.Fatalf("%d concurrent fetches into the same repository, want 1", maxActive)
 	}
 }

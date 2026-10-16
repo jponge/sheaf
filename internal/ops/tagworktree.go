@@ -39,12 +39,9 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 	report := func(phase, msg string) {
 		emit(Event{Repo: r.Name, Phase: phase, Kind: KindProgress, Message: msg})
 	}
-	primary, err := bundle.WorktreeDir(w.Root, r.Name, r.DefaultBranch)
-	if err != nil {
-		return WorktreeAddResult{}, err
-	}
-	if !isPrimaryCheckout(ctx, primary) {
-		return WorktreeAddResult{}, fmt.Errorf("%s: no primary checkout at %s", r.Name, primary)
+	primary, _, prob := coCheckPrimary(ctx, w.Root, r)
+	if prob != nil {
+		return WorktreeAddResult{}, prob
 	}
 	if err := checkTagName(ctx, primary, tag); err != nil {
 		return WorktreeAddResult{}, err
@@ -54,7 +51,7 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 		return WorktreeAddResult{}, fmt.Errorf("tag %q cannot be mapped to a directory name", tag)
 	}
 	// Cheap checks before the fetch; repeated under the lock below.
-	infos, repoDir, _, err := listRepo(ctx, w.Root, r)
+	infos, repoDir, _, err := listRepoUnverified(ctx, w.Root, r)
 	if err != nil {
 		return WorktreeAddResult{}, fmt.Errorf("%s: %w", r.Name, err)
 	}
@@ -84,7 +81,7 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 		return WorktreeAddResult{}, fmt.Errorf("locking %s: %w", bundle.FileName, err)
 	}
 	defer unlock()
-	if infos, repoDir, _, err = listRepo(ctx, w.Root, r); err != nil {
+	if infos, repoDir, _, err = listRepoUnverified(ctx, w.Root, r); err != nil {
 		return WorktreeAddResult{}, fmt.Errorf("%s: %w", r.Name, err)
 	}
 	if err := checkTagTarget(infos, repoDir, tag, dir); err != nil {

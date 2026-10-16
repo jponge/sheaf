@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,7 +161,7 @@ func TestWorktreeListPartialFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, errs, code := e.run(t, "wt", "list")
-	if code != 1 || !strings.Contains(out, filepath.Join(root, "a", "main")) || !strings.Contains(errs, "b: directory") {
+	if code != 1 || !strings.Contains(out, filepath.Join(root, "a", "main")) || !strings.Contains(errs, "b: "+filepath.Join(root, "b")+": repository directory missing") {
 		t.Fatalf("exit %d, stdout:\n%s\nstderr:\n%s", code, out, errs)
 	}
 	out, _, code = e.run(t, "wt", "list", "--json")
@@ -174,5 +175,29 @@ func TestWorktreeListPartialFailure(t *testing.T) {
 	}
 	if code != 1 || len(doc.Worktrees) != 1 || len(doc.Errors) != 1 || doc.Errors[0]["repo"] != "b" || doc.Errors[0]["error"] == "" {
 		t.Fatalf("json: exit %d, %+v", code, doc)
+	}
+}
+
+// A worktree that cannot be used is reported in errors[] with its path, and
+// makes the exit status 1.
+func TestWorktreeListJSONUnusableWorktree(t *testing.T) {
+	t.Parallel()
+	e, root := wtBundle(t)
+	p := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "feat", "--no-fetch"))
+	if err := os.RemoveAll(p); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Git(t, root, "clone", "-q", filepath.Join(root, "b", "main"), p)
+	out, _, code := e.run(t, "wt", "list", "--json")
+	var doc struct {
+		Worktrees []map[string]any `json:"worktrees"`
+		Errors    []map[string]any `json:"errors"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatal(err, out)
+	}
+	want := map[string]any{"repo": "a", "path": p, "error": "worktree of another repository (" + filepath.Join(p, ".git") + ")"}
+	if code != 1 || len(doc.Worktrees) != 2 || len(doc.Errors) != 1 || !maps.Equal(doc.Errors[0], want) {
+		t.Fatalf("exit %d, errors %v, want [%v], worktrees %v", code, doc.Errors, want, doc.Worktrees)
 	}
 }

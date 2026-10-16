@@ -98,7 +98,7 @@ func TestListCheckoutsReportsMissingDirectoriesAsProblems(t *testing.T) {
 	if got := coCheckoutNames(cs); !slices.Equal(got, []string{"alpha/main", "gamma/main"}) {
 		t.Errorf("checkouts = %v", got)
 	}
-	if len(probs) != 2 || probs[0].Repo != "alpha" || probs[0].Path != wt || probs[1].Repo != "beta" || probs[1].Path != beta {
+	if len(probs) != 2 || probs[0].Repo != "alpha" || probs[0].Path != wt || probs[1].Repo != "beta" || probs[1].Path != filepath.Dir(beta) {
 		t.Fatalf("problems = %+v", probs)
 	}
 	for _, p := range probs {

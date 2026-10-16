@@ -87,12 +87,9 @@ func AddPRWorktree(ctx context.Context, w *Workspace, h hosting.Hosting, repo st
 	if err != nil {
 		return PRWorktreeResult{}, fmt.Errorf("pull request #%d of %s: %w", number, r.Slug, err)
 	}
-	primary, err := bundle.WorktreeDir(w.Root, r.Name, r.DefaultBranch)
-	if err != nil {
-		return PRWorktreeResult{}, err
-	}
-	if !isPrimaryCheckout(ctx, primary) {
-		return PRWorktreeResult{}, fmt.Errorf("%s: no primary checkout at %s", r.Name, primary)
+	primary, _, prob := coCheckPrimary(ctx, w.Root, r)
+	if prob != nil {
+		return PRWorktreeResult{}, prob
 	}
 	report("fetching " + RemotesOf(r).String())
 	if err := coFetchRepo(ctx, primary, RemotesOf(r)); err != nil {
@@ -142,6 +139,9 @@ func sameRepoPR(ctx context.Context, w *Workspace, r bundle.Repository, head, he
 	}
 	for _, in := range infos {
 		if in.Branch == head {
+			if _, err := usableWorktree(in, r.Name); err != nil {
+				return PRWorktreeResult{}, err
+			}
 			res.Dir, res.Path = in.Dir, in.Path
 			// Checked out: never modified here (it may have local changes).
 			if msg, err := relationWarning(ctx, primary, head, in.Head, remote, remoteRef); err != nil {
@@ -256,6 +256,9 @@ func pullRefPR(ctx context.Context, w *Workspace, r bundle.Repository, primary s
 	}
 	for _, in := range infos {
 		if in.Branch == branch {
+			if _, err := usableWorktree(in, r.Name); err != nil {
+				return PRWorktreeResult{}, err
+			}
 			res.Dir, res.Path = in.Dir, in.Path
 			return refreshPR(ctx, r, in.Path, pullRef, res, emit)
 		}

@@ -216,12 +216,19 @@ func doctorRepo(ctx context.Context, root string, r bundle.Repository, now time.
 		checkRemote(rs.Reference, r.URL, " (the repository)", "url")
 		checkDefaultTracking(ctx, primary, r, rs, func(msg, hint string) { add(CheckWarn, "tracking", msg, hint) })
 	}
-	if infos, _, _, err := listRepo(ctx, root, r); err != nil {
+	if infos, _, _, err := listCheckedRepo(ctx, r, primary, common, true); err != nil {
 		add(CheckWarn, "worktree", "cannot list worktrees: "+err.Error(), "")
 	} else {
 		for _, in := range infos {
 			switch {
 			case in.Primary:
+			case in.unusable != nil:
+				hint := ""
+				var fe *foreignWorktreeError
+				if errors.As(in.unusable, &fe) {
+					hint = fmt.Sprintf("git keeps the entry while the directory holds another repository: move %s away, run `git -C %s worktree prune`, then move it back", in.Path, primary)
+				}
+				add(CheckWarn, "worktree", fmt.Sprintf("worktree %s [%s] cannot be used: %v", in.Path, branchOrDetached(in), in.unusable), hint)
 			case in.Prunable:
 				add(CheckWarn, "worktree", fmt.Sprintf("worktree %s [%s] is missing (%s)", in.Path, branchOrDetached(in), in.PrunableReason),
 					fmt.Sprintf("git -C %s worktree prune", primary))

@@ -123,8 +123,9 @@ func coDisplayDir(c ops.Checkout) string {
 
 const coStatusLong = `Show the state of every checkout of the bundle: the primary checkout of each
 repository and its worktrees, ordered by repository, primary first, then worktrees
-by directory name. Status does not access the network: ahead/behind counts are
-relative to the remote-tracking refs of the last fetch, unless --fetch is given.
+by directory name (those outside <bundle>/<repo>/ last). Status does not access
+the network: ahead/behind counts are relative to the remote-tracking refs of the
+last fetch, unless --fetch is given.
 
 A checkout is "clean" when it has no staged, unstaged, untracked or conflicted
 entries. Stashes belong to the repository and are shown on its first row whose

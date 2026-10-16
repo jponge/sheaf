@@ -112,6 +112,10 @@ type WorktreeInfo struct {
 	// TagMoved is set when the worktree pinned at Tag has HEAD elsewhere than
 	// the commit it was created at (see gitx.Worktree.TagMoved).
 	TagMoved bool `json:"tag_moved"`
+	// unusable is set for a linked worktree that is not a work tree of the
+	// repository (see repoEntry.Problem): ListWorktrees reports it as a
+	// failure, and it is never used as a target (see usableWorktree).
+	unusable error
 }
 
 // ListWorktrees lists the checkouts of repo (resolved like ResolveRepo with
@@ -120,7 +124,8 @@ type WorktreeInfo struct {
 // the repository directory last, by path). A repository that cannot be
 // listed (directory or primary checkout missing, git failure) does not stop
 // the others: the listing of the others is returned with one RepoError per
-// failed repository. The error is reserved for an unknown repo and
+// failed repository, and one per linked worktree that cannot be used (it is
+// left out of the listing). The error is reserved for an unknown repo and
 // cancellation.
 func ListWorktrees(ctx context.Context, w *Workspace, repo string) ([]WorktreeInfo, []RepoError, error) {
 	ctx = withCommandCache(ctx)
@@ -149,35 +154,44 @@ func ListWorktrees(ctx context.Context, w *Workspace, repo string) ([]WorktreeIn
 			fails = append(fails, RepoError{Repo: r.Name, Err: err})
 			continue
 		}
-		out = append(out, infos...)
+		for _, in := range infos {
+			if in.unusable != nil {
+				fails = append(fails, RepoError{Repo: r.Name, Path: in.Path, Err: in.unusable})
+				continue
+			}
+			out = append(out, in)
+		}
 	}
 	return out, fails, nil
 }
 
-// listRepo returns the sorted checkouts of r, its repository directory and
-// its primary checkout. The primary checkout must be
-// <root>/<repo>/<normalized default branch> (the layout invariant). See
-// enumerateRepo.
+// listRepo returns the checkouts of r in the order of enumerateRepo, its
+// repository directory and its primary checkout, after checking them (see
+// coCheckPrimary). A linked worktree that cannot be used is listed with
+// WorktreeInfo.unusable set, unless only its directory is missing (it is
+// then listed, prunable).
 func listRepo(ctx context.Context, root string, r bundle.Repository) (infos []WorktreeInfo, repoDir, primary string, err error) {
-	repoDir, err = repoDirOf(root, r.Name)
-	if err != nil {
-		return nil, "", "", err
+	primary, common, prob := coCheckPrimary(ctx, root, r)
+	if prob != nil {
+		return nil, "", "", fmt.Errorf("%s: %w", prob.Path, prob.Err)
 	}
-	if repoDir == "" {
-		return nil, "", "", fmt.Errorf("directory %s does not exist", bundle.RepoDir(root, r.Name))
+	return listCheckedRepo(ctx, r, primary, common, true)
+}
+
+// listRepoUnverified is listRepo without the verification of the linked
+// worktrees (unusable is never set), for collision checks.
+func listRepoUnverified(ctx context.Context, root string, r bundle.Repository) (infos []WorktreeInfo, repoDir, primary string, err error) {
+	primary, common, prob := coCheckPrimary(ctx, root, r)
+	if prob != nil {
+		return nil, "", "", fmt.Errorf("%s: %w", prob.Path, prob.Err)
 	}
-	primary, err = bundle.WorktreeDir(root, r.Name, r.DefaultBranch)
-	if err != nil {
-		return nil, "", "", err
-	}
-	if !isPrimaryCheckout(ctx, primary) {
-		return nil, "", "", fmt.Errorf("no primary checkout at %s", primary)
-	}
-	entries, _, err := enumerateRepo(ctx, r.Name, primary, enumPolicy{outside: func(p string) bool {
-		p = filepath.Clean(p)
-		rp := resolveExisting(p)
-		return filepath.Dir(rp) != repoDir || filepath.Dir(p) != repoDir
-	}})
+	return listCheckedRepo(ctx, r, primary, common, false)
+}
+
+// listCheckedRepo is listRepo (listRepoUnverified without verify) for a
+// primary checkout already accepted by coCheckPrimary.
+func listCheckedRepo(ctx context.Context, r bundle.Repository, primary, common string, verify bool) (infos []WorktreeInfo, repoDir, _ string, err error) {
+	entries, err := enumerateRepo(ctx, primary, common, enumPolicy{keepMissing: true, noVerify: !verify})
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -187,7 +201,7 @@ func listRepo(ctx context.Context, root string, r bundle.Repository) (infos []Wo
 			Repo: r.Name, Branch: wt.Branch, Path: p, Head: wt.Head, Primary: wt.Primary,
 			Detached: wt.Detached, Locked: wt.Locked, LockReason: wt.LockReason,
 			Prunable: wt.Prunable, PrunableReason: wt.PrunableReason, Tag: wt.Tag, TagMoved: wt.TagMoved,
-			Outside: wt.Outside,
+			Outside: wt.Outside, unusable: wt.Problem,
 		}
 		info.OffDefault = info.Primary && info.Branch != r.DefaultBranch
 		if !info.Outside {
@@ -195,24 +209,7 @@ func listRepo(ctx context.Context, root string, r bundle.Repository) (infos []Wo
 		}
 		infos = append(infos, info)
 	}
-	slices.SortStableFunc(infos, func(a, b WorktreeInfo) int {
-		switch {
-		case a.Primary != b.Primary:
-			if a.Primary {
-				return -1
-			}
-			return 1
-		case a.Outside != b.Outside:
-			if b.Outside {
-				return -1
-			}
-			return 1
-		case a.Dir != b.Dir:
-			return strings.Compare(a.Dir, b.Dir)
-		}
-		return strings.Compare(a.Path, b.Path)
-	})
-	return infos, repoDir, primary, nil
+	return infos, filepath.Dir(primary), primary, nil
 }
 
 // errNoWorktree is wrapped by findWorktree when nothing matches.
@@ -250,9 +247,9 @@ func findWorktree(infos []WorktreeInfo, repo string, tgt WorktreeTarget) (Worktr
 		return WorktreeInfo{}, fmt.Errorf("%q is ambiguous in %s: it is the branch of %s and the directory of %s; select one with --branch %s or --dir %s",
 			name, repo, describe(infos[byBranch]), describe(infos[byDir]), name, name)
 	case byBranch >= 0:
-		return infos[byBranch], nil
+		return usableWorktree(infos[byBranch], repo)
 	case byDir >= 0:
-		return infos[byDir], nil
+		return usableWorktree(infos[byDir], repo)
 	}
 	found := -1
 	for i, in := range infos {
@@ -264,7 +261,7 @@ func findWorktree(infos []WorktreeInfo, repo string, tgt WorktreeTarget) (Worktr
 		}
 	}
 	if found >= 0 {
-		return infos[found], nil
+		return usableWorktree(infos[found], repo)
 	}
 	var all []string
 	for _, in := range infos {
@@ -278,6 +275,15 @@ func findWorktree(infos []WorktreeInfo, repo string, tgt WorktreeTarget) (Worktr
 		what = "worktree with branch"
 	}
 	return WorktreeInfo{}, fmt.Errorf("%w: no %s %q in %s (worktrees: %s)", errNoWorktree, what, name, repo, strings.Join(all, ", "))
+}
+
+// usableWorktree returns in, or an error when it cannot be used (see
+// WorktreeInfo.unusable).
+func usableWorktree(in WorktreeInfo, repo string) (WorktreeInfo, error) {
+	if in.unusable != nil {
+		return WorktreeInfo{}, fmt.Errorf("worktree %s of %s cannot be used: %s: %w", describe(in), repo, in.Path, in.unusable)
+	}
+	return in, nil
 }
 
 // describe names a checkout in messages: "dir [branch]".
@@ -322,10 +328,17 @@ var (
 // RepoError is the failure of one repository in a multi-repository listing.
 type RepoError struct {
 	Repo string
+	// Path is set for the failure of one worktree of the repository.
+	Path string
 	Err  error
 }
 
-func (e *RepoError) Error() string { return e.Repo + ": " + e.Err.Error() }
+func (e *RepoError) Error() string {
+	if e.Path != "" {
+		return e.Repo + ": " + e.Path + ": " + e.Err.Error()
+	}
+	return e.Repo + ": " + e.Err.Error()
+}
 func (e *RepoError) Unwrap() error { return e.Err }
 
 // WorktreeAddOptions configures AddWorktree.
@@ -384,12 +397,9 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 	report := func(phase, msg string) {
 		emit(Event{Repo: r.Name, Phase: phase, Kind: KindProgress, Message: msg})
 	}
-	primary, err := bundle.WorktreeDir(w.Root, r.Name, r.DefaultBranch)
-	if err != nil {
-		return WorktreeAddResult{}, err
-	}
-	if !isPrimaryCheckout(ctx, primary) {
-		return WorktreeAddResult{}, fmt.Errorf("%s: no primary checkout at %s", r.Name, primary)
+	primary, _, prob := coCheckPrimary(ctx, w.Root, r)
+	if prob != nil {
+		return WorktreeAddResult{}, prob
 	}
 	if err := checkBranchName(ctx, primary, branch); err != nil {
 		return WorktreeAddResult{}, err
@@ -402,7 +412,7 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 		return WorktreeAddResult{}, err
 	}
 	// Cheap checks before the fetch; repeated under the lock below.
-	infos, repoDir, _, err := listRepo(ctx, w.Root, r)
+	infos, repoDir, _, err := listRepoUnverified(ctx, w.Root, r)
 	if err != nil {
 		return WorktreeAddResult{}, fmt.Errorf("%s: %w", r.Name, err)
 	}
@@ -453,7 +463,7 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 		return WorktreeAddResult{}, fmt.Errorf("locking %s: %w", bundle.FileName, err)
 	}
 	defer unlock()
-	if infos, repoDir, _, err = listRepo(ctx, w.Root, r); err != nil {
+	if infos, repoDir, _, err = listRepoUnverified(ctx, w.Root, r); err != nil {
 		return WorktreeAddResult{}, fmt.Errorf("%s: %w", r.Name, err)
 	}
 	if err := checkAddTarget(infos, repoDir, branch, dir); err != nil {
@@ -788,7 +798,11 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 	if !ok {
 		return "", fmt.Errorf("no repository named %q in the bundle (%s)", repo, repoList(b))
 	}
-	infos, repoDir, primary, err := listRepo(ctx, w.Root, r)
+	primary, common, prob := coCheckPrimary(ctx, w.Root, r)
+	if prob != nil {
+		return "", fmt.Errorf("%s: %s: %w", r.Name, prob.Path, prob.Err)
+	}
+	infos, repoDir, _, err := listCheckedRepo(ctx, r, primary, common, true)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", r.Name, err)
 	}
@@ -884,6 +898,11 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 		return "", fmt.Errorf("locking %s: %w", bundle.FileName, err)
 	}
 	defer unlock()
+	// The directory may have been replaced while waiting for confirmation.
+	if wt.unusable = verifyLinked(ctx, wt.Path, primary, common, true); wt.unusable != nil {
+		_, err := usableWorktree(wt, r.Name)
+		return "", err
+	}
 	again, err := mkPlan()
 	if err != nil {
 		return "", err

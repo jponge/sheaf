@@ -1,7 +1,6 @@
 package ops
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -115,29 +114,53 @@ func coPrimaryPath(root string, r bundle.Repository) (string, error) {
 	return bundle.WorktreeDir(root, r.Name, r.DefaultBranch)
 }
 
-// coCheckPrimary returns a problem when the primary checkout of r is
-// missing, not a directory, or not the main work tree of its own repository
-// (see coVerifyPrimary).
-// It also returns the repository's common git directory.
+// coCheckPrimary is the check of a repository's layout shared by every
+// command: it returns a problem unless the repository directory
+// <root>/<repo> and the primary checkout in it are real directories (not
+// symbolic links, resolving to themselves), and the primary checkout is the
+// main work tree of its own repository (see coVerifyPrimary) with a .git
+// directory. With these, git lists the primary checkout as the main work
+// tree, which enumerateRepo also checks. It also returns the repository's
+// common git directory.
 func coCheckPrimary(ctx context.Context, root string, r bundle.Repository) (string, string, *Problem) {
 	p, err := coPrimaryPath(root, r)
 	if err != nil {
 		return "", "", &Problem{Repo: r.Name, Path: filepath.Join(root, r.Name), Err: err}
 	}
-	fi, err := os.Stat(p)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return p, "", &Problem{Repo: r.Name, Path: p, Err: errors.New("primary checkout missing")}
-	case err != nil:
+	if err := coCheckRealDir(filepath.Dir(p), "repository directory"); err != nil {
+		return p, "", &Problem{Repo: r.Name, Path: filepath.Dir(p), Err: err}
+	}
+	if err := coCheckRealDir(p, "primary checkout"); err != nil {
 		return p, "", &Problem{Repo: r.Name, Path: p, Err: err}
-	case !fi.IsDir():
-		return p, "", &Problem{Repo: r.Name, Path: p, Err: errors.New("primary checkout is not a directory")}
 	}
 	common, err := coVerifyPrimary(ctx, p)
 	if err != nil {
 		return p, "", &Problem{Repo: r.Name, Path: p, Err: err}
 	}
+	if fi, err := os.Lstat(filepath.Join(p, ".git")); err != nil || !fi.IsDir() {
+		return p, "", &Problem{Repo: r.Name, Path: p, Err: errors.New("primary checkout's .git is not a directory")}
+	}
 	return p, common, nil
+}
+
+// coCheckRealDir returns an error, naming dir as what, unless dir is a
+// directory, not a symbolic link, that resolves to itself.
+func coCheckRealDir(dir, what string) error {
+	fi, err := os.Lstat(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return errors.New(what + " missing")
+	case err != nil:
+		return err
+	case fi.Mode()&fs.ModeSymlink != 0:
+		return errors.New(what + " is a symbolic link")
+	case !fi.IsDir():
+		return errors.New(what + " is not a directory")
+	}
+	if r, err := filepath.EvalSymlinks(dir); err != nil || r != dir {
+		return fmt.Errorf("%s does not resolve to itself (%s, %v)", what, r, err)
+	}
+	return nil
 }
 
 // coSameFile reports whether a and b resolve to the same path.
@@ -195,48 +218,29 @@ func coVerifyPrimary(ctx context.Context, dir string) (string, error) {
 	return wt.commonDir, nil
 }
 
-// coListRepo lists the checkouts of r: the primary first, then the linked
-// worktrees by directory name (then path). See enumerateRepo.
+// coListRepo lists the checkouts of r in the order of enumerateRepo; linked
+// worktrees that cannot be used are returned as problems.
 func coListRepo(ctx context.Context, root string, r bundle.Repository, primaryOnly bool) (*coRepoCheckouts, []Problem) {
 	primary, common, prob := coCheckPrimary(ctx, root, r)
 	if prob != nil {
 		return nil, []Problem{*prob}
 	}
-	repoDir := filepath.Dir(primary)
-	entries, probs, err := enumerateRepo(ctx, r.Name, primary, enumPolicy{
-		strictMain:  true,
-		primaryOnly: primaryOnly,
-		outside:     func(p string) bool { return !coSameFile(filepath.Dir(p), repoDir) },
-		verify: func(wt gitx.Worktree) error {
-			if _, err := os.Stat(wt.Path); err != nil {
-				msg := "worktree directory missing (still registered in git; `git worktree prune` removes the entry)"
-				if !errors.Is(err, fs.ErrNotExist) {
-					msg = err.Error()
-				}
-				return errors.New(msg)
-			}
-			insp, err := coInspect(ctx, wt.Path)
-			if err == nil && !coSameFile(insp.commonDir, common) {
-				err = fmt.Errorf("worktree of another repository (%s)", insp.commonDir)
-			}
-			return err
-		},
-	})
+	entries, err := enumerateRepo(ctx, primary, common, enumPolicy{primaryOnly: primaryOnly})
 	if err != nil {
 		return nil, []Problem{{Repo: r.Name, Path: primary, Err: err}}
 	}
 	rc := &coRepoCheckouts{name: r.Name, primary: primary, remotes: RemotesOf(r)}
 	rc.checkouts = append(rc.checkouts, Checkout{Repo: r.Name, Dir: filepath.Base(primary), Path: primary, Primary: true,
 		Branch: entries[0].Branch, Detached: entries[0].Detached})
-	var linked []Checkout
+	var probs []Problem
 	for _, wt := range entries[1:] {
-		linked = append(linked, Checkout{Repo: r.Name, Dir: filepath.Base(wt.Path), Path: wt.Path, Branch: wt.Branch, Detached: wt.Detached,
+		if wt.Problem != nil {
+			probs = append(probs, Problem{Repo: r.Name, Path: wt.Path, Err: wt.Problem})
+			continue
+		}
+		rc.checkouts = append(rc.checkouts, Checkout{Repo: r.Name, Dir: filepath.Base(wt.Path), Path: wt.Path, Branch: wt.Branch, Detached: wt.Detached,
 			Outside: wt.Outside, Tag: wt.Tag, TagMovedTo: tagMovedTo(wt.Worktree)})
 	}
-	slices.SortFunc(linked, func(a, b Checkout) int {
-		return cmp.Or(strings.Compare(a.Dir, b.Dir), strings.Compare(a.Path, b.Path))
-	})
-	rc.checkouts = append(rc.checkouts, linked...)
 	return rc, probs
 }
 
@@ -257,9 +261,11 @@ func coEnumerate(ctx context.Context, w *Workspace, f CheckoutFilter, jobs int) 
 
 // ListCheckouts returns the checkouts of the repositories of w selected by f:
 // sorted by repository, then primary first, then linked worktrees by
-// directory name. Checkouts that cannot be listed (missing directories, git
-// errors) are returned as problems, sorted the same way. The error is only
-// set for an invalid filter. Up to jobs repositories are listed in parallel.
+// directory name (those outside the repository directory last, by path).
+// Checkouts that cannot be listed (missing directories, worktrees of another
+// repository, git errors) are returned as problems, sorted the same way. The
+// error is only set for an invalid filter. Up to jobs repositories are listed
+// in parallel.
 func ListCheckouts(ctx context.Context, w *Workspace, f CheckoutFilter, jobs int) ([]Checkout, []Problem, error) {
 	sets, probs, err := coEnumerate(ctx, w, f, jobs)
 	if err != nil {

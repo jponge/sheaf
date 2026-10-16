@@ -145,7 +145,7 @@ func PlanPrune(ctx context.Context, w *Workspace, opts PruneOptions, rep Reporte
 
 func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts PruneOptions, report func(Event)) ([]PruneCandidate, []PruneSkip, []Problem, forkDistrust) {
 	var distrust forkDistrust
-	primary, _, prob := coCheckPrimary(ctx, root, r)
+	primary, common, prob := coCheckPrimary(ctx, root, r)
 	if prob != nil {
 		return nil, nil, []Problem{*prob}, distrust
 	}
@@ -170,7 +170,7 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 	} else if rs.Forked() {
 		distrust = offlineForkDistrust(rs.Fork)
 	}
-	infos, repoDir, _, err := listRepo(ctx, root, r)
+	infos, repoDir, _, err := listCheckedRepo(ctx, r, primary, common, true)
 	if err != nil {
 		return fail(err)
 	}
@@ -253,6 +253,8 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 		switch {
 		case ok && in.Primary:
 			skip(in.Path, "it is checked out in the primary checkout, which is never pruned")
+		case ok && in.unusable != nil:
+			skip(in.Path, "its worktree cannot be used: "+in.unusable.Error())
 		case ok && in.Outside:
 			skip(in.Path, "its worktree is outside "+repoDir)
 		case ok && in.Prunable:
@@ -465,12 +467,9 @@ func pruneBranch(ctx context.Context, w *Workspace, c PruneCandidate, distrust f
 	if !ok {
 		return failed(fmt.Errorf("no repository named %q in the bundle", c.Repo))
 	}
-	primary, err := bundle.WorktreeDir(w.Root, r.Name, r.DefaultBranch)
-	if err != nil {
-		return failed(err)
-	}
-	if !isPrimaryCheckout(ctx, primary) {
-		return failed(fmt.Errorf("%s: no primary checkout at %s", r.Name, primary))
+	primary, _, prob := coCheckPrimary(ctx, w.Root, r)
+	if prob != nil {
+		return failed(prob)
 	}
 	// ApplyPrune already reads fresh; lockBundleFresh keeps this correct on
 	// its own (defence in depth).
