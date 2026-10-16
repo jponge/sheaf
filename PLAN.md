@@ -197,3 +197,4 @@ What to do differently
 | B10 | Remaining bash scd completion gaps (single quote inside open single quote, `$'…'`, `!` in double quotes); cobra zsh open-quote (upstream); fish < 3.7 `-o` fallback untested | later |
 
 Order for the high-priority items: B3 → B6 (review sees the merged code) → B2 → B1 (docs describe the final behaviour).
+- Decisions 2026-10-16 (user) for B2: bare `sheaf` in a bundle with a TTY opens an overview (checkouts table from local status, no network at open; multi-select, filter) with actions update/fetch/wt add/wt rm/prune/doctor/sync reusing the per-command TUIs and returning to the overview; enter on a row cds there through the shell-init wrapper (prints the path without it). Outside a bundle: help plus a create/init hint. --no-tui or non-TTY: help, unchanged.
