@@ -306,8 +306,22 @@ func pullRefPR(ctx context.Context, w *Workspace, r bundle.Repository, primary s
 // updatePRBranch brings the existing, not checked out, local branch of pull
 // request n up to date with refs/pull/<n>/head before its worktree is
 // created: fast-forwarded (compare-and-swap) when behind, left alone when
-// ahead (the returned note says so), refused when diverged or in use.
+// ahead (the returned note says so), refused when diverged, in use, or
+// changed by someone else during the fetch.
 func updatePRBranch(ctx context.Context, root string, r bundle.Repository, primary, branch, pullRef string, n int, emit func(Event)) (string, error) {
+	// The fetch runs before the bundle lock is taken: it may prompt for
+	// credentials, which must not block the other sheaf processes. pr/<n>
+	// is read before it, so that a change made meanwhile (e.g. by a
+	// concurrent wt pr, whose fetch may be newer) is detected under the lock.
+	before, err := revParse(ctx, primary, "refs/heads/"+branch)
+	if err != nil {
+		return "", err
+	}
+	emit(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindProgress, Message: "fetching " + pullRef})
+	head, err := fetchPullHead(ctx, primary, RemotesOf(r).Reference, pullRef, n)
+	if err != nil {
+		return "", err
+	}
 	// Under the bundle lock (released before AddWorktree, which takes it).
 	// Fresh reads are defence in depth: wt pr has no query cache today.
 	ctx, unlock, err := lockBundleFresh(ctx, root, func() {
@@ -328,15 +342,15 @@ func updatePRBranch(ctx context.Context, root string, r bundle.Repository, prima
 	if err != nil {
 		return "", err
 	}
-	emit(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindProgress, Message: "fetching " + pullRef})
-	head, err := fetchPullHead(ctx, primary, RemotesOf(r).Reference, pullRef, n)
-	if err != nil {
-		return "", err
-	}
 	switch {
 	case head == local:
 		return "", nil
+	case local != before:
+		return "", fmt.Errorf("local branch %s changed while %s was being fetched (from %s to %s: another sheaf or git command?); nothing was changed: run this command again",
+			branch, pullRef, coShortID(before), coShortID(local))
 	case isAncestor(ctx, primary, local, head):
+		// Compare-and-swap: refused if the branch moved since it was read
+		// under the lock (by a git command, which does not take it).
 		if _, err := gitx.Run(ctx, primary, "update-ref", "-m", "sheaf wt pr: fast-forward to "+pullRef, "refs/heads/"+branch, head, local); err != nil {
 			return "", fmt.Errorf("fast-forwarding %s to %s: %w", branch, pullRef, err)
 		}
@@ -379,6 +393,9 @@ func fetchPullHead(ctx context.Context, dir, remote, pullRef string, n int) (str
 		defer cancel()
 		_, _ = gitx.Run(dctx, dir, "update-ref", "-d", tmp)
 	}()
+	if prFetchHook != nil {
+		prFetchHook(dir)
+	}
 	if err := gitx.FetchRefspecs(ctx, dir, remote, "+"+pullRef+":"+tmp, "+"+pullRef+":"+gitx.PullHeadRef(n)); err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
@@ -387,6 +404,10 @@ func fetchPullHead(ctx context.Context, dir, remote, pullRef string, n int) (str
 	}
 	return revParse(ctx, dir, tmp)
 }
+
+// prFetchHook, when set by a test, runs in fetchPullHead right before the
+// fetch.
+var prFetchHook func(dir string)
 
 func isAre(n int) string {
 	if n == 1 {
