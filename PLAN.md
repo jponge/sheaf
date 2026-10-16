@@ -176,3 +176,4 @@ What to do differently
 - macOS (user) at ef33315, -race: ops 46.1 s (was 44.5), gitx 31.3 s (was 34.6), cli 17.5 s (was 21.0). Step 13 did not help ops on macOS; further work needs per-test macOS timings.
 - Cached whole-tree fixtures (testutil.CachedTree) for pruneScenario and forkGoneTopic: ops processes −14%, CPU −15%/−18% (-race); the 15 prune-scenario tests −57% processes. Flaky TestFastForwardWithOptionsForceAlreadyClosed fixed (empty pidfile race; not reproduced).
 - macOS (user) at 040cb46, -race slowest ops tests: TestR10BranchMovedAfterPlan 4.02 s (builds the cached scenario), other prune-scenario tests 1.8–2.4 s (were 3.1–3.9 s); TestGitCallsPerCommand 3.35 s (was 5.1).
+- Decision 2026-10-16 (user): test execution time is acceptable; speed work closed.
