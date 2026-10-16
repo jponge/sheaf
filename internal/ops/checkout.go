@@ -196,47 +196,42 @@ func coVerifyPrimary(ctx context.Context, dir string) (string, error) {
 }
 
 // coListRepo lists the checkouts of r: the primary first, then the linked
-// worktrees by directory name (then path).
+// worktrees by directory name (then path). See enumerateRepo.
 func coListRepo(ctx context.Context, root string, r bundle.Repository, primaryOnly bool) (*coRepoCheckouts, []Problem) {
 	primary, common, prob := coCheckPrimary(ctx, root, r)
 	if prob != nil {
 		return nil, []Problem{*prob}
 	}
-	wts, err := gitx.WorktreeList(ctx, primary)
+	repoDir := filepath.Dir(primary)
+	entries, probs, err := enumerateRepo(ctx, r.Name, primary, enumPolicy{
+		strictMain:  true,
+		primaryOnly: primaryOnly,
+		outside:     func(p string) bool { return !coSameFile(filepath.Dir(p), repoDir) },
+		verify: func(wt gitx.Worktree) error {
+			if _, err := os.Stat(wt.Path); err != nil {
+				msg := "worktree directory missing (still registered in git; `git worktree prune` removes the entry)"
+				if !errors.Is(err, fs.ErrNotExist) {
+					msg = err.Error()
+				}
+				return errors.New(msg)
+			}
+			insp, err := coInspect(ctx, wt.Path)
+			if err == nil && !coSameFile(insp.commonDir, common) {
+				err = fmt.Errorf("worktree of another repository (%s)", insp.commonDir)
+			}
+			return err
+		},
+	})
 	if err != nil {
 		return nil, []Problem{{Repo: r.Name, Path: primary, Err: err}}
 	}
-	if len(wts) == 0 || wts[0].Bare || !coSameFile(wts[0].Path, primary) {
-		return nil, []Problem{{Repo: r.Name, Path: primary, Err: errors.New("not the main work tree of its repository")}}
-	}
 	rc := &coRepoCheckouts{name: r.Name, primary: primary, remotes: RemotesOf(r)}
 	rc.checkouts = append(rc.checkouts, Checkout{Repo: r.Name, Dir: filepath.Base(primary), Path: primary, Primary: true,
-		Branch: wts[0].Branch, Detached: wts[0].Detached})
-	if primaryOnly {
-		return rc, nil
-	}
-	repoDir := filepath.Dir(primary)
-	var probs []Problem
+		Branch: entries[0].Branch, Detached: entries[0].Detached})
 	var linked []Checkout
-	for _, wt := range wts[1:] {
-		if _, err := os.Stat(wt.Path); err != nil {
-			msg := "worktree directory missing (still registered in git; `git worktree prune` removes the entry)"
-			if !errors.Is(err, fs.ErrNotExist) {
-				msg = err.Error()
-			}
-			probs = append(probs, Problem{Repo: r.Name, Path: wt.Path, Err: errors.New(msg)})
-			continue
-		}
-		insp, err := coInspect(ctx, wt.Path)
-		if err == nil && !coSameFile(insp.commonDir, common) {
-			err = fmt.Errorf("worktree of another repository (%s)", insp.commonDir)
-		}
-		if err != nil {
-			probs = append(probs, Problem{Repo: r.Name, Path: wt.Path, Err: err})
-			continue
-		}
+	for _, wt := range entries[1:] {
 		linked = append(linked, Checkout{Repo: r.Name, Dir: filepath.Base(wt.Path), Path: wt.Path, Branch: wt.Branch, Detached: wt.Detached,
-			Outside: !coSameFile(filepath.Dir(wt.Path), repoDir), Tag: wt.Tag, TagMovedTo: tagMovedTo(wt)})
+			Outside: wt.Outside, Tag: wt.Tag, TagMovedTo: tagMovedTo(wt.Worktree)})
 	}
 	slices.SortFunc(linked, func(a, b Checkout) int {
 		return cmp.Or(strings.Compare(a.Dir, b.Dir), strings.Compare(a.Path, b.Path))

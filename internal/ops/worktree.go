@@ -156,7 +156,8 @@ func ListWorktrees(ctx context.Context, w *Workspace, repo string) ([]WorktreeIn
 
 // listRepo returns the sorted checkouts of r, its repository directory and
 // its primary checkout. The primary checkout must be
-// <root>/<repo>/<normalized default branch> (the layout invariant).
+// <root>/<repo>/<normalized default branch> (the layout invariant). See
+// enumerateRepo.
 func listRepo(ctx context.Context, root string, r bundle.Repository) (infos []WorktreeInfo, repoDir, primary string, err error) {
 	repoDir, err = repoDirOf(root, r.Name)
 	if err != nil {
@@ -172,25 +173,25 @@ func listRepo(ctx context.Context, root string, r bundle.Repository) (infos []Wo
 	if !isPrimaryCheckout(ctx, primary) {
 		return nil, "", "", fmt.Errorf("no primary checkout at %s", primary)
 	}
-	wts, err := gitx.WorktreeList(ctx, primary)
+	entries, _, err := enumerateRepo(ctx, r.Name, primary, enumPolicy{outside: func(p string) bool {
+		p = filepath.Clean(p)
+		rp := resolveExisting(p)
+		return filepath.Dir(rp) != repoDir || filepath.Dir(p) != repoDir
+	}})
 	if err != nil {
 		return nil, "", "", err
 	}
-	for i, wt := range wts {
-		if wt.Bare {
-			continue
-		}
+	for _, wt := range entries {
 		p := filepath.Clean(wt.Path)
 		info := WorktreeInfo{
-			Repo: r.Name, Branch: wt.Branch, Path: p, Head: wt.Head, Primary: i == 0,
+			Repo: r.Name, Branch: wt.Branch, Path: p, Head: wt.Head, Primary: wt.Primary,
 			Detached: wt.Detached, Locked: wt.Locked, LockReason: wt.LockReason,
 			Prunable: wt.Prunable, PrunableReason: wt.PrunableReason, Tag: wt.Tag, TagMoved: wt.TagMoved,
+			Outside: wt.Outside,
 		}
 		info.OffDefault = info.Primary && info.Branch != r.DefaultBranch
-		if rp := resolveExisting(p); filepath.Dir(rp) == repoDir && filepath.Dir(p) == repoDir {
+		if !info.Outside {
 			info.Dir = filepath.Base(p)
-		} else {
-			info.Outside = true
 		}
 		infos = append(infos, info)
 	}
