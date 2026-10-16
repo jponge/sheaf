@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
 	"runtime"
 
 	"github.com/spf13/cobra"
@@ -39,6 +40,9 @@ func NewRootCmdWithDeps(s Streams, d Deps) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(c *cobra.Command, _ []string) error {
+			if !c.HasParent() {
+				return nil // bare sheaf: runHome checks --jobs only when it opens the home screen
+			}
 			if o := OptionsFrom(c); o.Jobs < 1 {
 				return fmt.Errorf("invalid --jobs %d: must be at least 1", o.Jobs)
 			}
@@ -62,6 +66,7 @@ func NewRootCmdWithDeps(s Streams, d Deps) *cobra.Command {
 	root.AddCommand(newVersionCmd())
 	addBundleCommands(root, d)
 	installCompletions(root, d)
+	installHome(root, d)
 	return root
 }
 
@@ -87,7 +92,17 @@ func OptionsFrom(c *cobra.Command) Options {
 
 // Execute runs the CLI with the given arguments and returns the process exit
 // code. SIGINT, SIGTERM and SIGHUP cancel the context of the running command
-// (see execute).
+// (see execute). SHEAF_CD_FILE (see runHome) is read, then removed from the
+// environment before anything runs: the processes sheaf starts (commands of
+// `sheaf run`, git and its hooks) must not be able to write that file.
 func Execute(args []string, s Streams) int {
-	return execute(NewRootCmd(s), args)
+	cdFile := os.Getenv(cdFileVar)
+	_ = os.Unsetenv(cdFileVar)
+	getenv := func(k string) string {
+		if k == cdFileVar {
+			return cdFile
+		}
+		return os.Getenv(k)
+	}
+	return execute(NewRootCmdWithDeps(s, Deps{Getenv: getenv}), args)
 }

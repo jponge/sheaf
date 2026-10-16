@@ -65,6 +65,21 @@ func tuiSummary(c *cobra.Command, title string, run func(ctx context.Context, re
 	return printSummary(c.OutOrStdout(), sum)
 }
 
+// tuiUpdate runs update in a progress view and prints its summary.
+func tuiUpdate(c *cobra.Command, w *ops.Workspace, opts ops.UpdateOptions, strict bool) error {
+	s := newTUISession(c)
+	opts.Force = s.ctl.force
+	var r ops.UpdateReport
+	var uerr error
+	s.progress("Updating", progressOpts{Aside: ops.PhaseFetch}, func(ctx context.Context, rep ops.Reporter, _ askFunc) {
+		r, uerr = ops.Update(ctx, w, opts, rep)
+	})
+	if uerr != nil {
+		return uerr
+	}
+	return coPrintUpdateSummary(c.OutOrStdout(), r, strict)
+}
+
 // tuiInitAdopt offers the checkouts found by init (all preselected) and
 // adopts the chosen ones. Declining leaves the new bundle empty and prints
 // how to adopt later (init itself succeeded).

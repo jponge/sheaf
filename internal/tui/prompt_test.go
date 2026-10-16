@@ -1,0 +1,97 @@
+package tui
+
+import (
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+)
+
+func asPrompt(t *testing.T, m tea.Model) Prompt {
+	t.Helper()
+	p, ok := m.(Prompt)
+	if !ok {
+		t.Fatalf("model is %T, want Prompt", m)
+	}
+	return p
+}
+
+func newPrompt() Prompt { return NewPrompt("New worktree of alpha", []string{"branch", "tag"}) }
+
+func TestPromptTypesAndConfirms(t *testing.T) {
+	t.Parallel()
+	m, _ := press(newPrompt(), "f", "e", "a", "t", "/", "x", "y", "backspace")
+	v := view(m)
+	if !hasLine(v, "New worktree of alpha") || !hasLine(v, "branch: feat/x█") {
+		t.Fatalf("view:\n%s", v)
+	}
+	m, cmd := press(m, "enter")
+	p := asPrompt(t, m)
+	if !isQuit(cmd) || !p.Confirmed() || p.Cancelled() || p.Value() != "feat/x" || p.Mode() != "branch" {
+		t.Fatalf("quit=%v confirmed=%v cancelled=%v value=%q mode=%q", isQuit(cmd), p.Confirmed(), p.Cancelled(), p.Value(), p.Mode())
+	}
+	if m2, _ := press(m, "z"); asPrompt(t, m2).Value() != "feat/x" {
+		t.Fatal("input after the answer changed the value")
+	}
+}
+
+func TestPromptTabCyclesModes(t *testing.T) {
+	t.Parallel()
+	m, _ := press(newPrompt(), "v", "1", "tab")
+	if p := asPrompt(t, m); p.Mode() != "tag" || !hasLine(view(m), "tag: v1█") {
+		t.Fatalf("mode %q:\n%s", p.Mode(), view(m))
+	}
+	if !strings.Contains(view(m), "tab") {
+		t.Fatalf("help lacks tab:\n%s", view(m))
+	}
+	m, _ = press(m, "tab")
+	if p := asPrompt(t, m); p.Mode() != "branch" {
+		t.Fatalf("mode %q after a second tab", p.Mode())
+	}
+}
+
+func TestPromptBlankEnterIgnored(t *testing.T) {
+	t.Parallel()
+	m, cmd := press(newPrompt(), "space", "enter")
+	if isQuit(cmd) || asPrompt(t, m).Confirmed() {
+		t.Fatal("enter with a blank value confirmed")
+	}
+}
+
+func TestPromptCancelAndInterrupt(t *testing.T) {
+	t.Parallel()
+	m, cmd := press(newPrompt(), "x", "esc")
+	if p := asPrompt(t, m); !isQuit(cmd) || !p.Cancelled() || p.Interrupted() || p.Confirmed() {
+		t.Fatalf("esc: quit=%v cancelled=%v interrupted=%v", isQuit(cmd), p.Cancelled(), p.Interrupted())
+	}
+	m, cmd = press(newPrompt(), "ctrl+c")
+	if p := asPrompt(t, m); !isQuit(cmd) || !p.Cancelled() || !p.Interrupted() {
+		t.Fatalf("ctrl+c: quit=%v cancelled=%v interrupted=%v", isQuit(cmd), p.Cancelled(), p.Interrupted())
+	}
+}
+
+func TestPromptEditingAndPaste(t *testing.T) {
+	t.Parallel()
+	m, _ := press(newPrompt(), "a", "space", "b", "ctrl+w")
+	if got := asPrompt(t, m).Value(); got != "a " {
+		t.Fatalf("ctrl+w: %q", got)
+	}
+	m, _ = press(m, "ctrl+u")
+	m, _ = m.Update(paste("x\ny\x1b"))
+	if got := asPrompt(t, m).Value(); got != "xy" {
+		t.Fatalf("paste: %q", got)
+	}
+	if m, _ := m.Update(keyMsg("q")); asPrompt(t, m).Cancelled() || asPrompt(t, m).Value() != "xyq" {
+		t.Fatal("q must be typed, not cancel")
+	}
+}
+
+func TestPromptSanitizesTitle(t *testing.T) {
+	t.Parallel()
+	m := NewPrompt("t"+injectedSGR+"\n", []string{"branch"})
+	assertNoInjectedSGR(t, m)
+	assertNoControlChars(t, view(m))
+	if !strings.Contains(view(m), "branch: ") {
+		t.Fatalf("view:\n%s", view(m))
+	}
+}

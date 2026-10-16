@@ -32,6 +32,17 @@ type Deps struct {
 	// UseTUI decides whether a command runs its TUI; default: UseTUI
 	// (standard input and output are terminals, no --no-tui).
 	UseTUI func(in io.Reader, out io.Writer, noTUI bool) bool
+	// Getenv reads an environment variable (SHEAF_CD_FILE, see runHome);
+	// default: os.Getenv. Execute answers SHEAF_CD_FILE with the value read
+	// at startup, as it removes the variable from the environment.
+	Getenv func(string) string
+}
+
+func (d Deps) getenv(k string) string {
+	if d.Getenv != nil {
+		return d.Getenv(k)
+	}
+	return os.Getenv(k)
 }
 
 func (d Deps) hosting() hosting.Hosting {

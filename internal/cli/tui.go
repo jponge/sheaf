@@ -173,11 +173,15 @@ func newTUISession(c *cobra.Command) *tuiSession {
 
 // run runs a menu or confirmation program. An interruption (signal) kills
 // it and returns the context's error.
-func (s *tuiSession) run(m tea.Model) (tea.Model, error) {
+func (s *tuiSession) run(m tea.Model) (tea.Model, error) { return s.runModel(keepLastLine{m}) }
+
+// runModel is run without keepLastLine: the final frame is m's last view
+// as is.
+func (s *tuiSession) runModel(m tea.Model) (tea.Model, error) {
 	if err := s.ctx.Err(); err != nil {
 		return nil, err
 	}
-	final, err := tui.Run(keepLastLine{m}, s.in, s.out, tea.WithContext(s.ctx), tea.WithoutSignalHandler())
+	final, err := tui.Run(m, s.in, s.out, tea.WithContext(s.ctx), tea.WithoutSignalHandler())
 	if cerr := s.ctx.Err(); cerr != nil {
 		return nil, cerr
 	}

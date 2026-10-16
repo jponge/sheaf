@@ -1,0 +1,550 @@
+package tui
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+	"unicode/utf8"
+
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+)
+
+// Row is one row of an Overview table.
+type Row struct {
+	Key   string   // returned by Overview.Chosen; should be unique
+	Cells []string // one per column, matched by the filter
+	Alert bool     // the last cell is rendered with the Failed style (e.g. a problem)
+}
+
+// Scope tells which rows an OverviewAction applies to.
+type Scope int
+
+const (
+	// ScopeRows: the selected rows, or the current row when none is selected.
+	// Like MultiSelect.SelectedKeys, selected rows count whether the filter
+	// shows them or not (the status line gives the number selected).
+	ScopeRows Scope = iota
+	// ScopeCurrent: the current row only.
+	ScopeCurrent
+	// ScopeNone: no row (e.g. an action on the whole bundle).
+	ScopeNone
+)
+
+// OverviewAction is an action of an Overview, triggered by a key.
+type OverviewAction struct {
+	Key   string // as tea.KeyPressMsg.String(), e.g. "u" or "enter"
+	Name  string // returned by Overview.Chosen
+	Help  string // short description in the help line
+	Scope Scope
+	// Check, if set, may refuse the action for its targets: a non-empty
+	// message is displayed and the overview stays open.
+	Check func(targets []string) string
+}
+
+// noRowMessage is displayed when an action needing a row has none.
+const noRowMessage = "no row to act on"
+
+// Overview is a bubbletea model displaying a table of rows with a cursor,
+// a multi-selection and a filter, and quitting with the action chosen by
+// the user.
+//
+// Keys: up/down/k/j, pgup/pgdown, home/end move; space toggles the
+// selection of the current row; / enters filter mode (case-insensitive
+// substring over the cells; editing as in MultiSelect: enter keeps the
+// filter, esc clears it); the keys of the actions choose an action; q, esc
+// and ctrl+c quit. In list mode esc first clears an applied filter and only
+// quits when no filter is set. Key events of several runes and bracketed
+// pastes are ignored in list mode, so pasted text never triggers actions.
+// Text fields are displayed with control characters replaced by U+FFFD.
+//
+// Update returns tea.Quit once an action is chosen or the user quits; later
+// messages are ignored and the view is then empty, so that the program
+// leaves nothing in the terminal.
+type Overview struct {
+	title   string
+	header  []string
+	rows    []Row
+	actions []OverviewAction
+	message string
+
+	selected map[string]bool
+	visible  []int // indices into rows matching the filter
+	cursor   int   // index into visible
+	offset   int   // index into visible of the first rendered row
+
+	width, height int // 0 = unknown
+
+	filter    string
+	filtering bool
+
+	chosen                 string
+	targets                []string
+	cancelled, interrupted bool
+
+	keys   multiSelectKeys
+	help   help.Model
+	styles Styles
+}
+
+// NewOverview returns an Overview of rows (copied) under header.
+func NewOverview(title string, header []string, rows []Row, actions []OverviewAction) Overview {
+	h := help.New()
+	st := DefaultStyles()
+	h.Styles = st.Help
+	keys := newMultiSelectKeys()
+	keys.Toggle.SetHelp("space", "select")
+	keys.Cancel.SetHelp("q", "quit")
+	m := Overview{
+		title:    title,
+		header:   slices.Clone(header),
+		rows:     slices.Clone(rows),
+		actions:  slices.Clone(actions),
+		selected: map[string]bool{},
+		keys:     keys,
+		help:     h,
+		styles:   st,
+	}
+	m.applyFilter()
+	return m
+}
+
+// WithMessage returns a copy of m displaying msg below the table.
+func (m Overview) WithMessage(msg string) Overview {
+	m.message = msg
+	return m
+}
+
+// WithCursor returns a copy of m whose cursor is on the row key, if visible.
+func (m Overview) WithCursor(key string) Overview {
+	for i, r := range m.visible {
+		if m.rows[r].Key == key {
+			m.cursor = i
+			m.scrollToCursor()
+		}
+	}
+	return m
+}
+
+// WithFilter returns a copy of m filtering its rows with f.
+func (m Overview) WithFilter(f string) Overview {
+	m.setFilter(dropControl(f))
+	return m
+}
+
+// Init implements tea.Model.
+func (m Overview) Init() tea.Cmd { return nil }
+
+// Chosen returns the name of the chosen action and its targets (row keys,
+// nil for ScopeNone); the name is empty when no action was chosen.
+func (m Overview) Chosen() (string, []string) { return m.chosen, m.targets }
+
+// Cancelled reports whether the user quit (q, esc, ctrl+c). A model whose
+// program ended for another reason (e.g. input closed) has neither chosen
+// an action nor been cancelled.
+func (m Overview) Cancelled() bool { return m.cancelled }
+
+// Interrupted reports whether the user quit with ctrl+c, which callers
+// treat as an interruption rather than a plain quit.
+func (m Overview) Interrupted() bool { return m.interrupted }
+
+// CurrentKey returns the key of the current row, "" when no row is visible.
+func (m Overview) CurrentKey() string {
+	if m.cursor < len(m.visible) {
+		return m.rows[m.visible[m.cursor]].Key
+	}
+	return ""
+}
+
+// Filter returns the filter.
+func (m Overview) Filter() string { return m.filter }
+
+func (m Overview) done() bool { return m.chosen != "" || m.cancelled }
+
+// Update implements tea.Model.
+func (m Overview) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.done() {
+		return m, nil
+	}
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.help.SetWidth(msg.Width)
+		m.scrollToCursor()
+	case tea.PasteMsg:
+		if m.filtering {
+			m.setFilter(m.filter + dropControl(msg.Content))
+		}
+	case tea.KeyPressMsg:
+		if key.Matches(msg, m.keys.ForceQuit) {
+			m.cancelled, m.interrupted = true, true
+			return m, tea.Quit
+		}
+		if m.filtering {
+			return m.updateFilter(msg)
+		}
+		return m.updateList(msg)
+	}
+	return m, nil
+}
+
+func (m Overview) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if utf8.RuneCountInString(msg.Text) > 1 {
+		return m, nil
+	}
+	s := msg.String()
+	for _, a := range m.actions {
+		if a.Key == s {
+			return m.choose(a)
+		}
+	}
+	switch {
+	case key.Matches(msg, m.keys.Cancel):
+		if s == "esc" && m.filter != "" {
+			m.setFilter("")
+			return m, nil
+		}
+		m.cancelled = true
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Toggle):
+		if k := m.CurrentKey(); k != "" {
+			m.selected = cloneSet(m.selected)
+			if m.selected[k] {
+				delete(m.selected, k)
+			} else {
+				m.selected[k] = true
+			}
+		}
+	case key.Matches(msg, m.keys.Filter):
+		m.filtering = true
+		m.scrollToCursor() // the filter line takes a row
+	default:
+		m.move(msg)
+	}
+	return m, nil
+}
+
+// cloneSet returns a copy of s: models are values in bubbletea, and earlier
+// copies must keep their selection.
+func cloneSet(s map[string]bool) map[string]bool {
+	c := make(map[string]bool, len(s))
+	for k, v := range s {
+		c[k] = v
+	}
+	return c
+}
+
+// choose quits with a, or displays why it cannot apply.
+func (m Overview) choose(a OverviewAction) (tea.Model, tea.Cmd) {
+	var targets []string
+	switch a.Scope {
+	case ScopeRows:
+		for _, r := range m.rows {
+			if m.selected[r.Key] {
+				targets = append(targets, r.Key)
+			}
+		}
+		if len(targets) == 0 {
+			if k := m.CurrentKey(); k != "" {
+				targets = []string{k}
+			}
+		}
+	case ScopeCurrent:
+		if k := m.CurrentKey(); k != "" {
+			targets = []string{k}
+		}
+	}
+	if a.Scope != ScopeNone && len(targets) == 0 {
+		m.message = noRowMessage
+		return m, nil
+	}
+	if a.Check != nil {
+		if why := a.Check(targets); why != "" {
+			m.message = why
+			return m, nil
+		}
+	}
+	m.chosen, m.targets = a.Name, targets
+	return m, tea.Quit
+}
+
+func (m Overview) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch s := msg.String(); {
+	case key.Matches(msg, m.keys.ApplyFilter):
+		m.filtering = false
+		m.scrollToCursor()
+	case key.Matches(msg, m.keys.ClearFilter):
+		m.filtering = false
+		m.setFilter("")
+	case s == "ctrl+u":
+		m.setFilter("")
+	case s == "ctrl+w":
+		m.setFilter(deleteLastWord(m.filter))
+	case s == "backspace":
+		if r := []rune(m.filter); len(r) > 0 {
+			m.setFilter(string(r[:len(r)-1]))
+		}
+	case typedText(msg) != "":
+		m.setFilter(m.filter + dropControl(typedText(msg)))
+	case s == "up", s == "down", s == "pgup", s == "pgdown", s == "home", s == "end":
+		m.move(msg)
+	}
+	return m, nil
+}
+
+// move handles navigation keys; other keys are ignored.
+func (m *Overview) move(msg tea.KeyPressMsg) {
+	switch {
+	case key.Matches(msg, m.keys.Up):
+		m.cursor--
+	case key.Matches(msg, m.keys.Down):
+		m.cursor++
+	case key.Matches(msg, m.keys.PageUp):
+		m.cursor -= m.layout().rows
+	case key.Matches(msg, m.keys.PageDown):
+		m.cursor += m.layout().rows
+	case key.Matches(msg, m.keys.Home):
+		m.cursor = 0
+	case key.Matches(msg, m.keys.End):
+		m.cursor = len(m.visible) - 1
+	default:
+		return
+	}
+	m.scrollToCursor()
+}
+
+func (m *Overview) setFilter(f string) {
+	m.filter = f
+	m.applyFilter()
+}
+
+// applyFilter recomputes the visible rows, keeping the cursor on the same
+// row when it is still visible.
+func (m *Overview) applyFilter() {
+	current := -1
+	if m.cursor >= 0 && m.cursor < len(m.visible) {
+		current = m.visible[m.cursor]
+	}
+	needle := strings.ToLower(m.filter)
+	m.visible = nil // fresh slice: copies of the model must not share it
+	m.cursor = 0
+	for i, r := range m.rows {
+		if needle == "" || strings.Contains(strings.ToLower(strings.Join(r.Cells, "\x00")), needle) {
+			if i == current {
+				m.cursor = len(m.visible)
+			}
+			m.visible = append(m.visible, i)
+		}
+	}
+	m.offset = 0
+	m.scrollToCursor()
+}
+
+// ovLayout tells which lines View renders around the rows, and how many
+// rows fit.
+type ovLayout struct {
+	title, filter, header, status, message, help bool
+	rows                                         int
+}
+
+// layout fits the view into the window height. When the window is too
+// small for at least one row, the help, title, status, message, filter and
+// header lines are dropped in that order. With an unknown height every
+// visible row is shown.
+func (m Overview) layout() ovLayout {
+	l := ovLayout{title: true, filter: m.filtering || m.filter != "", header: true, status: true, message: m.message != "", help: true}
+	if m.height <= 0 {
+		l.rows = max(1, len(m.visible))
+		return l
+	}
+	chrome := func() int {
+		n := 0
+		for _, shown := range []bool{l.title, l.filter, l.header, l.status, l.message} {
+			if shown {
+				n++
+			}
+		}
+		if l.help {
+			n += len(m.helpLines())
+		}
+		return n
+	}
+	for _, line := range []*bool{&l.help, &l.title, &l.status, &l.message, &l.filter, &l.header} {
+		if m.height-chrome() >= 1 {
+			break
+		}
+		*line = false
+	}
+	l.rows = max(1, m.height-chrome())
+	return l
+}
+
+// scrollToCursor clamps the cursor and adjusts the offset so it is rendered.
+func (m *Overview) scrollToCursor() {
+	n := len(m.visible)
+	m.cursor = min(max(m.cursor, 0), max(n-1, 0))
+	h := m.layout().rows
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+h {
+		m.offset = m.cursor - h + 1
+	}
+	m.offset = min(max(m.offset, 0), max(n-h, 0))
+}
+
+// columnWidths returns the width of each column over the header and every
+// row (not only the visible ones, so that filtering does not shift them).
+func (m Overview) columnWidths() []int {
+	var w []int
+	grow := func(cells []string) {
+		for i, c := range cells {
+			if i >= len(w) {
+				w = append(w, 0)
+			}
+			w[i] = max(w[i], lipgloss.Width(sanitize(c)))
+		}
+	}
+	grow(m.header)
+	for _, r := range m.rows {
+		grow(r.Cells)
+	}
+	return w
+}
+
+// cells pads the cells to the column widths (not the last one) and joins
+// them; style, if set, renders the last cell.
+func cells(cs []string, widths []int, last *lipgloss.Style) string {
+	var b strings.Builder
+	for i, c := range cs {
+		c = sanitize(c)
+		if i > 0 {
+			b.WriteString("  ")
+		}
+		if i == len(cs)-1 {
+			if last != nil {
+				c = last.Render(c)
+			}
+			b.WriteString(c)
+			break
+		}
+		b.WriteString(c + strings.Repeat(" ", max(0, widths[i]-lipgloss.Width(c))))
+	}
+	return b.String()
+}
+
+// View implements tea.Model.
+func (m Overview) View() tea.View {
+	if m.done() {
+		return tea.NewView("")
+	}
+	st := m.styles
+	l := m.layout()
+	widths := m.columnWidths()
+	var lines []string
+	if l.title {
+		lines = append(lines, st.Title.Render(sanitize(m.title)))
+	}
+	if l.filter {
+		f := st.FilterPrompt.Render("/") + m.filter
+		if m.filtering {
+			f += "█"
+		}
+		lines = append(lines, f)
+	}
+	if l.header {
+		lines = append(lines, "      "+st.Detail.Render(cells(m.header, widths, nil)))
+	}
+	switch {
+	case len(m.rows) == 0:
+		lines = append(lines, st.Empty.Render("No rows."))
+	case len(m.visible) == 0:
+		lines = append(lines, st.Empty.Render("No matches."))
+	default:
+		end := min(m.offset+l.rows, len(m.visible))
+		for i := m.offset; i < end; i++ {
+			lines = append(lines, m.renderRow(i, widths))
+		}
+	}
+	if l.status {
+		lines = append(lines, st.Status.Render(m.status()))
+	}
+	if l.message {
+		lines = append(lines, sanitize(m.message))
+	}
+	if l.help {
+		lines = append(lines, m.helpLines()...)
+	}
+	if m.width > 0 {
+		trunc := lipgloss.NewStyle().MaxWidth(m.width)
+		for i, line := range lines {
+			lines[i] = trunc.Render(line)
+		}
+	}
+	return tea.NewView(strings.Join(lines, "\n"))
+}
+
+// helpLines renders the key help: the movement keys and quit, then the
+// actions, wrapped to the width so that none is cut off.
+func (m Overview) helpLines() []string {
+	if m.filtering {
+		return []string{m.help.ShortHelpView([]key.Binding{m.keys.ApplyFilter, m.keys.ClearFilter})}
+	}
+	lines := []string{m.help.ShortHelpView([]key.Binding{m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.Filter, m.keys.Cancel})}
+	unbounded := m.help // measures lines without the ellipsis
+	unbounded.SetWidth(0)
+	var line []key.Binding
+	for _, a := range m.actions {
+		b := key.NewBinding(key.WithKeys(a.Key), key.WithHelp(a.Key, a.Help))
+		if len(line) > 0 && m.width > 0 && lipgloss.Width(unbounded.ShortHelpView(append(slices.Clone(line), b))) > m.width {
+			lines = append(lines, m.help.ShortHelpView(line))
+			line = nil
+		}
+		line = append(line, b)
+	}
+	if len(line) > 0 {
+		lines = append(lines, m.help.ShortHelpView(line))
+	}
+	return lines
+}
+
+func (m Overview) renderRow(i int, widths []int) string {
+	st := m.styles
+	r := m.rows[m.visible[i]]
+	cursor := "  "
+	if i == m.cursor {
+		cursor = st.Cursor.Render("> ")
+	}
+	box := st.Unchecked.Render("[ ]")
+	if m.selected[r.Key] {
+		box = st.Checked.Render("[x]")
+	}
+	var last *lipgloss.Style
+	if r.Alert {
+		last = &st.Failed
+	}
+	text := cells(r.Cells, widths, last)
+	if i == m.cursor {
+		text = st.CurrentRow.Render(text)
+	}
+	return cursor + box + " " + text
+}
+
+func (m Overview) status() string {
+	n := 0
+	for _, r := range m.rows {
+		if m.selected[r.Key] {
+			n++
+		}
+	}
+	s := fmt.Sprintf("%d/%d selected", n, len(m.rows))
+	if m.filter != "" {
+		s += fmt.Sprintf(" · %d shown", len(m.visible))
+	}
+	if h := m.layout().rows; len(m.visible) > h {
+		s += fmt.Sprintf(" · rows %d-%d of %d", m.offset+1, m.offset+h, len(m.visible))
+	}
+	return s
+}

@@ -417,17 +417,7 @@ func newUpdateCmd(d Deps) *cobra.Command {
 			}
 			opts.Jobs = OptionsFrom(c).Jobs
 			if d.tuiMode(c) {
-				s := newTUISession(c)
-				opts.Force = s.ctl.force
-				var r ops.UpdateReport
-				var uerr error
-				s.progress("Updating", progressOpts{Aside: ops.PhaseFetch}, func(ctx context.Context, rep ops.Reporter, _ askFunc) {
-					r, uerr = ops.Update(ctx, w, opts, rep)
-				})
-				if uerr != nil {
-					return uerr
-				}
-				return coPrintUpdateSummary(c.OutOrStdout(), r, strict)
+				return tuiUpdate(c, w, opts, strict)
 			}
 			opts.Force = forceFrom(c.Context())
 			r, err := ops.Update(checkoutContext(c), w, opts, coCheckoutRenderer{plainRenderer{c.ErrOrStderr()}})

@@ -72,6 +72,10 @@ type CheckoutFilter struct {
 	Repos []string
 	// PrimaryOnly drops the linked worktrees.
 	PrimaryOnly bool
+	// Paths, when not empty, keeps only the checkouts (and problems) whose
+	// path is listed, as reported by ListCheckouts. A path matching neither
+	// a checkout nor a problem of the selected repositories is an error.
+	Paths []string
 }
 
 // coRepoCheckouts are the checkouts of one repository whose primary exists.
@@ -259,7 +263,34 @@ func coEnumerate(ctx context.Context, w *Workspace, f CheckoutFilter, jobs int) 
 	coForEach(jobs, len(repos), func(i int) {
 		sets[i], probs[i] = coListRepo(ctx, w.Root, repos[i], f.PrimaryOnly)
 	})
-	return slices.DeleteFunc(sets, func(s *coRepoCheckouts) bool { return s == nil }), slices.Concat(probs...), nil
+	sets = slices.DeleteFunc(sets, func(s *coRepoCheckouts) bool { return s == nil })
+	all := slices.Concat(probs...)
+	if len(f.Paths) == 0 {
+		return sets, all, nil
+	}
+	return coKeepPaths(sets, all, f.Paths)
+}
+
+// coKeepPaths applies CheckoutFilter.Paths.
+func coKeepPaths(sets []*coRepoCheckouts, probs []Problem, paths []string) ([]*coRepoCheckouts, []Problem, error) {
+	found := map[string]bool{}
+	for _, s := range sets {
+		s.checkouts = slices.DeleteFunc(s.checkouts, func(c Checkout) bool { return !slices.Contains(paths, c.Path) })
+		for _, c := range s.checkouts {
+			found[c.Path] = true
+		}
+	}
+	sets = slices.DeleteFunc(sets, func(s *coRepoCheckouts) bool { return len(s.checkouts) == 0 })
+	probs = slices.DeleteFunc(probs, func(p Problem) bool { return !slices.Contains(paths, p.Path) })
+	for _, p := range probs {
+		found[p.Path] = true
+	}
+	for _, p := range paths {
+		if !found[p] {
+			return nil, nil, fmt.Errorf("%s is not a checkout of the selected repositories", p)
+		}
+	}
+	return sets, probs, nil
 }
 
 // ListCheckouts returns the checkouts of the repositories of w selected by f:

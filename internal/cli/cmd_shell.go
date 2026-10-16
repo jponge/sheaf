@@ -111,6 +111,15 @@ func newShellInitCmd() *cobra.Command {
 			"<branch-or-dir>). When sheaf path fails its status is returned and the directory is\n" +
 			"not changed. Completion of scd is the one of `sheaf path`, and the code does not\n" +
 			"need the output of `sheaf completion`.\n\n" +
+			"It also defines a function named sheaf, which runs sheaf and, when enter was pressed\n" +
+			"on a checkout in the home screen (sheaf without a command, in a bundle, on a\n" +
+			"terminal), changes the directory to that checkout; sheaf writes it to the file named\n" +
+			"by SHEAF_CD_FILE, a temporary file created by the function (sheaf removes the\n" +
+			"variable from its environment at startup: the processes it starts never see it).\n" +
+			"Every other use of sheaf behaves as without the function (same arguments, streams\n" +
+			"and exit status). In the home screen, q or esc quits with status 0, even after an\n" +
+			"action failed (its error is printed and shown in the screen); ctrl+c exits with 130.\n" +
+			"The fish function needs fish 3.1 or later.\n\n" +
 			"Add to ~/.bashrc or ~/.zshrc:\n\n" +
 			"  eval \"$(sheaf shell-init bash)\"    # or zsh\n\n" +
 			"Add to ~/.config/fish/config.fish:\n\n" +
@@ -145,7 +154,24 @@ func newShellInitCmd() *cobra.Command {
 // the shells hand over unexpanded, and hide the global flags that mean nothing
 // for scd (--jobs, -j, --no-tui).
 var shellInit = map[string]string{
-	"bash": `scd() {
+	"bash": `# sheaf runs sheaf; after the home screen (bare sheaf) it changes the
+# directory to the checkout chosen there, which sheaf writes to the file
+# named by SHEAF_CD_FILE. Other commands run as without this function.
+sheaf() {
+  local tmp dir rc
+  tmp="$(mktemp "${TMPDIR:-/tmp}/sheaf-cd.XXXXXX" 2>/dev/null)" || { command sheaf "$@"; return; }
+  rc=0
+  SHEAF_CD_FILE="$tmp" command sheaf "$@" || rc=$?
+  dir=
+  if [ -s "$tmp" ]; then dir="$(cat -- "$tmp")"; fi
+  rm -f -- "$tmp"
+  if [ "$rc" -eq 0 ] && [ -n "$dir" ]; then
+    cd -- "$dir" || return
+  fi
+  return "$rc"
+}
+
+scd() {
   local dir
   dir="$(command sheaf path "$@")" || return $?
   [ -n "$dir" ] || return 1
@@ -256,7 +282,24 @@ _sheaf_scd() {
 }
 complete -F _sheaf_scd scd
 `,
-	"zsh": `scd() {
+	"zsh": `# sheaf runs sheaf; after the home screen (bare sheaf) it changes the
+# directory to the checkout chosen there, which sheaf writes to the file
+# named by SHEAF_CD_FILE. Other commands run as without this function.
+sheaf() {
+  local tmp dir rc
+  tmp="$(mktemp "${TMPDIR:-/tmp}/sheaf-cd.XXXXXX" 2>/dev/null)" || { command sheaf "$@"; return; }
+  rc=0
+  SHEAF_CD_FILE="$tmp" command sheaf "$@" || rc=$?
+  dir=
+  if [ -s "$tmp" ]; then dir="$(cat -- "$tmp")"; fi
+  rm -f -- "$tmp"
+  if [ "$rc" -eq 0 ] && [ -n "$dir" ]; then
+    cd -- "$dir" || return
+  fi
+  return "$rc"
+}
+
+scd() {
   local dir
   dir="$(command sheaf path "$@")" || return $?
   [ -n "$dir" ] || return 1
@@ -302,7 +345,34 @@ if (( $+functions[compdef] )); then
   compdef _sheaf_scd scd
 fi
 `,
-	"fish": `function scd --description 'cd to the output of sheaf path'
+	"fish": `# sheaf runs sheaf; after the home screen (bare sheaf) it changes the
+# directory to the checkout chosen there, which sheaf writes to the file
+# named by SHEAF_CD_FILE. Other commands run as without this function.
+function sheaf --description 'run sheaf; cd to the checkout chosen in its home screen'
+    set -l tmpdir /tmp
+    if set -q TMPDIR; and test -n "$TMPDIR"
+        set tmpdir $TMPDIR
+    end
+    set -l tmp (mktemp "$tmpdir/sheaf-cd.XXXXXX" 2>/dev/null)
+    or begin
+        command sheaf $argv
+        return
+    end
+    SHEAF_CD_FILE=$tmp command sheaf $argv
+    set -l rc $status
+    set -l dir
+    if test -s $tmp
+        set dir (string collect < $tmp)
+    end
+    rm -f -- $tmp
+    if test $rc -eq 0; and test -n "$dir"
+        cd $dir
+        or return
+    end
+    return $rc
+end
+
+function scd --description 'cd to the output of sheaf path'
     set -l dir (command sheaf path $argv)
     or return $status
     test (count $dir) -eq 1

@@ -1,0 +1,327 @@
+package tui
+
+import (
+	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+)
+
+func ovRows() []Row {
+	return []Row{
+		{Key: "/b/a/main", Cells: []string{"a", "main", "main", "clean"}},
+		{Key: "/b/a/feat-x", Cells: []string{"a", "feat-x", "feat/x", "dirty, behind 1"}},
+		{Key: "/b/bravo/main", Cells: []string{"bravo", "main", "main", "clean"}},
+	}
+}
+
+func ovActions() []OverviewAction {
+	return []OverviewAction{
+		{Key: "enter", Name: "cd", Help: "cd", Scope: ScopeCurrent},
+		{Key: "u", Name: "update", Help: "update", Scope: ScopeRows},
+		{Key: "a", Name: "add", Help: "add worktree", Scope: ScopeCurrent},
+		{Key: "p", Name: "prune", Help: "prune", Scope: ScopeNone},
+		{Key: "r", Name: "remove", Help: "remove worktree", Scope: ScopeRows, Check: func(targets []string) string {
+			for _, k := range targets {
+				if strings.HasSuffix(k, "/main") {
+					return "cannot remove a primary checkout"
+				}
+			}
+			return ""
+		}},
+	}
+}
+
+func newOv() Overview {
+	return NewOverview("sheaf: /b", []string{"REPO", "DIR", "BRANCH", "STATE"}, ovRows(), ovActions())
+}
+
+func asOv(t *testing.T, m tea.Model) Overview {
+	t.Helper()
+	o, ok := m.(Overview)
+	if !ok {
+		t.Fatalf("model is %T, want Overview", m)
+	}
+	return o
+}
+
+func assertChosen(t *testing.T, m tea.Model, name string, targets ...string) {
+	t.Helper()
+	gotName, got := asOv(t, m).Chosen()
+	if gotName != name || !reflect.DeepEqual(got, targets) && (len(got) != 0 || len(targets) != 0) {
+		t.Fatalf("Chosen() = %q %q, want %q %q", gotName, got, name, targets)
+	}
+}
+
+func TestOverviewRendersAlignedTable(t *testing.T) {
+	t.Parallel()
+	v := view(newOv())
+	for _, want := range []string{
+		"sheaf: /b",
+		"      REPO   DIR     BRANCH  STATE",
+		"> [ ] a      main    main    clean",
+		"  [ ] a      feat-x  feat/x  dirty, behind 1",
+		"  [ ] bravo  main    main    clean",
+		"0/3 selected",
+	} {
+		if !hasLine(v, want) {
+			t.Fatalf("view lacks line %q:\n%s", want, v)
+		}
+	}
+	if !strings.Contains(v, "enter cd") || !strings.Contains(v, "u update") || !strings.Contains(v, "q quit") {
+		t.Fatalf("help line lacks the actions:\n%s", v)
+	}
+}
+
+// The help lists every action at the width of a usual terminal: actions
+// cut off by the ellipsis of a single help line would be undiscoverable.
+func TestOverviewHelpShowsEveryActionAt80Columns(t *testing.T) {
+	t.Parallel()
+	actions := append(ovActions(),
+		OverviewAction{Key: "f", Name: "fetch", Help: "fetch"},
+		OverviewAction{Key: "d", Name: "doctor", Help: "doctor", Scope: ScopeNone},
+		OverviewAction{Key: "s", Name: "sync", Help: "sync", Scope: ScopeNone})
+	var m tea.Model = NewOverview("t", []string{"REPO"}, ovRows(), actions)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	v := view(m)
+	for _, a := range actions {
+		if !strings.Contains(v, a.Key+" "+a.Help) {
+			t.Errorf("help lacks %q:\n%s", a.Key+" "+a.Help, v)
+		}
+	}
+	if !strings.Contains(v, "q quit") || strings.Contains(v, "…") {
+		t.Errorf("help cut:\n%s", v)
+	}
+}
+
+func TestOverviewCursorMovesAndActionTargetsCurrentRow(t *testing.T) {
+	t.Parallel()
+	m, _ := press(newOv(), "down", "j", "k")
+	if got := asOv(t, m).CurrentKey(); got != "/b/a/feat-x" {
+		t.Fatalf("CurrentKey() = %q", got)
+	}
+	m, cmd := press(m, "u")
+	if !isQuit(cmd) {
+		t.Fatal("u did not quit")
+	}
+	assertChosen(t, m, "update", "/b/a/feat-x")
+	if asOv(t, m).Cancelled() || asOv(t, m).Interrupted() {
+		t.Fatal("an action is neither a cancellation nor an interruption")
+	}
+	if v := view(m); v != "" {
+		t.Fatalf("final view = %q, want empty (the overview leaves nothing behind)", v)
+	}
+	m, _ = press(m, "down", "q")
+	assertChosen(t, m, "update", "/b/a/feat-x")
+}
+
+func TestOverviewSelectionTargetsSelectedRows(t *testing.T) {
+	t.Parallel()
+	m, _ := press(newOv(), "down", "down", "space", "up", "up", "space")
+	if !hasLine(view(m), "2/3 selected") {
+		t.Fatalf("status:\n%s", view(m))
+	}
+	if !strings.Contains(view(m), "> [x] a ") {
+		t.Fatalf("current row not checked:\n%s", view(m))
+	}
+	m, _ = press(m, "u")
+	assertChosen(t, m, "update", "/b/a/main", "/b/bravo/main")
+}
+
+// Like MultiSelect.SelectedKeys on confirmation, the targets are every
+// selected row, hidden by the filter or not; the status line counts them.
+func TestOverviewSelectedRowsHiddenByFilterAreTargets(t *testing.T) {
+	t.Parallel()
+	m, _ := press(newOv(), "space", "/", "b", "r", "a", "v", "o", "enter", "space")
+	if v := view(m); strings.Contains(v, "feat-x") || !strings.Contains(v, "2/3 selected · 1 shown") {
+		t.Fatalf("view:\n%s", v)
+	}
+	m, _ = press(m, "u")
+	assertChosen(t, m, "update", "/b/a/main", "/b/bravo/main")
+}
+
+func TestOverviewSpaceUntoggles(t *testing.T) {
+	t.Parallel()
+	m, _ := press(newOv(), "space", "space", "down", "u")
+	assertChosen(t, m, "update", "/b/a/feat-x")
+}
+
+func TestOverviewScopeCurrentIgnoresSelection(t *testing.T) {
+	t.Parallel()
+	m, _ := press(newOv(), "space", "down", "enter")
+	assertChosen(t, m, "cd", "/b/a/feat-x")
+	m, _ = press(newOv(), "space", "down", "a")
+	assertChosen(t, m, "add", "/b/a/feat-x")
+}
+
+func TestOverviewScopeNoneHasNoTargets(t *testing.T) {
+	t.Parallel()
+	m, cmd := press(newOv(), "space", "p")
+	if !isQuit(cmd) {
+		t.Fatal("p did not quit")
+	}
+	assertChosen(t, m, "prune")
+}
+
+func TestOverviewQuitKeys(t *testing.T) {
+	t.Parallel()
+	for _, k := range []string{"q", "esc"} {
+		m, cmd := press(newOv(), k)
+		if !isQuit(cmd) || !asOv(t, m).Cancelled() || asOv(t, m).Interrupted() {
+			t.Fatalf("%s: quit=%v cancelled=%v interrupted=%v", k, isQuit(cmd), asOv(t, m).Cancelled(), asOv(t, m).Interrupted())
+		}
+		assertChosen(t, m, "")
+	}
+	m, cmd := press(newOv(), "ctrl+c")
+	if !isQuit(cmd) || !asOv(t, m).Interrupted() {
+		t.Fatalf("ctrl+c: quit=%v interrupted=%v", isQuit(cmd), asOv(t, m).Interrupted())
+	}
+	assertChosen(t, m, "")
+}
+
+func TestOverviewFilterTwoStepEsc(t *testing.T) {
+	t.Parallel()
+	m, _ := press(newOv(), "/", "B", "r")
+	v := view(m)
+	if !hasLine(v, "/Br█") || strings.Contains(v, "feat-x") || !strings.Contains(v, "bravo") {
+		t.Fatalf("filter mode, case-insensitive match on any cell:\n%s", v)
+	}
+	if _, cmd := press(m, "u"); isQuit(cmd) {
+		t.Fatal("a letter typed in filter mode triggered an action")
+	}
+	// enter applies the filter; esc then clears it; esc again quits.
+	m, cmd := press(m, "enter")
+	if isQuit(cmd) || asOv(t, m).Filter() != "Br" || !hasLine(view(m), "/Br") {
+		t.Fatalf("enter must apply the filter:\n%s", view(m))
+	}
+	m, cmd = press(m, "esc")
+	if isQuit(cmd) || asOv(t, m).Filter() != "" || !strings.Contains(view(m), "feat-x") {
+		t.Fatalf("first esc must clear the applied filter:\n%s", view(m))
+	}
+	_, cmd = press(m, "esc")
+	if !isQuit(cmd) {
+		t.Fatal("second esc did not quit")
+	}
+	// esc in filter mode clears the filter and returns to the list.
+	m, _ = press(newOv(), "/", "z", "z", "esc")
+	if asOv(t, m).Filter() != "" || strings.Contains(view(m), "zz") {
+		t.Fatalf("esc in filter mode:\n%s", view(m))
+	}
+	m, _ = press(newOv(), "/", "z", "z", "z", "enter")
+	if !strings.Contains(view(m), "No matches.") {
+		t.Fatalf("no match:\n%s", view(m))
+	}
+	// Filter editing keys.
+	m, _ = press(newOv(), "/", "f", "e", "a", "backspace")
+	if asOv(t, m).Filter() != "fe" {
+		t.Fatalf("backspace: filter %q", asOv(t, m).Filter())
+	}
+	m, _ = press(m, "ctrl+u")
+	if asOv(t, m).Filter() != "" {
+		t.Fatalf("ctrl+u: filter %q", asOv(t, m).Filter())
+	}
+}
+
+func TestOverviewActionOnFilteredRows(t *testing.T) {
+	t.Parallel()
+	m, _ := press(newOv(), "/", "f", "e", "a", "t", "enter", "u")
+	assertChosen(t, m, "update", "/b/a/feat-x")
+	// No visible row: an action needing one is refused.
+	m, cmd := press(newOv(), "/", "z", "z", "enter", "u")
+	if isQuit(cmd) {
+		t.Fatal("u quit without any row")
+	}
+	assertChosen(t, m, "")
+	if !strings.Contains(view(m), "no row") {
+		t.Fatalf("refusal not displayed:\n%s", view(m))
+	}
+	// A bundle-wide action does not need a row.
+	_, cmd = press(m, "p")
+	if !isQuit(cmd) {
+		t.Fatal("p refused without rows")
+	}
+}
+
+func TestOverviewCheckRefusesWithMessage(t *testing.T) {
+	t.Parallel()
+	m, cmd := press(newOv(), "r")
+	if isQuit(cmd) {
+		t.Fatal("refused action quit")
+	}
+	assertChosen(t, m, "")
+	if !strings.Contains(view(m), "cannot remove a primary checkout") {
+		t.Fatalf("refusal not displayed:\n%s", view(m))
+	}
+	m, cmd = press(m, "down", "r")
+	if !isQuit(cmd) {
+		t.Fatal("accepted action did not quit")
+	}
+	assertChosen(t, m, "remove", "/b/a/feat-x")
+}
+
+func TestOverviewWithMessageCursorAndFilter(t *testing.T) {
+	t.Parallel()
+	m := newOv().WithMessage("update: 1 fast-forwarded").WithCursor("/b/bravo/main")
+	v := view(m)
+	if !hasLine(v, "update: 1 fast-forwarded") || !strings.Contains(v, "> [ ] bravo") {
+		t.Fatalf("message or cursor:\n%s", v)
+	}
+	m = newOv().WithFilter("feat")
+	if v := view(m); strings.Contains(v, "bravo") || !hasLine(v, "/feat") {
+		t.Fatalf("filter:\n%s", v)
+	}
+	// A cursor key that is not visible keeps the first row.
+	if got := newOv().WithCursor("/nope").CurrentKey(); got != "/b/a/main" {
+		t.Fatalf("CurrentKey() = %q", got)
+	}
+}
+
+func TestOverviewScrollsToFitHeight(t *testing.T) {
+	t.Parallel()
+	var rows []Row
+	for i := range 30 {
+		rows = append(rows, Row{Key: fmt.Sprint(i), Cells: []string{fmt.Sprintf("r%02d", i), "main"}})
+	}
+	var m tea.Model = NewOverview("t", []string{"REPO", "DIR"}, rows, ovActions())
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	if n := lineCount(view(m)); n > 10 {
+		t.Fatalf("view has %d lines for a height of 10:\n%s", n, view(m))
+	}
+	m, _ = press(m, "end")
+	v := view(m)
+	if !strings.Contains(v, "> [ ] r29") || !strings.Contains(v, "of 30") {
+		t.Fatalf("end:\n%s", v)
+	}
+	if n := lineCount(v); n > 10 {
+		t.Fatalf("view has %d lines for a height of 10", n)
+	}
+}
+
+func TestOverviewIgnoresMultiRuneKeysAndPastesInList(t *testing.T) {
+	t.Parallel()
+	m, cmd := newOv().Update(keyMsg("uq"))
+	if isQuit(cmd) {
+		t.Fatal("a multi-rune key event triggered an action")
+	}
+	m, cmd = m.Update(paste("r"))
+	if isQuit(cmd) {
+		t.Fatal("a paste triggered an action")
+	}
+	assertChosen(t, m, "")
+	// In filter mode a paste edits the filter.
+	m, _ = press(newOv(), "/")
+	m, _ = m.Update(paste("fe\nat"))
+	if asOv(t, m).Filter() != "feat" {
+		t.Fatalf("pasted filter = %q", asOv(t, m).Filter())
+	}
+}
+
+func TestOverviewSanitizesCells(t *testing.T) {
+	t.Parallel()
+	rows := []Row{{Key: "k", Cells: []string{"a" + injectedSGR + "b", "x\ny"}}}
+	m := NewOverview("t\x1b[2J", []string{"REPO", "DIR"}, rows, nil).WithMessage("m\x07")
+	assertNoInjectedSGR(t, m)
+	assertNoControlChars(t, view(m))
+}
