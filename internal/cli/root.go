@@ -5,12 +5,15 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"runtime/debug"
 
 	"github.com/spf13/cobra"
 )
 
 // Version is the sheaf version; override with
-// -ldflags "-X github.com/jponge/sheaf/internal/cli.Version=...".
+// -ldflags "-X github.com/jponge/sheaf/internal/cli.Version=...". When it is
+// not overridden, `sheaf version` falls back to the build information Go
+// records (see versionString).
 var Version = "dev"
 
 // Streams groups the standard streams used by commands.
@@ -82,7 +85,8 @@ func newVersionCmd() *cobra.Command {
 		Short: "Print the sheaf version",
 		Args:  cobra.NoArgs,
 		Run: func(c *cobra.Command, _ []string) {
-			fmt.Fprintln(c.OutOrStdout(), Version)
+			bi, _ := debug.ReadBuildInfo()
+			fmt.Fprintln(c.OutOrStdout(), versionString(Version, bi))
 		},
 	}
 }
@@ -128,4 +132,35 @@ func executeOn(goos string, args []string, s Streams) int {
 		return os.Getenv(k)
 	}
 	return execute(NewRootCmdWithDeps(s, Deps{Getenv: getenv}), args)
+}
+
+// versionString returns the version to print: stamped (Version) when set at
+// build time, else the module version Go recorded in bi (`go install
+// ...@v1.2.3`, or a pseudo-version for a build in a git checkout), else
+// "dev" with the commit when recorded. bi may be nil.
+func versionString(stamped string, bi *debug.BuildInfo) string {
+	if stamped != "dev" || bi == nil {
+		return stamped
+	}
+	if v := bi.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+	var rev string
+	var modified bool
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			modified = s.Value == "true"
+		}
+	}
+	if rev == "" {
+		return stamped
+	}
+	rev = rev[:min(12, len(rev))]
+	if modified {
+		rev += "-dirty"
+	}
+	return stamped + " (" + rev + ")"
 }

@@ -121,7 +121,9 @@ func sheafBinary(t *testing.T) string {
 	}
 	dir := filepath.Join(testutil.ProcessTempDir(t), "sheaf-bin")
 	sheafBin.once.Do(func() {
-		cmd := exec.Command("go", "build", "-o", filepath.Join(dir, "sheaf"), "github.com/jponge/sheaf/cmd/sheaf")
+		// -buildvcs=false: `sheaf version` prints "dev" whatever the state of
+		// the checkout the tests run in (see versionString).
+		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", filepath.Join(dir, "sheaf"), "github.com/jponge/sheaf/cmd/sheaf")
 		cmd.Env = testutil.ToolchainEnv()
 		sheafBin.out, sheafBin.err = cmd.CombinedOutput()
 		sheafBin.dir = dir

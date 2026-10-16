@@ -45,16 +45,16 @@ From a clone of this repository:
 
 ```sh
 make build VERSION=v0.1.0      # writes bin/sheaf, version stamped
-go install ./cmd/sheaf         # installs into $(go env GOBIN) or $(go env GOPATH)/bin
+make install VERSION=v0.1.0    # installs into $(go env GOBIN) or $(go env GOPATH)/bin
+go install ./cmd/sheaf         # same, without stamping
 ```
 
-`sheaf version` prints the version given to `make build` through
-`-ldflags "-X github.com/jponge/sheaf/internal/cli.Version=..."`; any other
-build (including plain `go install`) prints `dev`. To stamp a `go install`:
-
-```sh
-go install -ldflags "-X github.com/jponge/sheaf/internal/cli.Version=v0.1.0" ./cmd/sheaf
-```
+`sheaf version` prints the version given through `VERSION=` (that is,
+`-ldflags "-X github.com/jponge/sheaf/internal/cli.Version=..."`). Without
+one, it prints the version Go recorded in the binary: the module version for
+`go install <module>/cmd/sheaf@<version>`, a pseudo-version (commit, `+dirty`
+for uncommitted changes) for a build in a git checkout, and otherwise `dev`,
+followed by the commit when known.
 
 Then set up the [shell integration](#shell-integration) and run
 `sheaf doctor` inside a bundle to check git, gh and the bundle.
@@ -415,6 +415,11 @@ This defines:
 
 The fish functions need fish 3.1 or later. zsh completion of `scd` needs
 `compinit` to have run before.
+
+Known limits of bash `scd` completion: completing inside an open single
+quote a candidate that itself contains a single quote, words quoted as
+`$'…'`, and `!` inside double quotes (history expansion) are not handled.
+Complete such names without quotes, or type them in full.
 
 ### Completion
 

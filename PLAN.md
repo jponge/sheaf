@@ -201,9 +201,9 @@ What to do differently
 | B7 | Dogfooding on the user's Mac (real bundles, GitHub error texts, ssh prompts, terminal emulator, macOS fish/zsh) | later, user-driven |
 | B8 | Release packaging (GoReleaser/Homebrew: new tool, needs approval) | later |
 | B9 | Housekeeping: goals.md, cobra-fish-issue.md (file upstream, then delete) | user |
-| B10 | Remaining bash scd completion gaps (single quote inside open single quote, `$'…'`, `!` in double quotes); cobra zsh open-quote (upstream); fish < 3.7 `-o` fallback untested | later |
-| B11 | `sheaf version` falls back to Go build info (go install builds print `dev` today); Makefile `install` target | later (from README review) |
-| B12 | Warn on git older than 2.36 in every command, not only doctor | later (from README review) |
+| B10 | Remaining bash scd completion gaps (single quote inside open single quote, `$'…'`, `!` in double quotes); cobra zsh open-quote (upstream); fish < 3.7 `-o` fallback untested | decided 2026-10-16 (user): documented as known limits in README |
+| B11 | `sheaf version` falls back to Go build info (go install builds print `dev` today); Makefile `install` target | done: build-info fallback + make install |
+| B12 | Warn on git older than 2.36 in every command, not only doctor | decided 2026-10-16 (user): leave as is (doctor only) |
 | B13 | `wt pr` on an existing, not checked-out pr/<n> fetches under .sheaf.lock with interactive git: fetch before locking | done (cf624f3) |
 | B14 | Root `--help` does not mention the home screen (kept byte-identical by decision) | done (a4a8745) |
 | B15 | Check that all Go dependencies are on their latest stable versions; upgrade (user: latest stable OK) | done: yaml v3.0.5, x/sys v0.49.0, x/sync v0.24.0, pflag v1.0.10, terminfo v1.2.0, runewidth v0.0.31; Charm, cobra, x/ansi, x/term, colorprofile already latest; ultraviolet at main head (no tags) |

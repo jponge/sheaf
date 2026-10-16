@@ -1,10 +1,14 @@
 VERSION ?= dev
 LDFLAGS := -X github.com/jponge/sheaf/internal/cli.Version=$(VERSION)
 
-.PHONY: build test test-shells test-symlinked-tmp vet
+.PHONY: build install test test-shells test-symlinked-tmp vet
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/sheaf ./cmd/sheaf
+
+# Installs sheaf into $GOBIN (default: $(go env GOPATH)/bin).
+install:
+	go install -ldflags "$(LDFLAGS)" ./cmd/sheaf
 
 test:
 	go test -race ./...
