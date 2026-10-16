@@ -30,8 +30,8 @@ internal/gitx/        thin exec wrapper over git: clone, default branch, status 
                       refspecs), fast-forward of a checkout to its upstream after the fetch (merge --ff-only),
                       deletion risks, per-command query cache
 internal/hosting/     interface Hosting { ListRepos, Repo, PR, CurrentUser, ListForks }; gh CLI impl (gh repo
-                      list/view --json, gh api user); in-memory Fake for tests (fake.go: a production file of
-                      the package, used only by tests; the linker drops it from the sheaf binary)
+                      list/view --json, gh api user); in-memory Fake for tests in the subpackage
+                      hosting/hostingtest (like net/http/httptest)
 internal/ops/         use cases, UI-agnostic; emit progress events (repo, worktree, phase, message, error) on a channel;
                       bounded-parallel executor (-j N, default NumCPU)
 internal/tui/         bubbletea models: multi-select (filter, select all/none), progress view over ops events, confirm dialog
@@ -209,6 +209,7 @@ What to do differently
 | B15 | Check that all Go dependencies are on their latest stable versions; upgrade (user: latest stable OK) | done: yaml v3.0.5, x/sys v0.49.0, x/sync v0.24.0, pflag v1.0.10, terminfo v1.2.0, runewidth v0.0.31; Charm, cobra, x/ansi, x/term, colorprofile already latest; ultraviolet at main head (no tags) |
 | B16 | License | done: Apache-2.0, "Copyright 2026 The sheaf Authors" (user, 2026-10-16) |
 | B17 | Idiomatic Go review (2026-10-16, golangci-lint 2.14 + AST scripts; gofmt/vet clean). HIGH: `co` prefix as namespace (93 identifiers, 43 files; leaked into the error text "coCommands killed on request", checkout_run.go:306); behaviour switches in context values (WithInteractive, WithFreshReads, interrupt controller). MEDIUM: ~17 package-level test hooks in production; over-wide exports in internal packages (~15-20 funcs/consts); hosting.Fake in production package (→ hostingtest); review-round names in test files (23) and comments; %v for secondary errors (14); triplicated resolves-to-itself guard. LOW: coJson* initialisms, cache.lookup error-in-middle, const doc comments, ctx in structs (2), shadowed max, gitx: prefix inconsistency, modernize (~15 production sites), long functions, 2 unparam | user chose all four groups (2026-10-16); order: defect+small items → drop co prefix → test file names + hostingtest → hooks and context switches (adversarial review) |
+| B18 | Select all / deselect all in every TUI list (user report: the home screen overview has none) | decided 2026-10-16 (user): `a` = all, `n` = none everywhere, applying to the visible (filtered) rows like the menus; the overview's add worktree moves from `a` to `w` |
 
 Order for the high-priority items: B3 → B6 (review sees the merged code) → B2 → B1 (docs describe the final behaviour).
 - Decisions 2026-10-16 (user) for B2: bare `sheaf` in a bundle with a TTY opens an overview (checkouts table from local status, no network at open; multi-select, filter) with actions update/fetch/wt add/wt rm/prune/doctor/sync reusing the per-command TUIs and returning to the overview; enter on a row cds there through the shell-init wrapper (prints the path without it). Outside a bundle: help plus a create/init hint. --no-tui or non-TTY: help, unchanged.
