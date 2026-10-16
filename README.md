@@ -557,7 +557,7 @@ These commands accept `--json`; each document has a `"version": 1` field.
 ## Platform support
 
 - Linux and macOS: tested.
-- Windows: the code builds, but Windows is not supported and untested.
+- Windows: not supported. The code builds, but `sheaf` refuses to run there (exit 1): it relies on Unix process groups, signals and file locks.
 
 ## Development
 

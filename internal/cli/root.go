@@ -35,8 +35,14 @@ func NewRootCmd(s Streams) *cobra.Command { return NewRootCmdWithDeps(s, Deps{})
 // (tests inject a fake hosting service and working directory).
 func NewRootCmdWithDeps(s Streams, d Deps) *cobra.Command {
 	root := &cobra.Command{
-		Use:           "sheaf",
-		Short:         "Manage git repository checkouts and worktrees in a bundle",
+		Use:   "sheaf",
+		Short: "Manage git repository checkouts and worktrees in a bundle",
+		Long: `Manage git repository checkouts and worktrees in a bundle.
+
+Without a command, inside a bundle and with a terminal, sheaf opens its
+home screen: an overview of the bundle's checkouts with actions (update,
+fetch, add and remove worktrees, prune, doctor, sync). Without a terminal
+or with --no-tui, it prints this help.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(c *cobra.Command, _ []string) error {
@@ -95,7 +101,24 @@ func OptionsFrom(c *cobra.Command) Options {
 // (see execute). SHEAF_CD_FILE (see runHome) is read, then removed from the
 // environment before anything runs: the processes sheaf starts (commands of
 // `sheaf run`, git and its hooks) must not be able to write that file.
-func Execute(args []string, s Streams) int {
+func Execute(args []string, s Streams) int { return executeOn("", args, s) }
+
+// executeOn is Execute for the operating system goos (runtime.GOOS when
+// empty). Windows is not supported: sheaf relies on Unix process groups,
+// signals and file locks there, so it refuses to run rather than run with
+// those safeguards missing.
+func executeOn(goos string, args []string, s Streams) int {
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	if goos == "windows" {
+		errw := s.Err
+		if errw == nil {
+			errw = os.Stderr
+		}
+		fmt.Fprintln(errw, "sheaf: Windows is not supported; use Linux or macOS")
+		return 1
+	}
 	cdFile := os.Getenv(cdFileVar)
 	_ = os.Unsetenv(cdFileVar)
 	getenv := func(k string) string {

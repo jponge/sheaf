@@ -117,3 +117,33 @@ func TestJobsMustBePositive(t *testing.T) {
 		t.Errorf("-j 1: %v", err)
 	}
 }
+
+func TestRootHelpDescribesTheHomeScreen(t *testing.T) {
+	t.Parallel()
+	out, _, err := run(t, "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Manage git repository checkouts and worktrees in a bundle", "home screen", "--no-tui"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sheaf --help lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestWindowsIsRefusedAtStartup(t *testing.T) {
+	t.Parallel()
+	for _, goos := range []string{"windows", "linux", "darwin"} {
+		var out, errb bytes.Buffer
+		code := executeOn(goos, []string{"version"}, Streams{In: strings.NewReader(""), Out: &out, Err: &errb})
+		if goos == "windows" {
+			if code != 1 || out.Len() != 0 || !strings.Contains(errb.String(), "Windows is not supported") {
+				t.Errorf("%s: exit %d, stdout %q, stderr %q; want exit 1, no output, a refusal", goos, code, out.String(), errb.String())
+			}
+			continue
+		}
+		if code != 0 || strings.TrimSpace(out.String()) != Version {
+			t.Errorf("%s: exit %d, stdout %q, stderr %q", goos, code, out.String(), errb.String())
+		}
+	}
+}
