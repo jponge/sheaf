@@ -74,12 +74,12 @@ func coFetchSets(ctx context.Context, sets []*coRepoCheckouts, jobs int, report 
 			return
 		}
 		report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindStart})
-		if err := coFetchRepo(ctx, s.primary); err != nil {
+		if err := coFetchRepo(ctx, s.primary, s.remotes); err != nil {
 			probs[i] = &Problem{Repo: s.name, Path: s.primary, Err: fmt.Errorf("fetch failed: %w", err)}
 			report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindFailed, Err: err})
 			return
 		}
-		report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindDone, Message: "fetched origin"})
+		report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindDone, Message: "fetched " + s.remotes.String()})
 	})
 	var out []Problem
 	for _, p := range probs {

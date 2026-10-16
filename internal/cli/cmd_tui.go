@@ -237,7 +237,7 @@ func tuiPrune(c *cobra.Command, w *ops.Workspace, opts ops.PruneOptions, yes boo
 // to exclude from future syncs, confirms removals, and applies the choices
 // like --exclude, --add-new and --remove-gone --yes (never --force nor
 // --allow-mass-removal: such refusals are displayed as failures).
-func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport) error {
+func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noFork bool) error {
 	s := newTUISession(c)
 	out := c.OutOrStdout()
 	if len(rep.Proposals) == 0 {
@@ -309,7 +309,7 @@ func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport) err
 	var addSum, rmSum ops.Summary
 	s.progress("Syncing", progressOpts{}, func(ctx context.Context, r ops.Reporter, _ askFunc) {
 		if len(add) > 0 {
-			addSum = ops.SyncAddNew(ctx, w, add, jobs, r)
+			addSum = ops.SyncAddNewWithOptions(ctx, w, add, ops.CloneOptions{Hosting: d.hosting(), NoFork: noFork}, jobs, r)
 		}
 		if len(gone) > 0 {
 			opts := ops.SyncRemoveOptions{Remove: ops.RemoveOptions{WorkingDir: wd, Confirm: func(ops.RemovePlan) bool { return true }}}

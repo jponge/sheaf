@@ -127,6 +127,10 @@ type WorktreeAddOpts struct {
 	// refs/remotes/origin/HEAD; WorktreeAdd fails with ErrNoDefaultBranch when
 	// that ref is missing (it never asks the remote).
 	Base string
+	// Remotes are the remotes searched, in order, for an existing
+	// refs/remotes/<remote>/<branch> (WorktreeRemoteBranch); default
+	// ["origin"].
+	Remotes []string
 }
 
 // WorktreeAddResult is the result of WorktreeAdd.
@@ -156,7 +160,8 @@ var ErrBaseNotFound = errors.New("gitx: base not found")
 //
 //   - refs/heads/<branch> exists: it is checked out (git refuses if it is
 //     already checked out in another worktree), whatever its upstream;
-//   - refs/remotes/origin/<branch> exists: a local branch tracking it is
+//   - refs/remotes/<remote>/<branch> exists for a remote of opts.Remotes
+//     (default origin), in that order: a local branch tracking it is
 //     created;
 //   - otherwise a new branch is created from opts.Base with no upstream
 //     (--no-track), so a later pull never merges the base into it.
@@ -184,7 +189,7 @@ func WorktreeAdd(ctx context.Context, repoDir, path, branch string, opts Worktre
 	if err != nil {
 		return WorktreeAddResult{}, err
 	}
-	mode, args, err := worktreeAddArgs(ctx, repoDir, path, branch, opts.Base, local)
+	mode, args, err := worktreeAddArgs(ctx, repoDir, path, branch, opts.Base, opts.Remotes, local)
 	if err != nil {
 		return WorktreeAddResult{}, err
 	}
@@ -229,16 +234,16 @@ func WorktreeAdd(ctx context.Context, repoDir, path, branch string, opts Worktre
 }
 
 // worktreeAddArgs chooses the mode and the `git worktree add` arguments.
-func worktreeAddArgs(ctx context.Context, repoDir, path, branch, base string, local bool) (WorktreeAddMode, []string, error) {
+func worktreeAddArgs(ctx context.Context, repoDir, path, branch, base string, remotes []string, local bool) (WorktreeAddMode, []string, error) {
 	if local {
 		return WorktreeLocalBranch, []string{"--", path, branch}, nil
 	}
-	remote, err := refExists(ctx, repoDir, "refs/remotes/origin/"+branch)
+	remote, err := remoteBranchRef(ctx, repoDir, branch, remotes)
 	if err != nil {
 		return 0, nil, err
 	}
-	if remote {
-		return WorktreeRemoteBranch, []string{"--track", "-b", branch, "--", path, "origin/" + branch}, nil
+	if remote != "" {
+		return WorktreeRemoteBranch, []string{"--track", "-b", branch, "--", path, remote + "/" + branch}, nil
 	}
 	if base == "" {
 		def, err := localDefaultBranch(ctx, repoDir)

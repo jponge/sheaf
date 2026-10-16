@@ -45,6 +45,18 @@ type PR struct {
 	URL               string
 }
 
+// Fork is a repository forked by the user, with the repository it was
+// forked from (its parent). The hosting service gives the parent's owner and
+// name only (no URL).
+type Fork struct {
+	Repo
+	ParentOwner string
+	ParentName  string
+}
+
+// ParentSlug returns "owner/name" of the parent.
+func (f Fork) ParentSlug() string { return f.ParentOwner + "/" + f.ParentName }
+
 // badChars reports whether s contains '/', whitespace or control characters.
 func badChars(s string) bool {
 	return strings.ContainsFunc(s, func(r rune) bool {
@@ -94,4 +106,9 @@ type Hosting interface {
 	ListRepos(ctx context.Context, owner string) ([]Repo, error)
 	Repo(ctx context.Context, owner, name string) (Repo, error)
 	PR(ctx context.Context, owner, name string, number int) (PR, error)
+	// CurrentUser returns the login of the authenticated user.
+	CurrentUser(ctx context.Context) (string, error)
+	// ListForks lists the forks owned by owner, with their parents.
+	// Repositories without a known parent are left out.
+	ListForks(ctx context.Context, owner string) ([]Fork, error)
 }

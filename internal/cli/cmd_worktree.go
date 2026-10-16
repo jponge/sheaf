@@ -93,7 +93,8 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 		Short: "Create a worktree for a branch or a tag and print its path",
 		Long: "Create <bundle>/<repo>/<normalized branch>/ for branch: the local branch if it\n" +
 			"exists, else a local branch tracking origin/<branch>, else a new branch from --base\n" +
-			"(default origin/<default branch>). origin is fetched first unless --no-fetch.\n" +
+			"(default origin/<default branch>, upstream/<default branch> for a clone of your\n" +
+			"fork). origin is fetched first unless --no-fetch.\n" +
 			"A base that does not exist is reported with the closest remote branches and tags.\n" +
 			"A name that is only a tag (no local or origin branch; origin's tags are fetched\n" +
 			"for this check unless --no-fetch) is refused: use --tag. So a new branch named\n" +
@@ -104,6 +105,9 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 			"nor overwritten: a local tag that differs from origin's is kept, with a warning\n" +
 			"(and used, if it is the requested one). The only positional argument is then\n" +
 			"the repository.\n\n" +
+			"For a repository cloned from your fork, upstream (the repository) and origin (your\n" +
+			"fork) are both fetched, existing branches are looked up on origin then upstream,\n" +
+			"new branches start from upstream/<default branch> and tags come from upstream.\n\n" +
 			"The path is printed on stdout (cd \"$(sheaf wt add feat/x)\"); progress goes to stderr.\n\n" +
 			singleArgHelp,
 		Args: func(c *cobra.Command, args []string) error {
@@ -144,8 +148,8 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&opts.Base, "base", "", "start point of a new branch (default: origin/<default branch>)")
-	cmd.Flags().BoolVar(&opts.NoFetch, "no-fetch", false, "do not fetch origin first")
+	cmd.Flags().StringVar(&opts.Base, "base", "", "start point of a new branch (default: origin/<default branch>, or upstream/<default branch> for a clone of your fork)")
+	cmd.Flags().BoolVar(&opts.NoFetch, "no-fetch", false, "do not fetch the repository's remotes first")
 	cmd.Flags().StringVar(&tag, "tag", "", "create a detached worktree pinned at this tag instead of a branch worktree")
 	return cmd
 }
@@ -306,9 +310,12 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 			"origin is fetched first (unless --offline);\n" +
 			"uncommitted changes, untracked files or commits only on a detached HEAD refuse the\n" +
 			"removal unless --force (like git worktree remove --force). -d deletes the local\n" +
-			"branch too, only if merged into its upstream or origin/<default branch>; -D deletes\n" +
-			"it even if unmerged (like git branch -d/-D); neither applies to a tag worktree (the\n" +
-			"tag is always kept). The primary checkout cannot be removed\n" +
+			"branch too, only if merged into its own upstream or into origin/<default branch>\n" +
+			"(upstream/<default branch> for a clone of your fork), or contained in another ref;\n" +
+			"-D deletes it even if unmerged (like git branch -d/-D); neither applies to a tag\n" +
+			"worktree (the tag is always kept). For a clone of your fork both remotes are\n" +
+			"fetched; when your fork is gone, or with --offline, its remote-tracking refs are\n" +
+			"not trusted (not pushed, not a merge target). The primary checkout cannot be removed\n" +
 			"(use `sheaf remove`). In CLI mode the removal must be confirmed with --yes; in TUI\n" +
 			"mode a dialog shows the plan and asks for confirmation, unless --yes is given.\n\n" +
 			singleArgHelp,
@@ -450,7 +457,9 @@ func newWorktreePRCmd(d Deps) *cobra.Command {
 	return &cobra.Command{
 		Use:   "pr [<repo>] <number>",
 		Short: "Check out a GitHub pull request in a worktree and print its path",
-		Long: "Resolve the pull request with gh (GitHub repositories only) and fetch origin.\n" +
+		Long: "Resolve the pull request with gh (GitHub repositories only) and fetch origin\n" +
+			"(for a clone of your fork: resolved against upstream, heads of your fork tracked\n" +
+			"from origin, other heads and pull refs from upstream).\n" +
 			"A pull request from a branch of the repository is checked out like `sheaf wt add\n" +
 			"<head branch>`. A pull request from a fork (or whose head branch was deleted) is\n" +
 			"fetched from refs/pull/<number>/head into the local branch pr/<number>, at\n" +

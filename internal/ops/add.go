@@ -26,6 +26,9 @@ type AddRequest struct {
 	Repos []string
 	// IncludeArchived makes archived repositories of Org eligible.
 	IncludeArchived bool
+	// NoFork disables fork detection: each repository is cloned as the
+	// single remote origin even when the user has a fork of it.
+	NoFork bool
 }
 
 func (r AddRequest) validate() error {
@@ -154,7 +157,11 @@ func Add(ctx context.Context, w *Workspace, h hosting.Hosting, req AddRequest, j
 			specs = append(specs, lookup{label: s, repo: r, err: err})
 		}
 	}
-	sum := Execute(ctx, jobs, planClones(w, specs, req.As, origin, source), rep)
+	var forks forkIndex
+	if !req.NoFork {
+		forks = detectForks(ctx, h, clonable(w.Bundle(), specs), rep)
+	}
+	sum := Execute(ctx, jobs, planClones(w, specs, req.As, origin, source, forks), rep)
 	// Successful clones recorded the source with their entry. Nothing was
 	// cloned: track the organization anyway when nothing failed either (an
 	// empty organization selected with All, or everything already present).
@@ -248,7 +255,7 @@ func skippedTask(repo, reason string) Task {
 
 // planClones turns lookups into tasks, checking names against the bundle and
 // against each other (case-insensitively, like the bundle does).
-func planClones(w *Workspace, specs []lookup, as, origin, source string) []Task {
+func planClones(w *Workspace, specs []lookup, as, origin, source string, forks forkIndex) []Task {
 	b := w.Bundle()
 	taken := map[string]bool{}
 	for _, r := range b.Repositories {
@@ -292,6 +299,9 @@ func planClones(w *Workspace, specs []lookup, as, origin, source string) []Task 
 		}
 		taken[strings.ToLower(name)] = true
 		entry := bundle.Repository{Name: name, Slug: r.Slug(), URL: r.CloneURL, DefaultBranch: r.DefaultBranch, Origin: origin}
+		if fk, ok := forks[strings.ToLower(r.Slug())]; ok {
+			entry.Fork = bundle.Fork{Slug: fk.Slug(), URL: fk.CloneURL}
+		}
 		tasks = append(tasks, Task{Repo: name, Phase: PhaseClone, Run: func(ctx context.Context, emit func(Event)) (string, error) {
 			return cloneRepo(ctx, w, entry, branchDir, source, emit)
 		}})
@@ -349,8 +359,17 @@ func cloneRepo(ctx context.Context, w *Workspace, entry bundle.Repository, branc
 		return "", err
 	}
 	dest := filepath.Join(repoDir, branchDir)
-	emit(Event{Message: "cloning " + entry.URL + " into " + dest})
-	err := gitx.Clone(ctx, entry.URL, dest, entry.DefaultBranch)
+	var err error
+	if entry.Forked() {
+		emit(Event{Message: fmt.Sprintf("using your fork %s as origin and %s as upstream", entry.Fork.Slug, entry.Slug)})
+		emit(Event{Message: "cloning " + entry.URL + " (upstream) and " + entry.Fork.URL + " (origin) into " + dest})
+		if err = gitx.CloneFork(ctx, entry.URL, entry.Fork.URL, dest, entry.DefaultBranch); err != nil && ctx.Err() == nil {
+			err = fmt.Errorf("%w (to clone %s without your fork, pass --no-fork)", err, entry.Slug)
+		}
+	} else {
+		emit(Event{Message: "cloning " + entry.URL + " into " + dest})
+		err = gitx.Clone(ctx, entry.URL, dest, entry.DefaultBranch)
+	}
 	if err == nil {
 		err = w.updateCtx(ctx, emit, func(b *bundle.Bundle) error {
 			if source != "" {
@@ -367,7 +386,77 @@ func cloneRepo(ctx context.Context, w *Workspace, entry bundle.Repository, branc
 		}
 		return "", err
 	}
+	if entry.Forked() {
+		return fmt.Sprintf("cloned into %s (origin: your fork %s, upstream: %s)", dest, entry.Fork.Slug, entry.Slug), nil
+	}
 	return "cloned into " + dest, nil
+}
+
+// forkIndex maps the lower-case slugs of reference repositories to the
+// user's forks of them.
+type forkIndex map[string]hosting.Fork
+
+// PhaseForks is the phase of the events about fork detection.
+const PhaseForks = "forks"
+
+// clonable returns the repositories of specs that planClones would clone
+// (looked up, not in the bundle, not empty).
+func clonable(b *bundle.Bundle, specs []lookup) []hosting.Repo {
+	var out []hosting.Repo
+	for _, s := range specs {
+		if s.err == nil && s.repo.DefaultBranch != "" && inBundle(b, s.repo.Slug()) == nil {
+			out = append(out, s.repo)
+		}
+	}
+	return out
+}
+
+// detectForks looks up the user's forks with one listing (h.CurrentUser,
+// then h.ListForks) when repos is not empty, and indexes those whose parent
+// is one of repos, matched by the parent's owner/name case-insensitively
+// (forks may be renamed). A failure is reported as a warning and yields no
+// fork: adding never fails because of fork detection. A possibly truncated
+// listing is used as is, with a warning.
+func detectForks(ctx context.Context, h hosting.Hosting, repos []hosting.Repo, rep Reporter) forkIndex {
+	if len(repos) == 0 || h == nil {
+		return nil
+	}
+	if rep == nil {
+		rep = Discard
+	}
+	warn := func(msg string) {
+		rep.Report(Event{Repo: PhaseForks, Phase: PhaseResolve, Kind: KindProgress, Message: "warning: " + msg})
+	}
+	login, err := h.CurrentUser(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			warn("cannot look up your forks (cloning without them): " + err.Error())
+		}
+		return nil
+	}
+	forks, err := h.ListForks(ctx, login)
+	if errors.Is(err, hosting.ErrPossiblyTruncated) {
+		warn("your list of forks may be incomplete: " + err.Error())
+	} else if err != nil {
+		if ctx.Err() == nil {
+			warn("cannot look up your forks (cloning without them): " + err.Error())
+		}
+		return nil
+	}
+	want := map[string]bool{}
+	for _, r := range repos {
+		want[strings.ToLower(r.Slug())] = true
+	}
+	idx := forkIndex{}
+	for _, fk := range forks {
+		k := strings.ToLower(fk.ParentSlug())
+		if want[k] && fk.CloneURL != "" && !strings.EqualFold(fk.Slug(), fk.ParentSlug()) {
+			if _, dup := idx[k]; !dup {
+				idx[k] = fk
+			}
+		}
+	}
+	return idx
 }
 
 // InBundle reports whether Add would skip the GitHub repository slug

@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -89,7 +90,7 @@ func Adopt(ctx context.Context, w *Workspace, dir string, opts AdoptOptions, emi
 			return "", fmt.Errorf("cannot adopt %s: neither a plain clone nor a laid-out repository: %w", dir, err)
 		}
 	}
-	entry, err := describeCheckout(ctx, checkout, name, opts.DefaultBranch, opts.Host)
+	entry, warnings, err := describeCheckout(ctx, checkout, name, opts.DefaultBranch, opts.Host)
 	if err != nil {
 		return "", fmt.Errorf("cannot adopt %s: %w", dir, err)
 	}
@@ -104,7 +105,19 @@ func Adopt(ctx context.Context, w *Workspace, dir string, opts AdoptOptions, emi
 	register := func() error {
 		return w.updateCtx(ctx, emit, func(b *bundle.Bundle) error { return b.AddRepository(entry) })
 	}
-	return adoptCheckout(ctx, w.Root, layout{plain: plain, dir: dir, checkout: checkout}, entry, register, emit)
+	for _, m := range warnings {
+		emit(Event{Message: "warning: " + m})
+	}
+	msg, err := adoptCheckout(ctx, w.Root, layout{plain: plain, dir: dir, checkout: checkout}, entry, register, emit)
+	if err != nil || !entry.Forked() {
+		return msg, err
+	}
+	if defDir, nerr := bundle.NormalizeBranch(entry.DefaultBranch); nerr == nil {
+		checkDefaultTracking(ctx, filepath.Join(dir, defDir), entry, gitx.ForkRemotes, func(m, hint string) {
+			emit(Event{Message: "warning: " + m + "; fix: " + hint})
+		})
+	}
+	return msg + fmt.Sprintf("; recorded as a fork of %s (origin = your fork)", entry.Slug), nil
 }
 
 // laidOutPlausible accepts checkout, the single primary checkout found in
@@ -123,10 +136,12 @@ func laidOutPlausible(ctx context.Context, dir, checkout, def string) error {
 	if cur, err := gitx.CurrentBranch(ctx, checkout); err == nil && matches(cur) {
 		return nil
 	}
-	if u, err := gitx.RemoteURL(ctx, checkout, "origin"); err == nil {
-		if _, slug, err := ParseRemoteURL(u); err == nil {
-			if _, repo, _ := strings.Cut(slug, "/"); strings.EqualFold(repo, filepath.Base(dir)) {
-				return nil
+	for _, remote := range gitx.ForkRemotes.All() { // upstream, origin
+		if u, err := gitx.RemoteURL(ctx, checkout, remote); err == nil {
+			if _, slug, err := ParseRemoteURL(u); err == nil {
+				if _, repo, _ := strings.Cut(slug, "/"); strings.EqualFold(repo, filepath.Base(dir)) {
+					return nil
+				}
 			}
 		}
 	}
@@ -287,15 +302,98 @@ func adoptTarget(w *Workspace, dir string) (string, string, error) {
 	return filepath.Join(w.Root, name), name, nil
 }
 
-// describeCheckout builds the bundle entry of the checkout from its origin.
-func describeCheckout(ctx context.Context, checkout, name, defaultBranch, hostOverride string) (bundle.Repository, error) {
+// forkUpstream returns the URL, host and slug of the remote "upstream" of
+// checkout when it may be the repository origin was forked from: upstream
+// exists, its URL parses (ParseRemoteURL) and has another owner/name than
+// origin's (originSlug, case-insensitively). ok is false otherwise.
+func forkUpstream(ctx context.Context, checkout, originURL, originSlug string) (url, host, slug string, ok bool) {
+	u, err := gitx.RemoteURL(ctx, checkout, gitx.ForkRemotes.Reference)
+	if err != nil || u == originURL {
+		return "", "", "", false
+	}
+	h, s, err := ParseRemoteURL(u)
+	if err != nil || strings.EqualFold(s, originSlug) {
+		return "", "", "", false // the same repository (e.g. another URL form, or a mirror)
+	}
+	return u, h, s, true
+}
+
+// sharedHistory checks that origin/<def> and upstream/<def> both exist in
+// checkout and have a merge base, i.e. that origin plausibly is a fork of
+// upstream. It returns why not ("" when they share history).
+func sharedHistory(ctx context.Context, checkout, def, upstreamSlug string) (string, error) {
+	rs := gitx.ForkRemotes
+	for _, remote := range []string{rs.Reference, rs.Fork} {
+		ok, err := refExists(ctx, checkout, "refs/remotes/"+remote+"/"+def)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return fmt.Sprintf("%s/%s is missing locally: cannot check that origin is a fork of upstream (%s); recorded as a single-remote repository "+
+				"(to record the fork, run `git -C %s fetch %s` before adopting)", remote, def, upstreamSlug, checkout, remote), nil
+		}
+	}
+	_, err := gitx.Run(ctx, checkout, "merge-base", rs.Fork+"/"+def, rs.Reference+"/"+def)
+	var ge *gitx.GitError
+	switch {
+	case err == nil:
+		return "", nil
+	case errors.As(err, &ge) && ge.ExitCode == 1 && ctx.Err() == nil:
+		return fmt.Sprintf("upstream (%s) shares no history with origin (no merge base between %s/%s and %s/%s): not recorded as the repository of your fork; recorded as a single-remote repository",
+			upstreamSlug, rs.Fork, def, rs.Reference, def), nil
+	}
+	return "", err
+}
+
+// describeCheckout builds the bundle entry of the checkout from its origin
+// remote, or, when the checkout is set up for a fork (a remote "upstream"
+// naming another repository, see forkUpstream, whose default branch shares
+// history with origin's, see sharedHistory), from upstream with origin
+// recorded as the fork. No hosting service is asked. The warnings explain
+// why an upstream remote was not recorded.
+func describeCheckout(ctx context.Context, checkout, name, defaultBranch, hostOverride string) (bundle.Repository, []string, error) {
 	url, err := gitx.RemoteURL(ctx, checkout, "origin")
 	if err != nil {
-		return bundle.Repository{}, fmt.Errorf("no usable origin remote: %w", err)
+		return bundle.Repository{}, nil, fmt.Errorf("no usable origin remote: %w", err)
 	}
 	host, slug, err := ParseRemoteURL(url)
 	if err != nil {
-		return bundle.Repository{}, err
+		return bundle.Repository{}, nil, err
+	}
+	var warnings []string
+	defaultOf := func(remote string) (string, error) {
+		if defaultBranch != "" {
+			return defaultBranch, nil
+		}
+		def, err := gitx.DefaultBranchOf(ctx, checkout, remote)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "", fmt.Errorf("cannot determine the default branch of %s; pass --default-branch <name> (%v)", remote, err)
+		}
+		return def, nil
+	}
+	if uu, uh, us, ok := forkUpstream(ctx, checkout, url, slug); ok {
+		def, err := defaultOf(gitx.ForkRemotes.Reference)
+		if err != nil {
+			return bundle.Repository{}, nil, err
+		}
+		why, err := sharedHistory(ctx, checkout, def, us)
+		if err != nil {
+			return bundle.Repository{}, nil, err
+		}
+		if why == "" {
+			if hostOverride != "" {
+				uh = hostOverride
+			}
+			if strings.EqualFold(uh, bundle.HostGitHub) {
+				uh = ""
+			}
+			return bundle.Repository{Name: name, Slug: us, URL: uu, DefaultBranch: def, Origin: bundle.OriginAdopted, Host: uh,
+				Fork: bundle.Fork{Slug: slug, URL: url}}, nil, nil
+		}
+		warnings = append(warnings, why)
 	}
 	if hostOverride != "" {
 		host = hostOverride
@@ -303,16 +401,11 @@ func describeCheckout(ctx context.Context, checkout, name, defaultBranch, hostOv
 	if strings.EqualFold(host, bundle.HostGitHub) {
 		host = "" // the default, as stored in sheaf.yaml
 	}
-	def := defaultBranch
-	if def == "" {
-		if def, err = gitx.DefaultBranch(ctx, checkout); err != nil {
-			if ctx.Err() != nil {
-				return bundle.Repository{}, ctx.Err()
-			}
-			return bundle.Repository{}, fmt.Errorf("cannot determine the default branch of origin; pass --default-branch <name> (%v)", err)
-		}
+	def, err := defaultOf(gitx.OriginRemotes.Reference)
+	if err != nil {
+		return bundle.Repository{}, nil, err
 	}
-	return bundle.Repository{Name: name, Slug: slug, URL: url, DefaultBranch: def, Origin: bundle.OriginAdopted, Host: host}, nil
+	return bundle.Repository{Name: name, Slug: slug, URL: url, DefaultBranch: def, Origin: bundle.OriginAdopted, Host: host}, warnings, nil
 }
 
 // moveIntoSubdir moves dir to dir/sub through a temporary directory in root

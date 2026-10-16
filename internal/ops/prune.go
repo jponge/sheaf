@@ -79,6 +79,9 @@ type PrunePlan struct {
 	// fetched holds the repositories whose origin was fetched by PlanPrune:
 	// ApplyPrune does not fetch them again.
 	fetched map[string]bool
+	// distrust holds the repositories whose fork refs are not trusted (fork
+	// gone, or --offline), see forkDistrust.
+	distrust map[string]forkDistrust
 }
 
 // PlanPrune finds, in the selected repositories, the linked worktrees whose
@@ -86,7 +89,10 @@ type PrunePlan struct {
 // merged, and with opts.IncludeBranches the local branches without worktree
 // in that state. Unless opts.Offline, origin is fetched first (once per
 // repository, up to opts.Jobs repositories in parallel); a repository whose
-// fetch fails gets no candidates.
+// fetch fails gets no candidates, except a forked repository whose fork
+// appears to be gone: its fork refs are then not trusted (see forkDistrust;
+// also with opts.Offline), branches tracking the fork count as gone, and
+// the branch deletions of ApplyPrune do not rely on those refs.
 //
 // A branch is merged when its tip is reachable from origin/<default branch>
 // but is not on the first-parent history of origin/<default branch>, i.e.
@@ -111,17 +117,21 @@ func PlanPrune(ctx context.Context, w *Workspace, opts PruneOptions, rep Reporte
 	}
 	report := coSerialize(rep)
 	type repoPlan struct {
-		cands []PruneCandidate
-		skips []PruneSkip
-		probs []Problem
+		cands    []PruneCandidate
+		skips    []PruneSkip
+		probs    []Problem
+		distrust forkDistrust
 	}
 	plans := make([]repoPlan, len(repos))
 	coForEach(opts.Jobs, len(repos), func(i int) {
 		p := &plans[i]
-		p.cands, p.skips, p.probs = planPruneRepo(ctx, w.Root, repos[i], opts, report)
+		p.cands, p.skips, p.probs, p.distrust = planPruneRepo(ctx, w.Root, repos[i], opts, report)
 	})
-	out := PrunePlan{fetched: map[string]bool{}}
+	out := PrunePlan{fetched: map[string]bool{}, distrust: map[string]forkDistrust{}}
 	for i, p := range plans {
+		if p.distrust.set() {
+			out.distrust[repos[i].Name] = p.distrust
+		}
 		if !opts.Offline && len(p.cands) > 0 {
 			out.fetched[repos[i].Name] = true // candidates exist only after a successful fetch
 		}
@@ -132,21 +142,32 @@ func PlanPrune(ctx context.Context, w *Workspace, opts PruneOptions, rep Reporte
 	return out, nil
 }
 
-func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts PruneOptions, report func(Event)) ([]PruneCandidate, []PruneSkip, []Problem) {
+func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts PruneOptions, report func(Event)) ([]PruneCandidate, []PruneSkip, []Problem, forkDistrust) {
+	var distrust forkDistrust
 	primary, _, prob := coCheckPrimary(ctx, root, r)
 	if prob != nil {
-		return nil, nil, []Problem{*prob}
+		return nil, nil, []Problem{*prob}, distrust
 	}
-	fail := func(err error) ([]PruneCandidate, []PruneSkip, []Problem) {
-		return nil, nil, []Problem{{Repo: r.Name, Path: primary, Err: err}}
+	fail := func(err error) ([]PruneCandidate, []PruneSkip, []Problem, forkDistrust) {
+		return nil, nil, []Problem{{Repo: r.Name, Path: primary, Err: err}}, distrust
 	}
+	rs := RemotesOf(r)
 	if !opts.Offline {
 		report(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindStart})
-		if err := coFetchRepo(ctx, primary); err != nil {
-			report(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindFailed, Err: err})
-			return fail(fmt.Errorf("fetch failed, nothing proposed: %w", err))
+		if err := coFetchRepo(ctx, primary, rs); err != nil {
+			var rf *remoteFetchError
+			if ctx.Err() != nil || !onlyForkFetchFailed(err, rs) || !errors.As(err, &rf) || !forkGoneError(rf.Err, rs.Fork) {
+				report(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindFailed, Err: err})
+				return fail(fmt.Errorf("fetch failed, nothing proposed: %w", err))
+			}
+			// The fork is gone: go on without trusting its refs.
+			distrust = goneForkDistrust(rs.Fork)
+			report(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindDone, Message: "fetched " + rs.Reference + "; " + distrust.why + ": its remote-tracking refs are not trusted"})
+		} else {
+			report(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindDone, Message: "fetched " + rs.String()})
 		}
-		report(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindDone, Message: "fetched origin"})
+	} else if rs.Forked() {
+		distrust = offlineForkDistrust(rs.Fork)
 	}
 	infos, repoDir, _, err := listRepo(ctx, root, r)
 	if err != nil {
@@ -161,7 +182,7 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 		return fail(err)
 	}
 	var probs []Problem
-	target := "refs/remotes/origin/" + r.DefaultBranch
+	target := "refs/remotes/" + RemotesOf(r).Reference + "/" + r.DefaultBranch
 	merged := map[string]bool{}
 	if ok, err := refExists(ctx, primary, target); err != nil {
 		return fail(err)
@@ -192,6 +213,10 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 		if b.Name == r.DefaultBranch {
 			continue
 		}
+		gone, goneNote := b.Gone, ""
+		if distrust.gone && distrust.covers(b.Upstream) {
+			gone, goneNote = true, " ("+distrust.why+")"
+		}
 		isMerged := false
 		if merged[b.Name] {
 			fp, err := onFirstParentLine(ctx, primary, b.Head, target)
@@ -200,12 +225,12 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 			}
 			isMerged = !fp
 		}
-		if !b.Gone && !isMerged {
+		if !gone && !isMerged {
 			continue
 		}
 		var why []string
-		if b.Gone {
-			why = append(why, "upstream "+strings.TrimPrefix(b.Upstream, "refs/remotes/")+" is gone")
+		if gone {
+			why = append(why, "upstream "+strings.TrimPrefix(b.Upstream, "refs/remotes/")+" is gone"+goneNote)
 		}
 		if isMerged {
 			why = append(why, "merged into "+strings.TrimPrefix(target, "refs/remotes/"))
@@ -222,7 +247,7 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 			skip(u.Path, "it is "+describeUse(u))
 			continue
 		}
-		c := PruneCandidate{Repo: r.Name, Branch: b.Name, Head: b.Head, Gone: b.Gone, Merged: isMerged, Reason: reason}
+		c := PruneCandidate{Repo: r.Name, Branch: b.Name, Head: b.Head, Gone: gone, Merged: isMerged, Reason: reason}
 		in, ok := checkedOut[b.Name]
 		switch {
 		case ok && in.Primary:
@@ -235,7 +260,7 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 			skip(in.Path, "its worktree is locked")
 		case ok:
 			c.Worktree, c.Dir, c.Path = true, in.Dir, in.Path
-			if risks, err := gitx.DeletionRisks(ctx, in.Path); err != nil {
+			if risks, err := gitx.DeletionRisksWithOptions(ctx, in.Path, gitx.DeletionRisksOptions{UntrustedRemotes: distrust.untrusted()}); err != nil {
 				if ctx.Err() != nil {
 					return fail(ctx.Err())
 				}
@@ -256,7 +281,7 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 				Reason: "pinned at tag " + in.Tag + " (tag worktrees are never pruned; remove it with `sheaf wt rm`)"})
 		}
 	}
-	return cands, skips, probs
+	return cands, skips, probs, distrust
 }
 
 // busyUse returns a use of a branch other than being checked out (a rebase
@@ -345,9 +370,9 @@ func ApplyPrune(ctx context.Context, w *Workspace, plan PrunePlan, opts PruneOpt
 		case ctx.Err() != nil:
 			res = PruneResult{PruneCandidate: c, Outcome: PruneFailed, Message: "not started (interrupted)", Err: ctx.Err()}
 		case c.Worktree:
-			res = pruneWorktree(ctx, w, c, opts, plan.fetched[c.Repo], wd, report)
+			res = pruneWorktree(ctx, w, c, opts, plan.fetched[c.Repo], plan.distrust[c.Repo], wd, report)
 		default:
-			res = pruneBranch(ctx, w, c)
+			res = pruneBranch(ctx, w, c, plan.distrust[c.Repo])
 		}
 		e := Event{Repo: c.Repo, Worktree: c.Dir, Phase: PhasePrune, Message: res.Message}
 		switch res.Outcome {
@@ -364,10 +389,10 @@ func ApplyPrune(ctx context.Context, w *Workspace, plan PrunePlan, opts PruneOpt
 	return out
 }
 
-func pruneWorktree(ctx context.Context, w *Workspace, c PruneCandidate, opts PruneOptions, fetched bool, wd string, report func(Event)) PruneResult {
+func pruneWorktree(ctx context.Context, w *Workspace, c PruneCandidate, opts PruneOptions, fetched bool, distrust forkDistrust, wd string, report func(Event)) PruneResult {
 	res := PruneResult{PruneCandidate: c}
 	changed := ""
-	ro := WorktreeRemoveOptions{DeleteBranch: opts.DeleteBranches, Offline: opts.Offline, WorkingDir: wd, originFetched: fetched,
+	ro := WorktreeRemoveOptions{DeleteBranch: opts.DeleteBranches, Offline: opts.Offline, WorkingDir: wd, originFetched: fetched, forkDistrust: distrust,
 		Confirm: func(p WorktreeRemovePlan) bool {
 			res.Notes = riskNotes(p.Risks)
 			switch {
@@ -422,7 +447,7 @@ func pruneWorktree(ctx context.Context, w *Workspace, c PruneCandidate, opts Pru
 	return res
 }
 
-func pruneBranch(ctx context.Context, w *Workspace, c PruneCandidate) PruneResult {
+func pruneBranch(ctx context.Context, w *Workspace, c PruneCandidate, distrust forkDistrust) PruneResult {
 	res := PruneResult{PruneCandidate: c}
 	failed := func(err error) PruneResult {
 		res.Outcome, res.Message, res.Err = PruneFailed, err.Error(), err
@@ -454,7 +479,7 @@ func pruneBranch(ctx context.Context, w *Workspace, c PruneCandidate) PruneResul
 		return kept("it no longer exists")
 	}
 	var plan WorktreeRemovePlan
-	if err := checkMerged(ctx, primary, r, c.Branch, &plan); err != nil {
+	if err := checkMerged(ctx, primary, r, c.Branch, &plan, distrust); err != nil {
 		return failed(err)
 	}
 	if plan.branchOID != c.Head {

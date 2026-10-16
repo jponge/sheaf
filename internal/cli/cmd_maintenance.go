@@ -102,7 +102,10 @@ func newPruneCmd(d Deps) *cobra.Command {
 		Short: "Remove worktrees whose branch is gone or merged",
 		Long: "Fetch origin (unless --offline), then find the linked worktrees whose branch is\n" +
 			"gone (its upstream was deleted on the remote) or merged into origin/<default branch>\n" +
-			"with a merge commit. Squash- and rebase-merged branches are only found once their\n" +
+			"with a merge commit. For a repository cloned from your fork, upstream and origin are\n" +
+			"fetched and merged means merged into upstream/<default branch>; when your fork is gone\n" +
+			"(or with --offline) its remote-tracking refs are not trusted: branches tracking a gone\n" +
+			"fork count as gone, and a branch whose commits are only on its refs is kept. Squash- and rebase-merged branches are only found once their\n" +
 			"remote branch is deleted (gone); a branch without commits of its own is never\n" +
 			"considered merged. The primary checkout, worktrees outside the repository directory,\n" +
 			"locked ones and pull request branches of `sheaf wt pr` are never pruned.\n\n" +
@@ -277,7 +280,8 @@ func newDoctorCmd(d Deps) *cobra.Command {
 			"authenticated for github.com,\n" +
 			"that sheaf.yaml is valid, and for each repository: its directory and primary\n" +
 			"checkout (<repo>/<default branch>/, a work tree of its own), origin's URL against\n" +
-			"sheaf.yaml, missing worktrees or worktrees outside the repository directory, and\n" +
+			"sheaf.yaml (for a clone of your fork: origin, upstream, and the default branch\n" +
+			"tracking upstream), missing worktrees or worktrees outside the repository directory, and\n" +
 			"lock files left in its git directory. Directories of the bundle that are not\n" +
 			"repositories of it are listed (with `sheaf adopt` when they hold a checkout).\n" +
 			"Nothing is fetched or changed. One line per check: OK, INFO, WARN or FAIL, with\n" +

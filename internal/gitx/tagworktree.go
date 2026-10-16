@@ -41,10 +41,14 @@ var ErrTagNotFound = errors.New("gitx: tag not found")
 // tags (sorted) and no error when these refusals are the only failures;
 // any other failure is an error.
 func FetchTags(ctx context.Context, dir string) (kept []string, err error) {
+	return fetchTags(ctx, dir, "origin")
+}
+
+func fetchTags(ctx context.Context, dir, remote string) (kept []string, err error) {
 	// Without --quiet: the refusals are only listed in the ref update
 	// summary, which fetch.output=full keeps parseable (compact shows "*"
 	// instead of the local name).
-	_, err = run(ctx, netOpts(ctx), dir, "-c", "fetch.output=full", "fetch", "--no-prune", "--tags", "origin")
+	_, err = run(ctx, netOpts(ctx), dir, "-c", "fetch.output=full", "fetch", "--no-prune", "--tags", remote)
 	if err == nil {
 		return nil, nil
 	}

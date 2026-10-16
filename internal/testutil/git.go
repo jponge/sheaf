@@ -261,3 +261,31 @@ func TagOriginDangling(t *testing.T, o Origin, name, rev string) string {
 	Git(t, o.Path, "tag", "-a", "-m", "tag "+name, name, oid)
 	return oid
 }
+
+// ForkedOrigin is a reference repository and a fork of it, both bare
+// repositories reached through file:// URLs.
+type ForkedOrigin struct {
+	Upstream Origin // the reference repository: <dir>/upstream/repo.git
+	Fork     Origin // the fork: <dir>/fork/repo.git
+}
+
+// NewForkedOrigin builds a reference repository like NewOrigin does and a
+// bare clone of it standing for the user's fork. The repository paths end in
+// upstream/repo.git and fork/repo.git, so the slugs derived from their URLs
+// ("upstream/repo", "fork/repo") differ. Both are independent afterwards
+// (use AdvanceOrigin on either). Safe in parallel tests like NewOrigin.
+func NewForkedOrigin(t *testing.T, opts OriginOpts) ForkedOrigin {
+	t.Helper()
+	o := NewOrigin(t, opts)
+	root := t.TempDir()
+	up := filepath.Join(root, "upstream", "repo.git")
+	if err := os.MkdirAll(filepath.Dir(up), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(o.Path, up); err != nil {
+		t.Fatal(err)
+	}
+	fork := filepath.Join(root, "fork", "repo.git")
+	Git(t, root, "clone", "-q", "--bare", "--no-local", up, fork)
+	return ForkedOrigin{Upstream: Origin{Path: up, URL: "file://" + up}, Fork: Origin{Path: fork, URL: "file://" + fork}}
+}

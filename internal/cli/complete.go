@@ -268,7 +268,8 @@ func (k completer) worktrees(c *cobra.Command, repoArg string, excludePrimary bo
 }
 
 // branchesToAdd returns the branches `worktree add` can create a worktree
-// for: the local branches and origin's branches (from the refs already in
+// for: the local branches and origin's branches (upstream's too for a
+// repository with a fork; from the refs already in
 // the primary checkout, no fetch) that are not checked out anywhere, and not
 // the default branch (it lives in the primary checkout).
 func (k completer) branchesToAdd(c *cobra.Command, repoArg string) []string {
@@ -280,27 +281,38 @@ func (k completer) branchesToAdd(c *cobra.Command, repoArg string) []string {
 	for _, in := range infos {
 		taken[in.Branch] = true
 	}
+	remotes := gitx.OriginRemotes.BranchSearch()
 	for _, r := range w.Bundle().Repositories {
 		if r.Name == repo {
 			taken[r.DefaultBranch] = true
+			remotes = ops.RemotesOf(r).BranchSearch()
 		}
 	}
 	ctx, cancel := completionContext(c)
 	defer cancel()
-	out, err := gitx.Run(ctx, infos[0].Path, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin")
+	args := []string{"for-each-ref", "--format=%(refname)", "refs/heads"}
+	for _, rem := range remotes {
+		args = append(args, "refs/remotes/"+rem)
+	}
+	out, err := gitx.Run(ctx, infos[0].Path, args...)
 	if err != nil {
 		return nil
 	}
 	var names []string
+	seen := map[string]bool{}
 	for _, ref := range strings.Split(out, "\n") {
-		var b string
-		switch {
-		case strings.HasPrefix(ref, "refs/heads/"):
-			b = strings.TrimPrefix(ref, "refs/heads/")
-		case strings.HasPrefix(ref, "refs/remotes/origin/"):
-			b = strings.TrimPrefix(ref, "refs/remotes/origin/")
+		b := strings.TrimPrefix(ref, "refs/heads/")
+		if b == ref {
+			b = ""
+			for _, rem := range remotes {
+				if s, ok := strings.CutPrefix(ref, "refs/remotes/"+rem+"/"); ok {
+					b = s
+					break
+				}
+			}
 		}
-		if b != "" && b != "HEAD" && !taken[b] {
+		if b != "" && b != "HEAD" && !taken[b] && !seen[b] {
+			seen[b] = true
 			names = append(names, b)
 		}
 	}

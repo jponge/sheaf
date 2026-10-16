@@ -283,3 +283,67 @@ func (g *GH) PR(ctx context.Context, owner, name string, number int) (PR, error)
 	}
 	return p, nil
 }
+
+const forkFields = "name,owner,parent,url,sshUrl,isFork"
+
+// CurrentUser returns the login of the authenticated user
+// (`gh api user --jq .login`).
+func (g *GH) CurrentUser(ctx context.Context) (string, error) {
+	out, err := g.run(ctx, "api", "user", "--jq", ".login")
+	if err != nil {
+		return "", err
+	}
+	login := strings.TrimSpace(string(out))
+	if login == "" {
+		return "", errors.New("gh api user: empty login")
+	}
+	if err := validateOwner(login); err != nil {
+		return "", fmt.Errorf("gh api user: %w", err)
+	}
+	return login, nil
+}
+
+// ListForks lists the forks owned by owner (`gh repo list <owner> --fork`).
+// gh reports the parent by owner and name only. Entries without a parent
+// are left out. Like ListRepos, more than Limit forks yields the trimmed
+// list together with ErrPossiblyTruncated.
+func (g *GH) ListForks(ctx context.Context, owner string) ([]Fork, error) {
+	if err := validateOwner(owner); err != nil {
+		return nil, err
+	}
+	proto, err := g.protocol(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out, err := g.run(ctx, "repo", "list", owner, "--fork", "--limit", strconv.Itoa(g.opts.Limit+1), "--json", forkFields)
+	if err != nil {
+		return nil, err
+	}
+	var raw []struct {
+		ghRepo
+		Parent *struct {
+			Name  string `json:"name"`
+			Owner struct {
+				Login string `json:"login"`
+			} `json:"owner"`
+		} `json:"parent"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, fmt.Errorf("parse gh repo list --fork output for %q: %w", owner, err)
+	}
+	truncated := len(raw) > g.opts.Limit
+	if truncated {
+		raw = raw[:g.opts.Limit]
+	}
+	forks := make([]Fork, 0, len(raw))
+	for _, r := range raw {
+		if r.Parent == nil || r.Parent.Name == "" || r.Parent.Owner.Login == "" {
+			continue
+		}
+		forks = append(forks, Fork{Repo: r.toRepo(proto), ParentOwner: r.Parent.Owner.Login, ParentName: r.Parent.Name})
+	}
+	if truncated {
+		return forks, fmt.Errorf("%w: %q has more than %d forks", ErrPossiblyTruncated, owner, g.opts.Limit)
+	}
+	return forks, nil
+}

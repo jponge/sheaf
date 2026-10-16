@@ -318,13 +318,18 @@ func findPrimary(ctx context.Context, repoDir string) (string, error) {
 	return "", fmt.Errorf("%s: several primary checkouts: %s", repoDir, strings.Join(found, ", "))
 }
 
-// localDefaultBranch returns origin's default branch as recorded locally in
+// localDefaultBranch returns the default branch as recorded locally in
+// refs/remotes/upstream/HEAD (a checkout set up for a fork) or else
 // refs/remotes/origin/HEAD, or "" (no network access).
 func localDefaultBranch(ctx context.Context, dir string) string {
-	out, err := gitx.Run(ctx, dir, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
-	if err != nil {
-		return ""
+	for _, remote := range gitx.ForkRemotes.All() { // upstream, origin
+		out, err := gitx.Run(ctx, dir, "symbolic-ref", "--quiet", "refs/remotes/"+remote+"/HEAD")
+		if err != nil {
+			continue
+		}
+		if b, _ := strings.CutPrefix(strings.TrimSpace(out), "refs/remotes/"+remote+"/"); b != "" {
+			return b
+		}
 	}
-	b, _ := strings.CutPrefix(strings.TrimSpace(out), "refs/remotes/origin/")
-	return b
+	return ""
 }

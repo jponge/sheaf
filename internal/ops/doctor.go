@@ -43,7 +43,8 @@ func (l CheckLevel) String() string {
 func (l CheckLevel) MarshalText() ([]byte, error) { return []byte(l.String()), nil }
 
 // Check is one doctor finding. Check names: git, gh, bundle, repo-dir, host,
-// primary, origin-url, worktree, lock, adoptable, unknown-dir.
+// primary, origin-url, upstream-url, tracking, worktree, lock, adoptable,
+// unknown-dir.
 type Check struct {
 	Level   CheckLevel `json:"level"`
 	Check   string     `json:"check"`
@@ -82,7 +83,9 @@ const DefaultStaleLockAge = 10 * time.Minute
 // Doctor checks the environment (git version, gh) and the bundle: sheaf.yaml
 // is valid, and for each repository its directory exists, its primary
 // checkout is <repo>/<normalized default branch> and a work tree of its own,
-// origin matches the URL of sheaf.yaml, its worktrees are present and inside
+// origin matches the URL of sheaf.yaml (for a repository with a fork: origin
+// matches the fork's URL, upstream the repository's, and the local default
+// branch tracks upstream/<default branch>), its worktrees are present and inside
 // the repository directory, and no lock file is left in its git directory.
 // Directories of the bundle root that are not repositories of the bundle are
 // reported, with `sheaf adopt` for those holding a checkout. It only reads:
@@ -193,14 +196,24 @@ func doctorRepo(ctx context.Context, root string, r bundle.Repository, now time.
 	}
 	// The configured URL, not `git remote get-url`, which applies
 	// url.<base>.insteadOf rewrites: sheaf.yaml records the URL as cloned.
-	u, err := gitx.Run(ctx, primary, "config", "--get", "remote.origin.url")
-	u = strings.TrimSpace(u)
-	switch {
-	case err != nil:
-		add(CheckWarn, "origin-url", "no origin remote: "+firstLineOf(err.Error()), fmt.Sprintf("git -C %s remote add origin %s", primary, r.URL))
-	case u != r.URL:
-		add(CheckWarn, "origin-url", fmt.Sprintf("origin is %s but %s says %s", u, bundle.FileName, r.URL),
-			fmt.Sprintf("fix origin with `git -C %s remote set-url origin %s`, or the url in %s", primary, r.URL, bundle.FileName))
+	checkRemote := func(remote, want, what, field string) {
+		u, err := gitx.Run(ctx, primary, "config", "--get", "remote."+remote+".url")
+		u = strings.TrimSpace(u)
+		switch {
+		case err != nil:
+			add(CheckWarn, remote+"-url", "no "+remote+" remote"+what+": "+firstLineOf(err.Error()), fmt.Sprintf("git -C %s remote add %s %s", primary, remote, want))
+		case u != want:
+			add(CheckWarn, remote+"-url", fmt.Sprintf("%s%s is %s but %s says %s", remote, what, u, bundle.FileName, want),
+				fmt.Sprintf("fix %s with `git -C %s remote set-url %s %s`, or the %s in %s", remote, primary, remote, want, field, bundle.FileName))
+		}
+	}
+	rs := RemotesOf(r)
+	if !rs.Forked() {
+		checkRemote(rs.Reference, r.URL, "", "url")
+	} else {
+		checkRemote(rs.Fork, r.Fork.URL, " (your fork)", "fork url")
+		checkRemote(rs.Reference, r.URL, " (the repository)", "url")
+		checkDefaultTracking(ctx, primary, r, rs, func(msg, hint string) { add(CheckWarn, "tracking", msg, hint) })
 	}
 	if infos, _, _, err := listRepo(ctx, root, r); err != nil {
 		add(CheckWarn, "worktree", "cannot list worktrees: "+err.Error(), "")
@@ -237,6 +250,31 @@ func doctorRepo(ctx context.Context, root string, r bundle.Repository, now time.
 		}
 	}
 	return cs
+}
+
+// checkDefaultTracking reports (warn) a local default branch of a forked
+// repository that does not track <reference>/<default>: update would then
+// follow the fork instead of the repository.
+func checkDefaultTracking(ctx context.Context, primary string, r bundle.Repository, rs gitx.Remotes, warn func(msg, hint string)) {
+	want := rs.Reference + "/" + r.DefaultBranch
+	out, err := gitx.Run(ctx, primary, "for-each-ref", "--format=%(upstream:short)", "refs/heads/"+r.DefaultBranch)
+	if err != nil || !branchExistsIn(ctx, primary, r.DefaultBranch) {
+		return // no local default branch: nothing tracks anything
+	}
+	switch up := strings.TrimSpace(out); up {
+	case want:
+	case "":
+		warn(fmt.Sprintf("%s has no upstream; it should track %s", r.DefaultBranch, want),
+			fmt.Sprintf("git -C %s branch --set-upstream-to=%s %s", primary, want, r.DefaultBranch))
+	default:
+		warn(fmt.Sprintf("%s tracks %s, not %s: update follows your fork instead of the repository", r.DefaultBranch, up, want),
+			fmt.Sprintf("git -C %s branch --set-upstream-to=%s %s", primary, want, r.DefaultBranch))
+	}
+}
+
+func branchExistsIn(ctx context.Context, dir, branch string) bool {
+	ok, err := refExists(ctx, dir, "refs/heads/"+branch)
+	return err == nil && ok
 }
 
 func branchOrDetached(in WorktreeInfo) string {

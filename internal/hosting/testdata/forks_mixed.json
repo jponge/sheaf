@@ -1,0 +1,3 @@
+[{"isFork":true,"name":"x-renamed","owner":{"login":"jponge"},"parent":{"name":"x","owner":{"login":"Upstream-Org"}},"sshUrl":"git@github.com:jponge/x-renamed.git","url":"https://github.com/jponge/x-renamed"},
+{"isFork":false,"name":"own","owner":{"login":"jponge"},"parent":null,"sshUrl":"git@github.com:jponge/own.git","url":"https://github.com/jponge/own"},
+{"isFork":true,"name":"orphan","owner":{"login":"jponge"},"parent":null,"sshUrl":"git@github.com:jponge/orphan.git","url":"https://github.com/jponge/orphan"}]

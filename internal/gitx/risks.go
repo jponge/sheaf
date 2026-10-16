@@ -219,12 +219,18 @@ type DeletionRisksOptions struct {
 	// point inside it counts as having no remote: deleting the tree deletes
 	// those remotes too.
 	DeletedRoot string
+	// UntrustedRemotes are remotes whose remote-tracking refs do not count
+	// as pushed for dir's own repository (not for nested repositories), e.g.
+	// a fork that appears to be gone: commits reachable only from them are
+	// reported as unpushed or detached.
+	UntrustedRemotes []string
 }
 
 // nestOpts carries the options and the recursion state.
 type nestOpts struct {
 	before  func(ctx context.Context, dir string) error
-	root    string // resolved DeletedRoot
+	remotes []string // "--exclude=<remote>/*"... "--remotes" for the top-level repository
+	root    string   // resolved DeletedRoot
 	visited map[string]bool
 }
 
@@ -235,6 +241,9 @@ func DeletionRisksWithOptions(ctx context.Context, dir string, opts DeletionRisk
 		return nil, err
 	}
 	no := &nestOpts{before: opts.BeforeNested, root: resolvePath(top), visited: map[string]bool{resolvePath(top): true}}
+	for _, r := range opts.UntrustedRemotes {
+		no.remotes = append(no.remotes, "--exclude="+r+"/*")
+	}
 	if opts.DeletedRoot != "" {
 		no.root = resolvePath(opts.DeletedRoot)
 	}
@@ -251,17 +260,21 @@ func deletionRisks(ctx context.Context, dir string, depth int, no *nestOpts) ([]
 	if err != nil {
 		return nil, err
 	}
-	branchCommits, err := revCount(ctx, dir, "--branches", "--not", "--remotes")
+	remotes := []string{"--remotes"}
+	if depth == maxNestingDepth { // dir's own repository, not a nested one
+		remotes = append(slices.Clone(no.remotes), "--remotes")
+	}
+	branchCommits, err := revCount(ctx, dir, append([]string{"--branches", "--not"}, remotes...)...)
 	if err != nil {
 		return nil, err
 	}
 	detachedCommits := 0
 	if st.Detached && !st.Unborn {
-		if detachedCommits, err = revCount(ctx, dir, "HEAD", "--not", "--branches", "--tags", "--remotes"); err != nil {
+		if detachedCommits, err = revCount(ctx, dir, append([]string{"HEAD", "--not", "--branches", "--tags"}, remotes...)...); err != nil {
 			return nil, err
 		}
 	}
-	tagCommits, err := revCount(ctx, dir, "--tags", "--not", "--branches", "--remotes")
+	tagCommits, err := revCount(ctx, dir, append([]string{"--tags", "--not", "--branches"}, remotes...)...)
 	if err != nil {
 		return nil, err
 	}

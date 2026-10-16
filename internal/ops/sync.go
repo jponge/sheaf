@@ -403,8 +403,21 @@ func diffOrg(b *bundle.Bundle, src bundle.Source, repos []hosting.Repo, complete
 // skipped. Proposals of another kind are failed results; so are directory
 // name clashes, also between the proposals of different organizations.
 func SyncAddNew(ctx context.Context, w *Workspace, props []Proposal, jobs int, rep Reporter) Summary {
+	return SyncAddNewWithOptions(ctx, w, props, CloneOptions{}, jobs, rep)
+}
+
+// SyncAddNewWithOptions is SyncAddNew with fork detection like Add's: unless
+// opts.NoFork, the user's forks are listed once through opts.Hosting, and a
+// repository with a fork is cloned with origin = the fork and upstream = the
+// repository.
+func SyncAddNewWithOptions(ctx context.Context, w *Workspace, props []Proposal, opts CloneOptions, jobs int, rep Reporter) Summary {
+	type planned struct {
+		spec  lookup
+		owner string
+	}
 	var tasks []Task
-	planned := map[string]bool{}
+	var clones []planned
+	seen := map[string]bool{}
 	for _, p := range props {
 		if p.Kind != ProposalNew {
 			tasks = append(tasks, failedTask(p.Name, fmt.Errorf("%s is a %s proposal, not a new repository", p.Slug, p.Kind)))
@@ -418,16 +431,27 @@ func SyncAddNew(ctx context.Context, w *Workspace, props []Proposal, jobs int, r
 			tasks = append(tasks, skippedTask(p.Repo.Name, p.Slug+" is an empty repository (no default branch): nothing to clone yet"))
 			continue
 		}
-		if planned[strings.ToLower(p.Repo.Name)] {
+		if seen[strings.ToLower(p.Repo.Name)] {
 			tasks = append(tasks, failedTask(p.Slug, fmt.Errorf("cannot add %s: another selected repository is also named %q; add it with sheaf add --org %s --repo %s --as <dir>", p.Slug, p.Repo.Name, p.Org, p.Repo.Name)))
 			continue
 		}
-		planned[strings.ToLower(p.Repo.Name)] = true
+		seen[strings.ToLower(p.Repo.Name)] = true
 		owner := p.Repo.Owner
 		if owner == "" {
 			owner = p.Org
 		}
-		tasks = append(tasks, planClones(w, []lookup{{label: p.Slug, repo: p.Repo}}, "", bundle.OriginOrgPrefix+owner, "")...)
+		clones = append(clones, planned{spec: lookup{label: p.Slug, repo: p.Repo}, owner: owner})
+	}
+	var forks forkIndex
+	if !opts.NoFork {
+		var specs []lookup
+		for _, c := range clones {
+			specs = append(specs, c.spec)
+		}
+		forks = detectForks(ctx, opts.Hosting, clonable(w.Bundle(), specs), rep)
+	}
+	for _, c := range clones {
+		tasks = append(tasks, planClones(w, []lookup{c.spec}, "", bundle.OriginOrgPrefix+c.owner, "", forks)...)
 	}
 	return Execute(ctx, jobs, tasks, rep)
 }
@@ -490,4 +514,12 @@ func SyncRemoveGone(ctx context.Context, w *Workspace, props []Proposal, sopts S
 		}})
 	}
 	return Execute(ctx, jobs, tasks, rep)
+}
+
+// CloneOptions configures the fork detection of SyncAddNewWithOptions.
+type CloneOptions struct {
+	// Hosting lists the user's forks; nil disables fork detection.
+	Hosting hosting.Hosting
+	// NoFork disables fork detection (see AddRequest.NoFork).
+	NoFork bool
 }

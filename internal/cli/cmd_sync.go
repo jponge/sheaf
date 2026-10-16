@@ -23,6 +23,7 @@ type syncFlags struct {
 	exclude             []string
 	yes, force, offline bool
 	allowMass           bool
+	noFork              bool
 }
 
 func (fl syncFlags) validate() error {
@@ -86,6 +87,7 @@ func newSyncCmd(d Deps) *cobra.Command {
 	f.BoolVar(&fl.includeArchived, "include-archived", false, "also propose archived repositories as new")
 	f.BoolVar(&fl.asJSON, "json", false, "print the proposals as a JSON document (no changes)")
 	f.BoolVar(&fl.addNew, "add-new", false, "clone every new repository (except the --exclude ones)")
+	f.BoolVar(&fl.noFork, "no-fork", false, "when adding, do not look for your forks: clone each repository as origin")
 	f.StringArrayVar(&fl.exclude, "exclude", nil, "record a new repository ([org/]name) as declined so that sync stops proposing it (repeatable)")
 	f.BoolVar(&fl.removeGone, "remove-gone", false, "remove the repositories gone from their organization (requires --yes)")
 	f.BoolVarP(&fl.yes, "yes", "y", false, "with --remove-gone: confirm the removals")
@@ -132,7 +134,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 		return rep.Err()
 	}
 	if !(fl.addNew || fl.removeGone || len(fl.exclude) > 0) && d.tuiMode(c) {
-		return tuiSync(c, d, w, rep)
+		return tuiSync(c, d, w, rep, fl.noFork)
 	}
 	excluded, err := syResolveExcludes(rep, fl.exclude, fl.includeArchived)
 	if err != nil {
@@ -160,7 +162,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 		if len(add) == 0 {
 			fmt.Fprintln(out, "no new repository to add")
 		} else {
-			errs = append(errs, printSummary(out, ops.SyncAddNew(ctx, w, add, OptionsFrom(c).Jobs, r)))
+			errs = append(errs, printSummary(out, ops.SyncAddNewWithOptions(ctx, w, add, ops.CloneOptions{Hosting: d.hosting(), NoFork: fl.noFork}, OptionsFrom(c).Jobs, r)))
 		}
 	}
 	if fl.removeGone {

@@ -58,7 +58,23 @@ type Repository struct {
 	DefaultBranch string `yaml:"default_branch"`
 	Origin        string `yaml:"origin"`
 	Host          string `yaml:"host,omitempty"`
+	// Fork is the user's fork of the repository, cloned as the remote
+	// "origin" while the repository itself (Slug, URL) is the remote
+	// "upstream". Zero (omitted from sheaf.yaml) when there is no fork:
+	// the repository is then the remote "origin".
+	Fork Fork `yaml:"fork,omitempty"`
 }
+
+// Fork identifies the user's fork of a repository of the bundle. The
+// repository entry itself (Slug, URL) stays the reference repository: sync,
+// add --org and wt pr use it.
+type Fork struct {
+	Slug string `yaml:"slug"`
+	URL  string `yaml:"url"`
+}
+
+// Forked reports whether the repository has a fork recorded.
+func (r Repository) Forked() bool { return r.Fork != Fork{} }
 
 // Hosts recorded in Repository.Host.
 const (
@@ -187,6 +203,17 @@ func validateRepository(r Repository) error {
 	}
 	if err := ValidateHost(r.Host); err != nil {
 		return fmt.Errorf("repository %q: %w", r.Name, err)
+	}
+	if r.Forked() {
+		if err := validateSlug(r.Fork.Slug); err != nil {
+			return fmt.Errorf("repository %q: fork: %w", r.Name, err)
+		}
+		if r.Fork.URL == "" {
+			return fmt.Errorf("repository %q: fork: url must not be empty", r.Name)
+		}
+		if r.Fork.URL == r.URL || strings.EqualFold(r.Fork.Slug, r.Slug) {
+			return fmt.Errorf("repository %q: fork: must differ from the repository itself (%s)", r.Name, r.Slug)
+		}
 	}
 	return nil
 }

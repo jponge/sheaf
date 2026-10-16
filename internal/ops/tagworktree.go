@@ -61,16 +61,17 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 		return WorktreeAddResult{}, err
 	}
 	var warnings []string
+	ref := RemotesOf(r).Reference
 	if !opts.NoFetch {
-		report(PhaseFetch, "fetching origin and its tags")
-		kept, err := gitx.FetchTags(ctx, primary)
+		report(PhaseFetch, "fetching "+ref+" and its tags")
+		kept, err := gitx.FetchTagsFrom(ctx, primary, ref)
 		if err != nil {
 			if ctx.Err() != nil {
 				return WorktreeAddResult{}, ctx.Err()
 			}
 			return WorktreeAddResult{}, fmt.Errorf("fetching %s failed: %w\npass --no-fetch to create the worktree from the local tags of the repository", r.Name, err)
 		}
-		warnings = keptTagWarnings(kept, tag)
+		warnings = keptTagWarnings(kept, tag, ref)
 	}
 	unlock, err := lockBundle(ctx, w.Root, func() {
 		report(PhaseWorktree, "waiting for "+lockFileName+" (another sheaf process is working on the bundle)")
@@ -99,9 +100,9 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 			return WorktreeAddResult{}, ctx.Err()
 		}
 		if errors.Is(err, gitx.ErrTagNotFound) {
-			hint := "it is not on origin either"
+			hint := "it is not on " + ref + " either"
 			if opts.NoFetch {
-				hint = "origin's tags were not fetched (--no-fetch)"
+				hint = ref + "'s tags were not fetched (--no-fetch)"
 			}
 			return WorktreeAddResult{}, fmt.Errorf("no tag %q in %s (%s)", tag, r.Name, hint)
 		}
@@ -117,11 +118,11 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 // keptTagWarnings describes the local tags that gitx.FetchTags kept because
 // origin has a different tag of the same name; the requested tag gets its
 // own warning, since the worktree is then made from the local one.
-func keptTagWarnings(kept []string, tag string) []string {
+func keptTagWarnings(kept []string, tag, remote string) []string {
 	var out, others []string
 	for _, k := range kept {
 		if k == tag {
-			out = append(out, fmt.Sprintf("local tag %s differs from origin's and was kept: the worktree is at the local tag (git fetch origin +refs/tags/%s:refs/tags/%s takes origin's)", tag, tag, tag))
+			out = append(out, fmt.Sprintf("local tag %s differs from %s's and was kept: the worktree is at the local tag (git fetch %s +refs/tags/%s:refs/tags/%s takes %s's)", tag, remote, remote, tag, tag, remote))
 		} else {
 			others = append(others, k)
 		}
@@ -129,9 +130,9 @@ func keptTagWarnings(kept []string, tag string) []string {
 	switch len(others) {
 	case 0:
 	case 1:
-		out = append(out, fmt.Sprintf("local tag %s differs from origin's and was kept", others[0]))
+		out = append(out, fmt.Sprintf("local tag %s differs from %s's and was kept", others[0], remote))
 	default:
-		out = append(out, fmt.Sprintf("local tags %s differ from origin's and were kept", strings.Join(others, ", ")))
+		out = append(out, fmt.Sprintf("local tags %s differ from %s's and were kept", strings.Join(others, ", "), remote))
 	}
 	return out
 }
@@ -190,9 +191,14 @@ func checkTagTarget(infos []WorktreeInfo, repoDir, tag, dir string) error {
 }
 
 // wouldCreateBranch reports whether name is neither a local branch nor a
-// branch of origin, i.e. whether AddWorktree would create a new branch.
-func wouldCreateBranch(ctx context.Context, dir, name string) (bool, error) {
-	for _, ref := range []string{"refs/heads/" + name, "refs/remotes/origin/" + name} {
+// branch of one of remotes, i.e. whether AddWorktree would create a new
+// branch.
+func wouldCreateBranch(ctx context.Context, dir, name string, remotes []string) (bool, error) {
+	refs := []string{"refs/heads/" + name}
+	for _, rem := range remotes {
+		refs = append(refs, "refs/remotes/"+rem+"/"+name)
+	}
+	for _, ref := range refs {
 		ok, err := refExists(ctx, dir, ref)
 		if err != nil || ok {
 			return false, err
@@ -204,8 +210,8 @@ func wouldCreateBranch(ctx context.Context, dir, name string) (bool, error) {
 // checkNotOnlyATag refuses a branch worktree for name when name is a tag but
 // neither a local branch nor a branch of origin: AddWorktree would otherwise
 // create a new branch named like the tag, which is rarely what was meant.
-func checkNotOnlyATag(ctx context.Context, dir, name string) error {
-	if newBranch, err := wouldCreateBranch(ctx, dir, name); err != nil || !newBranch {
+func checkNotOnlyATag(ctx context.Context, dir, name string, remotes []string) error {
+	if newBranch, err := wouldCreateBranch(ctx, dir, name, remotes); err != nil || !newBranch {
 		return err
 	}
 	ok, err := refExists(ctx, dir, "refs/tags/"+name)
@@ -222,16 +228,20 @@ const maxBaseSuggestions = 5
 // repository, with whether origin was fetched and up to maxBaseSuggestions
 // remote branches, local branches and tags whose names match base
 // case-insensitively (see closestRefs).
-func baseNotFoundError(ctx context.Context, dir, repo, base string, noFetch bool) error {
-	msg := fmt.Sprintf("base %s not found in %s (after fetching origin)", base, repo)
+func baseNotFoundError(ctx context.Context, dir, repo, base string, noFetch bool, rs gitx.Remotes) error {
+	msg := fmt.Sprintf("base %s not found in %s (after fetching %s)", base, repo, rs)
 	if noFetch {
 		msg = fmt.Sprintf("base %s not found in %s (not fetched: --no-fetch)", base, repo)
 	}
-	out, err := gitx.Run(ctx, dir, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/", "refs/heads/", "refs/tags/")
+	args := []string{"for-each-ref", "--format=%(refname)"}
+	for _, rem := range rs.BranchSearch() {
+		args = append(args, "refs/remotes/"+rem+"/")
+	}
+	out, err := gitx.Run(ctx, dir, append(args, "refs/heads/", "refs/tags/")...)
 	if err != nil {
 		return errors.New(msg)
 	}
-	if s := closestRefs(base, strings.Split(out, "\n")); len(s) > 0 {
+	if s := closestRefsFor(base, strings.Split(out, "\n"), rs.BranchSearch()); len(s) > 0 {
 		msg += "; closest: " + strings.Join(s, ", ")
 	}
 	return errors.New(msg)
@@ -246,8 +256,22 @@ func baseNotFoundError(ctx context.Context, dir, repo, base string, noFetch bool
 // of half the query at least. Ties go to the name closest in length, then
 // remote branches, local branches, tags, then by name. At most maxBaseSuggestions.
 func closestRefs(query string, refs []string) []string {
+	return closestRefsFor(query, refs, gitx.OriginRemotes.BranchSearch())
+}
+
+// closestRefsFor is closestRefs with the remote branches of remotes
+// ("<remote>/<branch>") instead of origin's only.
+func closestRefsFor(query string, refs []string, remotes []string) []string {
 	q := strings.ToLower(query)
-	for _, p := range []string{"refs/remotes/origin/", "refs/heads/", "refs/tags/", "origin/", "tags/"} {
+	prefixes := []string{}
+	for _, rem := range remotes {
+		prefixes = append(prefixes, "refs/remotes/"+rem+"/")
+	}
+	prefixes = append(prefixes, "refs/heads/", "refs/tags/")
+	for _, rem := range remotes {
+		prefixes = append(prefixes, rem+"/")
+	}
+	for _, p := range append(prefixes, "tags/") {
 		if strings.HasPrefix(q, p) {
 			q = q[len(p):]
 			break
@@ -266,8 +290,8 @@ func closestRefs(query string, refs []string) []string {
 	for _, ref := range refs {
 		var name, show string
 		kind := 0
-		if b, ok := strings.CutPrefix(ref, "refs/remotes/origin/"); ok && b != "HEAD" {
-			name, show = b, "origin/"+b
+		if rem, b, ok := cutRemoteRef(ref, remotes); ok && b != "HEAD" {
+			name, show = b, rem+"/"+b
 		} else if b, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
 			name, show, kind = b, b+" (local branch)", 1
 		} else if t, ok := strings.CutPrefix(ref, "refs/tags/"); ok {
@@ -331,4 +355,15 @@ func refLikeTagPrefix(tag string) string {
 		return "refs/"
 	}
 	return ""
+}
+
+// cutRemoteRef splits refs/remotes/<remote>/<branch> for a remote of
+// remotes.
+func cutRemoteRef(ref string, remotes []string) (remote, branch string, ok bool) {
+	for _, rem := range remotes {
+		if b, ok := strings.CutPrefix(ref, "refs/remotes/"+rem+"/"); ok {
+			return rem, b, true
+		}
+	}
+	return "", "", false
 }

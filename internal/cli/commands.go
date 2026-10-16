@@ -137,7 +137,10 @@ func newAddCmd(d Deps) *cobra.Command {
 			"Repositories are given as owner/repo, or selected from an organization with --org and\n" +
 			"either --all or one --repo per repository (archived ones need --include-archived).\n" +
 			"The organization is then tracked as a source. Repositories already in the bundle are\n" +
-			"skipped. Use --as to choose the directory name of a single repository.",
+			"skipped. Use --as to choose the directory name of a single repository.\n" +
+			"Your forks are looked up (one gh listing): a repository you forked is cloned with\n" +
+			"origin = your fork and upstream = the repository, its default branch tracking\n" +
+			"upstream; --no-fork disables this. sheaf never creates forks.",
 		RunE: func(c *cobra.Command, args []string) error {
 			req.Slugs = args
 			if len(args) == 0 && req.Org == "" && !req.All && len(req.Repos) == 0 {
@@ -163,6 +166,7 @@ func newAddCmd(d Deps) *cobra.Command {
 	f.BoolVar(&req.All, "all", false, "with --org: add every (non-archived) repository")
 	f.StringArrayVar(&req.Repos, "repo", nil, "with --org: add this repository (repeatable)")
 	f.BoolVar(&req.IncludeArchived, "include-archived", false, "with --org: also consider archived repositories")
+	f.BoolVar(&req.NoFork, "no-fork", false, "do not look for your forks: clone each repository as origin")
 	return cmd
 }
 
@@ -176,7 +180,10 @@ func newAdoptCmd(d Deps) *cobra.Command {
 			"moved to <dir>/<default branch>/; a single checkout <dir>/<child>/ is renamed to it if\n" +
 			"needed (or only registered). Nothing is checked out or switched, linked worktrees are\n" +
 			"repaired. Owner, name and host are derived from the origin remote URL; SSH config\n" +
-			"aliases are recorded as-is unless --host is given.",
+			"aliases are recorded as-is unless --host is given. A clone with a remote upstream\n" +
+			"naming another repository whose default branch shares history with origin's is\n" +
+			"recorded as a fork: upstream is the repository, origin your fork (a default branch\n" +
+			"that does not track upstream is reported, with the fix).",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			w, err := openWorkspace(c, d)
@@ -200,7 +207,7 @@ func newAdoptCmd(d Deps) *cobra.Command {
 			return printSummary(c.OutOrStdout(), s)
 		},
 	}
-	cmd.Flags().StringVar(&opts.DefaultBranch, "default-branch", "", "origin's default branch, when it cannot be determined (applies to every <dir>)")
+	cmd.Flags().StringVar(&opts.DefaultBranch, "default-branch", "", "the repository's default branch (upstream's for a clone of your fork), when it cannot be determined (applies to every <dir>)")
 	cmd.Flags().StringVar(&opts.Host, "host", "", "host to record instead of the one in the origin URL, e.g. github.com for an SSH config alias (applies to every <dir>)")
 	return cmd
 }

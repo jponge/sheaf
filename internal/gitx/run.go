@@ -2,7 +2,9 @@
 // client. Every operation runs git in an explicit working directory with a
 // sanitized environment (see Run) and returns a *GitError on failure.
 //
-// Functions that need a remote assume it is called "origin".
+// Functions that need a remote and take no remote name assume it is called
+// "origin"; the *Of / *From variants and Remotes support repositories
+// cloned from a fork (origin = the fork, upstream = the reference).
 package gitx
 
 import (

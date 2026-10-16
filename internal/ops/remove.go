@@ -124,6 +124,11 @@ func (e *RisksError) Error() string {
 // (git worktree remove), its directory <root>/<name> and its sheaf.yaml
 // entry, in that order.
 //
+// For a repository with a fork (see RemotesOf), upstream is fetched like
+// origin below, then the fork: a fork that appears to be gone is a data
+// risk only when commits of local branches exist on it alone (see
+// fetchFork); commits on any remote-tracking ref count as pushed.
+//
 // Before deleting anything it fetches origin (so that commits whose remote
 // branch was deleted count as unpushed), then gathers gitx.DeletionRisks for
 // the primary checkout and every worktree, fetching every nested repository
@@ -141,9 +146,11 @@ func (e *RisksError) Error() string {
 // The risk check and the deletion are not atomic: changes made in between
 // are lost.
 func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, emit func(Event)) (string, error) {
-	if _, ok := w.Bundle().Repository(name); !ok {
+	entry, ok := w.Bundle().Repository(name)
+	if !ok {
 		return "", fmt.Errorf("no repository named %q in the bundle", name)
 	}
+	rs := RemotesOf(*entry)
 	// The fetch happens once; the re-check after confirmation reuses its
 	// outcome.
 	// fetchForceable: the fetch problem is one that Force overrides (a gone
@@ -158,18 +165,30 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 			emit(Event{Phase: PhaseFetch, Message: "offline: not fetching the repository nor its nested repositories; the remote state may be stale (commits whose remote branch was deleted are not detected)"})
 			return "", nil
 		}
-		emit(Event{Phase: PhaseFetch, Message: "fetching origin"})
-		if err := gitx.Fetch(ctx, primary); err != nil {
+		emit(Event{Phase: PhaseFetch, Message: "fetching " + rs.Reference})
+		if err := gitx.FetchRemote(ctx, primary, rs.Reference); err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
 			fetchMsg = fetchProblem(err)
 			var ge *gitx.GitError
-			if errors.As(err, &ge) && remoteRepoGone(ge.Stderr) {
+			if errors.As(err, &ge) && remoteRepoGoneFor(ge.Stderr, rs.Reference) {
 				fetchMsg, fetchForceable = goneRemoteProblem, true
 			}
 		} else if opts.ExpectedGone != "" {
 			fetchMsg, fetchForceable = "the GitHub API cannot see "+opts.ExpectedGone+" but its remote still answers: check gh authentication scope (not removed)", true
+		}
+		if !rs.Forked() {
+			return fetchMsg, nil
+		}
+		msg, forceable, err := fetchFork(ctx, primary, rs.Fork, emit)
+		if err != nil {
+			return "", err
+		}
+		if msg != "" {
+			// Force overrides the combination only if it overrides both.
+			fetchForceable = forceable && (fetchMsg == "" || fetchForceable)
+			fetchMsg = joinProblem(fetchMsg, msg)
 		}
 		return fetchMsg, nil
 	}
@@ -445,11 +464,68 @@ var quotedNotFound = regexp.MustCompile(`repository '[^']*' not found`)
 // "Could not read from remote repository" alone is not enough: git prints
 // it for authentication and network failures too.
 func remoteRepoGone(stderr string) bool {
+	return remoteRepoGoneFor(stderr, "origin")
+}
+
+// remoteRepoGoneFor is remoteRepoGone for a fetch of the named remote
+// ("'<remote>' does not appear ..." means that no such remote is configured).
+func remoteRepoGoneFor(stderr, remote string) bool {
 	if strings.Contains(stderr, "Repository not found") || quotedNotFound.MatchString(stderr) {
 		return true
 	}
 	return strings.Contains(stderr, "does not appear to be a git repository") &&
-		!strings.Contains(stderr, "'origin' does not appear to be a git repository")
+		!strings.Contains(stderr, "'"+remote+"' does not appear to be a git repository")
+}
+
+// fetchFork fetches the fork remote of a forked repository for Remove and
+// returns a problem (empty if none) and whether Force overrides it:
+//
+//   - fetch succeeds: no problem;
+//   - the fork appears to be gone: a data risk (forceable) when commits are
+//     reachable from the fork's (now stale) remote-tracking refs but from
+//     no other remote's (see forkOnlyCommits); otherwise only a progress
+//     note, since everything the clone holds is also on the reference
+//     repository or reported as unpushed;
+//   - any other failure: the remote state is unknown (not forceable), as
+//     for the reference repository.
+func fetchFork(ctx context.Context, primary, fork string, emit func(Event)) (string, bool, error) {
+	emit(Event{Phase: PhaseFetch, Message: "fetching " + fork + " (your fork)"})
+	gone, err := fetchForkRemote(ctx, primary, fork)
+	switch {
+	case ctx.Err() != nil:
+		return "", false, ctx.Err()
+	case err == nil:
+		return "", false, nil
+	case !gone:
+		return "fetch of your fork (" + fork + ") failed: " + fetchProblem(err), false, nil
+	}
+	n, cerr := forkOnlyCommits(ctx, primary, fork)
+	if cerr != nil {
+		if ctx.Err() != nil {
+			return "", false, ctx.Err()
+		}
+		return "your fork (" + fork + ") appears to be gone and its commits cannot be checked: " + cerr.Error(), false, nil
+	}
+	if n == 0 {
+		emit(Event{Phase: PhaseFetch, Message: "your fork (" + fork + ") appears to be gone; no commit exists only on it"})
+		return "", false, nil
+	}
+	verb := "exist"
+	if n == 1 {
+		verb = "exists"
+	}
+	return fmt.Sprintf("your fork (%s) appears to be gone and %s %s only on it (its remote-tracking refs %s/*): this clone holds the only copy "+
+		"(or you no longer have access (wrong SSH key/account))", fork, commits(n), verb, fork), true, nil
+}
+
+// forkOnlyCommits counts the commits reachable from the remote-tracking
+// refs of fork (stale once the fork is gone) and from no other remote's
+// remote-tracking ref: once the fork is gone, the clone holds their only
+// copy, whether a local branch still points at them or not. Commits on no
+// remote-tracking ref at all are not included: the risk checks report them
+// as unpushed.
+func forkOnlyCommits(ctx context.Context, primary, fork string) (int, error) {
+	return revCount(ctx, primary, "--remotes="+fork+"/*", "--not", "--exclude="+fork+"/*", "--remotes")
 }
 
 func joinProblem(a, b string) string {

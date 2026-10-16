@@ -78,6 +78,7 @@ type CheckoutFilter struct {
 // coRepoCheckouts are the checkouts of one repository whose primary exists.
 type coRepoCheckouts struct {
 	name      string
+	remotes   gitx.Remotes
 	primary   string // path of the primary checkout
 	checkouts []Checkout
 }
@@ -208,7 +209,7 @@ func coListRepo(ctx context.Context, root string, r bundle.Repository, primaryOn
 	if len(wts) == 0 || wts[0].Bare || !coSameFile(wts[0].Path, primary) {
 		return nil, []Problem{{Repo: r.Name, Path: primary, Err: errors.New("not the main work tree of its repository")}}
 	}
-	rc := &coRepoCheckouts{name: r.Name, primary: primary}
+	rc := &coRepoCheckouts{name: r.Name, primary: primary, remotes: RemotesOf(r)}
 	rc.checkouts = append(rc.checkouts, Checkout{Repo: r.Name, Dir: filepath.Base(primary), Path: primary, Primary: true,
 		Branch: wts[0].Branch, Detached: wts[0].Detached})
 	if primaryOnly {
@@ -308,10 +309,57 @@ var coFetchLocks = struct {
 // per-repository lock.
 var coFetchHook func(commonDir string)
 
-// coFetchRepo fetches origin into the repository of dir, serialized with the
-// other fetches into the same repository. Under a context made by
-// gitx.WithInteractive, git keeps the terminal.
-func coFetchRepo(ctx context.Context, dir string) error {
+// RemotesOf returns the remotes of a repository of the bundle: origin
+// alone, or upstream (the repository) and origin (the user's fork) when a
+// fork is recorded. In the documentation of this package, "origin" stands
+// for these remotes: fetches fetch all of them (reference first), the
+// default branch and merged checks use the reference remote
+// (<reference>/<default branch>), existing remote branches are looked up in
+// the fork first, and pull request refs are fetched from the reference.
+func RemotesOf(r bundle.Repository) gitx.Remotes {
+	if r.Forked() {
+		return gitx.ForkRemotes
+	}
+	return gitx.OriginRemotes
+}
+
+// fetchRemotes fetches each remote of rs into the repository of dir
+// (reference first), stopping at the first failure. Callers serialize it
+// per repository (see coFetchRepo).
+func fetchRemotes(ctx context.Context, dir string, rs gitx.Remotes) error {
+	if !rs.Forked() {
+		return gitx.FetchRemote(ctx, dir, rs.Reference)
+	}
+	for _, remote := range rs.All() {
+		if err := gitx.FetchRemote(ctx, dir, remote); err != nil {
+			return &remoteFetchError{Remote: remote, Err: err}
+		}
+	}
+	return nil
+}
+
+// remoteFetchError is the failure of fetchRemotes for one remote of a
+// repository with a fork (the remotes after it were not fetched).
+type remoteFetchError struct {
+	Remote string
+	Err    error
+}
+
+func (e *remoteFetchError) Error() string { return "fetching " + e.Remote + ": " + e.Err.Error() }
+func (e *remoteFetchError) Unwrap() error { return e.Err }
+
+// onlyForkFetchFailed reports whether err is the failure of the fork fetch
+// alone (the reference was fetched).
+func onlyForkFetchFailed(err error, rs gitx.Remotes) bool {
+	var rf *remoteFetchError
+	return rs.Forked() && errors.As(err, &rf) && rf.Remote == rs.Fork
+}
+
+// coFetchRepo fetches the remotes rs into the repository of dir (see
+// fetchRemotes), serialized with the other fetches into the same
+// repository. Under a context made by gitx.WithInteractive, git keeps the
+// terminal.
+func coFetchRepo(ctx context.Context, dir string, rs gitx.Remotes) error {
 	cd, err := gitx.CommonDir(ctx, dir)
 	if err != nil {
 		return err
@@ -331,7 +379,7 @@ func coFetchRepo(ctx context.Context, dir string) error {
 	if coFetchHook != nil {
 		coFetchHook(cd)
 	}
-	return gitx.Fetch(ctx, dir)
+	return fetchRemotes(ctx, dir, rs)
 }
 
 // FetchOptions configures FetchRepos.
@@ -342,8 +390,9 @@ type FetchOptions struct {
 
 // FetchRepos runs one `git fetch --prune origin` per selected repository (in
 // its primary checkout; worktrees share the remote-tracking refs), up to
-// Jobs repositories in parallel. Only origin is fetched, like update, which
-// fast-forwards to origin's remote-tracking refs: fetching every remote would
+// Jobs repositories in parallel; for a repository with a fork, upstream and
+// then origin. Only these remotes are fetched, like update, which
+// fast-forwards to their remote-tracking refs: fetching every remote would
 // add network round trips and credential prompts that update does not use.
 // A missing primary checkout fails that repository. The error is only set for
 // an invalid filter.
@@ -359,10 +408,10 @@ func FetchRepos(ctx context.Context, w *Workspace, opts FetchOptions, rep Report
 			if prob != nil {
 				return "", fmt.Errorf("%s: %w", prob.Path, prob.Err)
 			}
-			if err := coFetchRepo(ctx, primary); err != nil {
+			if err := coFetchRepo(ctx, primary, RemotesOf(r)); err != nil {
 				return "", err
 			}
-			return "fetched origin", nil
+			return "fetched " + RemotesOf(r).String(), nil
 		}})
 	}
 	return Execute(ctx, opts.Jobs, tasks, rep), nil

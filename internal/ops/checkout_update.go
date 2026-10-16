@@ -91,7 +91,10 @@ func (f *coInflight) onCancel() {
 	}
 }
 
-// Update fetches origin once per selected repository, then fast-forwards
+// Update fetches origin (upstream and origin for a repository with a fork,
+// see RemotesOf; when only the fork fetch fails, the checkouts tracking the
+// fork fail with that error, the others are updated, and the failure is
+// also returned as a Problem) once per selected repository, then fast-forwards
 // each of its checkouts (primary, then worktrees) to its upstream with
 // gitx.FastForwardWithOptions: checkouts that are dirty (staged, unstaged or
 // conflicted changes; untracked files do not count), detached, without
@@ -119,18 +122,24 @@ func Update(ctx context.Context, w *Workspace, opts UpdateOptions, rep Reporter)
 	stop := context.AfterFunc(ctx, fl.onCancel)
 	defer stop()
 	results := make([][]CheckoutUpdate, len(sets))
+	fetchProbs := make([]*Problem, len(sets))
 	coForEach(opts.Jobs, len(sets), func(i int) {
-		results[i] = coUpdateRepo(ctx, sets[i], opts, report, fl)
+		results[i], fetchProbs[i] = coUpdateRepo(ctx, sets[i], opts, report, fl)
 	})
 	var out []CheckoutUpdate
-	for _, r := range results {
+	for i, r := range results {
 		out = append(out, r...)
+		if fetchProbs[i] != nil {
+			probs = append(probs, *fetchProbs[i])
+		}
 	}
 	coSortProblems(probs)
 	return UpdateReport{Checkouts: out, Problems: probs}, nil
 }
 
-func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, report func(Event), fl *coInflight) []CheckoutUpdate {
+// coUpdateRepo updates the checkouts of s. The problem is set when only the
+// fork of a forked repository could not be fetched (see Update).
+func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, report func(Event), fl *coInflight) ([]CheckoutUpdate, *Problem) {
 	out := make([]CheckoutUpdate, 0, len(s.checkouts))
 	emit := func(u CheckoutUpdate) {
 		e := Event{Repo: u.Repo, Worktree: u.Dir, Phase: PhaseUpdate, Message: u.Reason}
@@ -172,10 +181,14 @@ func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, r
 				emit(notStarted(c, err))
 			}
 		}
-		return out
+		return out, nil
 	}
 	report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindStart})
-	if err := coFetchRepo(ctx, s.primary); err != nil {
+	fetchErr := coFetchRepo(ctx, s.primary, s.remotes)
+	// Only the fork could not be fetched: the checkouts tracking it fail,
+	// the others are updated from the reference as usual.
+	forkFailed := fetchErr != nil && ctx.Err() == nil && onlyForkFetchFailed(fetchErr, s.remotes)
+	if err := fetchErr; err != nil && !forkFailed {
 		report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindFailed, Err: err})
 		reason := "fetch failed"
 		if ctx.Err() != nil {
@@ -186,9 +199,16 @@ func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, r
 				emit(CheckoutUpdate{Checkout: c, Outcome: gitx.PullFailed, Reason: reason, Err: err})
 			}
 		}
-		return out
+		return out, nil
 	}
-	report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindDone, Message: "fetched origin"})
+	var prob *Problem
+	if forkFailed {
+		prob = &Problem{Repo: s.name, Path: s.primary, Err: fmt.Errorf("fetch of your fork failed (checkouts tracking it were not updated): %w", fetchErr)}
+		report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindFailed, Err: fetchErr,
+			Message: "fetched " + s.remotes.Reference + " only; checkouts tracking " + s.remotes.Fork + " are not updated"})
+	} else {
+		report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindDone, Message: "fetched " + s.remotes.String()})
+	}
 	ffo := gitx.FastForwardOptions{MergeTimeout: opts.MergeTimeout, Force: opts.Force}
 	for _, c := range s.checkouts {
 		if pinned(c) {
@@ -196,6 +216,10 @@ func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, r
 		}
 		if err := ctx.Err(); err != nil {
 			emit(notStarted(c, err))
+			continue
+		}
+		if forkFailed && c.Branch != "" && branchRemote(ctx, c.Path, c.Branch) == s.remotes.Fork {
+			emit(CheckoutUpdate{Checkout: c, Outcome: gitx.PullFailed, Reason: "fetch of " + s.remotes.Fork + " (your fork) failed", Err: fetchErr})
 			continue
 		}
 		o := ffo
@@ -209,7 +233,7 @@ func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, r
 		}
 		emit(u)
 	}
-	return out
+	return out, prob
 }
 
 // Skipped reports whether the checkout was left alone on purpose (dirty,
@@ -315,4 +339,13 @@ func coClassifyUpdate(ctx context.Context, c Checkout, r gitx.PullResult) Checko
 		}
 	}
 	return u
+}
+
+// branchRemote returns branch.<branch>.remote, "" when unset or unreadable.
+func branchRemote(ctx context.Context, dir, branch string) string {
+	out, err := gitx.Run(ctx, dir, "config", "--get", "branch."+branch+".remote")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }

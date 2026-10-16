@@ -205,7 +205,7 @@ func newStatusCmd(d Deps) *cobra.Command {
 	}
 	coAddFilterFlags(cmd, &opts.Filter, true)
 	cmd.Flags().BoolVar(&opts.DirtyOnly, "dirty-only", false, "only checkouts that are not clean")
-	cmd.Flags().BoolVar(&opts.Fetch, "fetch", false, "fetch origin into each repository first")
+	cmd.Flags().BoolVar(&opts.Fetch, "fetch", false, "fetch origin (upstream and origin for a clone of your fork) into each repository first")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON document (schema in --help)")
 	return cmd
 }
@@ -352,10 +352,11 @@ func newFetchCmd(d Deps) *cobra.Command {
 	var opts ops.FetchOptions
 	cmd := &cobra.Command{
 		Use:   "fetch",
-		Short: "Fetch origin into every repository (once per repository)",
+		Short: "Fetch the remotes of every repository (once per repository)",
 		Long: "Run `git fetch --prune origin` once per repository of the bundle (worktrees share\n" +
-			"the remote-tracking refs), several repositories in parallel (-j). Only origin is\n" +
-			"fetched, as update only fast-forwards to origin's branches.",
+			"the remote-tracking refs), several repositories in parallel (-j); for a repository\n" +
+			"cloned from your fork, upstream (the repository) then origin (your fork). Only these\n" +
+			"remotes are fetched, as update only fast-forwards to their branches.",
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			w, err := openWorkspace(c, d)
@@ -392,7 +393,9 @@ func newUpdateCmd(d Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Fetch, then fast-forward every clean checkout and worktree",
-		Long: "Fetch origin once per repository, then fast-forward each checkout (primary first,\n" +
+		Long: "Fetch origin once per repository (upstream and origin for a clone of your fork; if\n" +
+			"only your fork cannot be fetched, the checkouts tracking it fail and the others are\n" +
+			"updated), then fast-forward each checkout (primary first,\n" +
 			"then worktrees) to its upstream with `git merge --ff-only`. Checkouts are skipped,\n" +
 			"with the reason, when they have staged or unstaged changes (untracked files do not\n" +
 			"count), are detached, have no upstream or a deleted one, or have diverged.\n" +

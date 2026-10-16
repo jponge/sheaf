@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Fake is an in-memory Hosting for tests of other packages. Set CloneURL on
@@ -18,6 +19,16 @@ type Fake struct {
 	ListErr map[string]error
 	RepoErr map[string]error
 	PRErr   map[string]error
+
+	// User is the login returned by CurrentUser; UserErr and ForksErr,
+	// when set, are returned by CurrentUser and ListForks.
+	User     string
+	UserErr  error
+	ForksErr error
+
+	mu        sync.Mutex
+	forks     []Fork
+	forkCalls int
 
 	owners map[string][]Repo
 	prs    map[string]PR
@@ -114,4 +125,53 @@ func (f *Fake) PR(_ context.Context, owner, name string, number int) (PR, error)
 		return p, nil
 	}
 	return PR{}, fmt.Errorf("pull request %s/%s#%d: %w", owner, name, number, ErrNotFound)
+}
+
+// FakeUser is the login returned by Fake.CurrentUser when User is empty.
+const FakeUser = "sheaf-fake-user"
+
+// AddFork registers a fork, listed by ListForks(f.Owner).
+func (f *Fake) AddFork(fk Fork) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.forks = append(f.forks, fk)
+}
+
+// ForkCalls returns how many times ListForks was called.
+func (f *Fake) ForkCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forkCalls
+}
+
+// CurrentUser returns UserErr, or User (FakeUser when empty).
+func (f *Fake) CurrentUser(context.Context) (string, error) {
+	if f.UserErr != nil {
+		return "", f.UserErr
+	}
+	if f.User == "" {
+		return FakeUser, nil
+	}
+	return f.User, nil
+}
+
+// ListForks returns ForksErr, or a copy of the forks owned by owner (an
+// owner without forks gets an empty list).
+func (f *Fake) ListForks(_ context.Context, owner string) ([]Fork, error) {
+	if err := validateOwner(owner); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.forkCalls++
+	if f.ForksErr != nil {
+		return nil, f.ForksErr
+	}
+	out := []Fork{}
+	for _, fk := range f.forks {
+		if strings.EqualFold(fk.Owner, owner) {
+			out = append(out, fk)
+		}
+	}
+	return out, nil
 }

@@ -14,6 +14,11 @@ import (
 // are created; dest itself must not exist or must be empty (git's rule). A
 // relative dest is resolved against the process working directory.
 func Clone(ctx context.Context, url, dest, branch string) error {
+	return clone(ctx, url, dest, branch, "")
+}
+
+// clone is Clone with the name of the remote (empty: git's default, origin).
+func clone(ctx context.Context, url, dest, branch, remote string) error {
 	abs, err := filepath.Abs(dest)
 	if err != nil {
 		return fmt.Errorf("gitx: clone destination %q: %w", dest, err)
@@ -25,6 +30,9 @@ func Clone(ctx context.Context, url, dest, branch string) error {
 	args := []string{"clone", "--quiet"}
 	if branch != "" {
 		args = append(args, "--branch", branch)
+	}
+	if remote != "" {
+		args = append(args, "--origin", remote)
 	}
 	args = append(args, "--", url, abs)
 	_, err = run(ctx, netOpts(ctx), parent, args...)
@@ -43,10 +51,14 @@ var ErrNoDefaultBranch = errors.New("gitx: cannot determine the default branch o
 // that is missing, asks the remote with `git ls-remote --symref origin HEAD`
 // (network access; nothing is written locally).
 func DefaultBranch(ctx context.Context, repoDir string) (string, error) {
-	if b, err := localDefaultBranch(ctx, repoDir); err == nil {
+	return defaultBranchOf(ctx, repoDir, "origin")
+}
+
+func defaultBranchOf(ctx context.Context, repoDir, remote string) (string, error) {
+	if b, err := localDefaultBranchOf(ctx, repoDir, remote); err == nil {
 		return b, nil
 	}
-	out, err := run(ctx, netOpts(ctx), repoDir, "ls-remote", "--symref", "origin", "HEAD")
+	out, err := run(ctx, netOpts(ctx), repoDir, "ls-remote", "--symref", "--", remote, "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrNoDefaultBranch, err)
 	}
@@ -68,14 +80,19 @@ func DefaultBranch(ctx context.Context, repoDir string) (string, error) {
 // localDefaultBranch reads refs/remotes/origin/HEAD only (no network). It
 // returns an error wrapping ErrNoDefaultBranch when the ref is missing.
 func localDefaultBranch(ctx context.Context, repoDir string) (string, error) {
-	out, err := Run(ctx, repoDir, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
+	return localDefaultBranchOf(ctx, repoDir, "origin")
+}
+
+func localDefaultBranchOf(ctx context.Context, repoDir, remote string) (string, error) {
+	head := "refs/remotes/" + remote + "/HEAD"
+	out, err := Run(ctx, repoDir, "symbolic-ref", "--quiet", head)
 	if err != nil {
-		return "", fmt.Errorf("%w: refs/remotes/origin/HEAD: %w", ErrNoDefaultBranch, err)
+		return "", fmt.Errorf("%w: %s: %w", ErrNoDefaultBranch, head, err)
 	}
-	if b, ok := strings.CutPrefix(strings.TrimSpace(out), "refs/remotes/origin/"); ok && b != "" {
+	if b, ok := strings.CutPrefix(strings.TrimSpace(out), "refs/remotes/"+remote+"/"); ok && b != "" {
 		return b, nil
 	}
-	return "", fmt.Errorf("%w: refs/remotes/origin/HEAD points to %q", ErrNoDefaultBranch, strings.TrimSpace(out))
+	return "", fmt.Errorf("%w: %s points to %q", ErrNoDefaultBranch, head, strings.TrimSpace(out))
 }
 
 // CurrentBranch returns the short name of the branch checked out in dir. It

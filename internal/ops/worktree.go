@@ -332,8 +332,12 @@ type WorktreeAddOptions struct {
 	// branch>" (default branch from sheaf.yaml). It is ignored (with a
 	// warning) when the branch exists locally or on origin.
 	Base string
-	// NoFetch skips the fetch of origin.
+	// NoFetch skips the fetch of origin (of upstream and origin for a
+	// repository with a fork).
 	NoFetch bool
+	// remotes (ops-internal) overrides the remotes searched for an
+	// existing remote branch (default: RemotesOf(r).BranchSearch()).
+	remotes []string
 }
 
 // WorktreeAddResult is the outcome of AddWorktree.
@@ -405,9 +409,14 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 	if err := checkAddTarget(infos, repoDir, branch, dir); err != nil {
 		return WorktreeAddResult{}, err
 	}
+	rs := RemotesOf(r)
+	search := opts.remotes
+	if len(search) == 0 {
+		search = rs.BranchSearch()
+	}
 	if !opts.NoFetch {
-		report(PhaseFetch, "fetching origin")
-		if err := gitx.Fetch(ctx, primary); err != nil {
+		report(PhaseFetch, "fetching "+rs.String())
+		if err := fetchRemotes(ctx, primary, rs); err != nil {
 			if ctx.Err() != nil {
 				return WorktreeAddResult{}, ctx.Err()
 			}
@@ -417,11 +426,11 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 		// gitx.FetchTags), so that checkNotOnlyATag also sees tags that git's
 		// automatic tag following did not bring. Kept local tags do not matter
 		// here: the check only needs the names.
-		if newBranch, err := wouldCreateBranch(ctx, primary, branch); err != nil {
+		if newBranch, err := wouldCreateBranch(ctx, primary, branch, search); err != nil {
 			return WorktreeAddResult{}, err
 		} else if newBranch {
-			report(PhaseFetch, "fetching origin's tags")
-			if _, err := gitx.FetchTags(ctx, primary); err != nil {
+			report(PhaseFetch, "fetching "+rs.Reference+"'s tags")
+			if _, err := gitx.FetchTagsFrom(ctx, primary, rs.Reference); err != nil {
 				if ctx.Err() != nil {
 					return WorktreeAddResult{}, ctx.Err()
 				}
@@ -447,7 +456,7 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 	if err := checkAddTarget(infos, repoDir, branch, dir); err != nil {
 		return WorktreeAddResult{}, err
 	}
-	if err := checkNotOnlyATag(ctx, primary, branch); err != nil {
+	if err := checkNotOnlyATag(ctx, primary, branch, search); err != nil {
 		return WorktreeAddResult{}, err
 	}
 	if testHookAfterAddCheck != nil {
@@ -455,25 +464,28 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 	}
 	base := opts.Base
 	if base == "" {
-		base = "origin/" + r.DefaultBranch
+		base = rs.Reference + "/" + r.DefaultBranch
 	}
 	path := filepath.Join(repoDir, dir)
 	ev := func(msg string) {
 		emit(Event{Repo: r.Name, Worktree: dir, Phase: PhaseWorktree, Kind: KindProgress, Message: msg})
 	}
 	ev("creating worktree " + path)
-	res, err := gitx.WorktreeAdd(ctx, primary, path, branch, gitx.WorktreeAddOpts{Base: base})
+	res, err := gitx.WorktreeAdd(ctx, primary, path, branch, gitx.WorktreeAddOpts{Base: base, Remotes: search})
 	if err != nil {
 		if ctx.Err() != nil {
 			return WorktreeAddResult{}, ctx.Err()
 		}
 		if errors.Is(err, gitx.ErrBaseNotFound) {
-			return WorktreeAddResult{}, baseNotFoundError(ctx, primary, r.Name, base, opts.NoFetch)
+			return WorktreeAddResult{}, baseNotFoundError(ctx, primary, r.Name, base, opts.NoFetch, rs)
 		}
 		return WorktreeAddResult{}, fmt.Errorf("creating worktree %s: %w", path, err)
 	}
 	out := WorktreeAddResult{Repo: r.Name, Branch: branch, Dir: dir, Path: path, Mode: res.Mode, Upstream: res.Upstream}
-	remoteRef := "origin/" + branch
+	var remoteRefs []string // <remote>/<branch> for each searched remote
+	for _, rem := range search {
+		remoteRefs = append(remoteRefs, rem+"/"+branch)
+	}
 	switch res.Mode {
 	case gitx.WorktreeLocalBranch:
 		msg := "checked out existing local branch " + branch
@@ -481,15 +493,18 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 			msg += " (upstream " + res.Upstream + ")"
 		}
 		ev(msg)
-		if res.Upstream != "" && res.Upstream != remoteRef {
-			out.Warnings = append(out.Warnings, fmt.Sprintf("local branch %s tracks %s, not %s", branch, res.Upstream, remoteRef))
+		if res.Upstream != "" && !slices.Contains(remoteRefs, res.Upstream) {
+			out.Warnings = append(out.Warnings, fmt.Sprintf("local branch %s tracks %s, not %s", branch, res.Upstream, strings.Join(remoteRefs, " nor ")))
 		} else if res.Upstream == "" {
-			if ok, err := refExists(ctx, primary, "refs/remotes/"+remoteRef); err == nil && ok {
-				out.Warnings = append(out.Warnings, fmt.Sprintf("local branch %s has no upstream although %s exists (git branch --set-upstream-to=%s %s)", branch, remoteRef, remoteRef, branch))
+			for _, remoteRef := range remoteRefs {
+				if ok, err := refExists(ctx, primary, "refs/remotes/"+remoteRef); err == nil && ok {
+					out.Warnings = append(out.Warnings, fmt.Sprintf("local branch %s has no upstream although %s exists (git branch --set-upstream-to=%s %s)", branch, remoteRef, remoteRef, branch))
+					break
+				}
 			}
 		}
 	case gitx.WorktreeRemoteBranch:
-		ev("created local branch " + branch + " tracking " + remoteRef)
+		ev("created local branch " + branch + " tracking " + res.Upstream)
 	case gitx.WorktreeNewBranch:
 		out.Base = base
 		ev("created new branch " + branch + " from " + base + " (no upstream)")
@@ -640,6 +655,9 @@ type WorktreeRemoveOptions struct {
 	// originFetched (ops-internal) skips the fetch of origin, already done
 	// by the caller (prune); nested repositories are still fetched.
 	originFetched bool
+	// forkDistrust (ops-internal, with originFetched): the caller's
+	// verdict on the fork's remote-tracking refs.
+	forkDistrust forkDistrust
 	// Confirm is called with the plan once RemoveWorktree may proceed;
 	// returning false (or a nil Confirm) aborts with ErrNotConfirmed.
 	Confirm func(WorktreeRemovePlan) bool
@@ -740,6 +758,12 @@ func (e *WorktreeRefusedError) Error() string {
 // branch or its directory name, see findWorktree), and with
 // opts.DeleteBranch its local branch.
 //
+// For a forked repository (see RemotesOf), upstream then the fork are
+// fetched; a fork that appears to be gone is not an error, but its
+// remote-tracking refs are then not trusted (see forkDistrust; also with
+// opts.Offline): commits only on them are at risk (detached HEAD: blocking
+// unless opts.Force; branch deletion: unmerged, needs ForceDeleteBranch).
+//
 // The primary checkout is always refused (use Remove). Unless opts.Offline,
 // origin is fetched first, and every nested repository with a remote before
 // it is assessed; a failed fetch of origin is a hard problem. The worktree
@@ -783,18 +807,36 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 		emit(Event{Repo: r.Name, Worktree: wt.Dir, Phase: phase, Kind: KindProgress, Message: msg})
 	}
 	fetchMsg := ""
+	rs := RemotesOf(r)
+	var distrust forkDistrust
 	var fetchNested func(context.Context, string) error
 	if opts.Offline {
 		ev(PhaseFetch, "offline: not fetching; the remote state may be stale")
+		if rs.Forked() {
+			distrust = offlineForkDistrust(rs.Fork)
+		}
 	} else {
 		if !opts.originFetched {
-			ev(PhaseFetch, "fetching origin")
-			if err := gitx.Fetch(ctx, primary); err != nil {
+			ev(PhaseFetch, "fetching "+rs.String())
+			if err := gitx.FetchRemote(ctx, primary, rs.Reference); err != nil {
 				if ctx.Err() != nil {
 					return "", ctx.Err()
 				}
 				fetchMsg = fetchProblem(err)
+			} else if rs.Forked() {
+				gone, err := fetchForkRemote(ctx, primary, rs.Fork)
+				switch {
+				case ctx.Err() != nil:
+					return "", ctx.Err()
+				case gone:
+					distrust = goneForkDistrust(rs.Fork)
+					ev(PhaseFetch, distrust.why+": its remote-tracking refs are not trusted")
+				case err != nil:
+					fetchMsg = fetchProblem(&remoteFetchError{Remote: rs.Fork, Err: err})
+				}
 			}
+		} else {
+			distrust = opts.forkDistrust
 		}
 		fetched := map[string]error{}
 		fetchNested = func(ctx context.Context, dir string) error {
@@ -810,7 +852,7 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 		}
 	}
 	mkPlan := func() (WorktreeRemovePlan, error) {
-		return planWorktreeRemoval(ctx, r, repoDir, primary, wt, deleteBr, wd, fetchMsg, fetchNested)
+		return planWorktreeRemoval(ctx, r, repoDir, primary, wt, deleteBr, wd, fetchMsg, fetchNested, distrust)
 	}
 	ev(PhaseCheck, "checking for data at risk")
 	plan, err := mkPlan()
@@ -925,7 +967,7 @@ func checkContained(repoDir string, wt WorktreeInfo) error {
 }
 
 func planWorktreeRemoval(ctx context.Context, r bundle.Repository, repoDir, primary string, wt WorktreeInfo, deleteBr bool, wd, fetchMsg string,
-	fetchNested func(context.Context, string) error) (WorktreeRemovePlan, error) {
+	fetchNested func(context.Context, string) error, distrust forkDistrust) (WorktreeRemovePlan, error) {
 	plan := WorktreeRemovePlan{Repo: r.Name, Worktree: wt}
 	inspectable := true
 	if wt.Prunable {
@@ -954,14 +996,14 @@ func planWorktreeRemoval(ctx context.Context, r bundle.Repository, repoDir, prim
 		plan.Hard = append(plan.Hard, "detached HEAD: there is no branch to delete")
 	}
 	if inspectable {
-		risks, err := gitx.DeletionRisksWithOptions(ctx, wt.Path, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: wt.Path})
+		risks, err := gitx.DeletionRisksWithOptions(ctx, wt.Path, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: wt.Path, UntrustedRemotes: distrust.untrusted()})
 		if err != nil {
 			return plan, err
 		}
 		plan.Risks = risks
 	}
 	if deleteBr && wt.Branch != "" {
-		if err := checkMerged(ctx, primary, r, wt.Branch, &plan); err != nil {
+		if err := checkMerged(ctx, primary, r, wt.Branch, &plan, distrust); err != nil {
 			return plan, err
 		}
 		// Normally impossible (git worktree add -f, or a rebase or bisect
@@ -982,10 +1024,14 @@ func planWorktreeRemoval(ctx context.Context, r bundle.Repository, repoDir, prim
 
 // checkMerged fills plan.branchOID and either plan.MergedInto or
 // plan.Unmerged with plan.UnmergedCommits: the branch is merged when its tip
-// is an ancestor of (or equal to) its upstream or origin/<default branch>.
+// is an ancestor of (or equal to) its upstream or <reference>/<default
+// branch> (origin, or upstream for a repository with a fork).
 // An upstream counts only when it is a remote-tracking ref or another local
 // branch: a branch configured as its own upstream (remote ".") does not.
-func checkMerged(ctx context.Context, primary string, r bundle.Repository, branch string, plan *WorktreeRemovePlan) error {
+// Refs of a distrusted fork (see forkDistrust) are neither merge targets
+// nor count as containing the branch's commits; targets that do not exist
+// are not named in the message.
+func checkMerged(ctx context.Context, primary string, r bundle.Repository, branch string, plan *WorktreeRemovePlan, distrust forkDistrust) error {
 	own := "refs/heads/" + branch
 	oid, err := gitx.Run(ctx, primary, "rev-parse", "--verify", "--end-of-options", own)
 	if err != nil {
@@ -997,19 +1043,20 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 		return err
 	}
 	var targets []string
-	if u := strings.TrimSpace(up); strings.HasPrefix(u, "refs/remotes/") || strings.HasPrefix(u, "refs/heads/") && u != own {
+	if u := strings.TrimSpace(up); (strings.HasPrefix(u, "refs/remotes/") || strings.HasPrefix(u, "refs/heads/") && u != own) && !distrust.covers(u) {
 		targets = append(targets, u)
 	}
-	if d := "refs/remotes/origin/" + r.DefaultBranch; !slices.Contains(targets, d) {
+	if d := "refs/remotes/" + RemotesOf(r).Reference + "/" + r.DefaultBranch; !slices.Contains(targets, d) {
 		targets = append(targets, d)
 	}
-	var names []string
+	var names, missing []string
 	for _, t := range targets {
 		short := strings.TrimPrefix(strings.TrimPrefix(t, "refs/remotes/"), "refs/heads/")
-		names = append(names, short)
 		if ok, err := refExists(ctx, primary, t); err != nil || !ok {
+			missing = append(missing, short)
 			continue
 		}
+		names = append(names, short)
 		_, err := gitx.Run(ctx, primary, "merge-base", "--is-ancestor", plan.branchOID, t)
 		if err == nil {
 			plan.MergedInto = short
@@ -1023,7 +1070,15 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 	// Commits lost with the branch: those on no other branch, no
 	// remote-tracking ref and no tag. (Branch names cannot contain glob
 	// characters, so --exclude matches this branch only.)
-	lost, err := revCount(ctx, primary, plan.branchOID, "--not", "--exclude="+branch, "--branches", "--remotes", "--tags")
+	others := func(withTags bool) []string {
+		a := append([]string{plan.branchOID, "--not", "--exclude=" + branch, "--branches"}, distrust.excludes()...)
+		a = append(a, "--remotes")
+		if withTags {
+			a = append(a, "--tags")
+		}
+		return a
+	}
+	lost, err := revCount(ctx, primary, others(true)...)
 	if err != nil {
 		return err
 	}
@@ -1036,19 +1091,24 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 			return err
 		}
 		for _, ref := range strings.Fields(out) {
-			if ref != own {
+			if ref != own && !distrust.covers(ref) {
 				plan.ContainedIn = strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "refs/remotes/"), "refs/tags/")
 				return nil
 			}
 		}
 		return fmt.Errorf("branch %s: no commit would be lost but no ref contains its tip", branch)
 	}
-	notTags, err := revCount(ctx, primary, plan.branchOID, "--not", "--exclude="+branch, "--branches", "--remotes")
+	notTags, err := revCount(ctx, primary, others(false)...)
 	if err != nil {
 		return err
 	}
 	plan.UnmergedCommits, plan.TagOnlyCommits = lost, notTags-lost
-	plan.Unmerged = fmt.Sprintf("branch %s is not merged into %s; its %s would be lost", branch, strings.Join(names, " nor "), commits(lost))
+	if len(names) > 0 {
+		plan.Unmerged = fmt.Sprintf("branch %s is not merged into %s; its %s would be lost", branch, strings.Join(names, " nor "), commits(lost))
+	} else {
+		plan.Unmerged = fmt.Sprintf("branch %s has no merge target (%s does not exist); its %s would be lost", branch, strings.Join(missing, ", "), commits(lost))
+	}
+	plan.Unmerged += distrust.note()
 	if plan.TagOnlyCommits > 0 {
 		plan.Unmerged += fmt.Sprintf(" (%d more reachable only from tags)", plan.TagOnlyCommits)
 	}
