@@ -177,7 +177,7 @@ func doctorRepo(ctx context.Context, root string, r bundle.Repository, now time.
 	if !r.IsGitHub() {
 		add(CheckInfo, "host", fmt.Sprintf("hosted on %s: GitHub features (sync, wt pr) do not apply", r.HostName()), "")
 	}
-	primary, common, prob := coCheckPrimary(ctx, root, r)
+	primary, common, prob := checkPrimary(ctx, root, r)
 	if prob != nil {
 		hint := ""
 		if found, _ := primaries(ctx, repoDir); len(found) > 0 && !slices.Contains(found, primary) {

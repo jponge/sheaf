@@ -21,8 +21,8 @@ import (
 // exit 130), as with signals in CLI mode.
 func TestTUIUpdateCtrlCTwiceExits130(t *testing.T) {
 	killed, exited := stubEmergency(t)
-	e := coBundle(t)
-	o, primary := e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	o, primary := e.addRepo(t, "alpha")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	hooks := t.TempDir()
 	started := filepath.Join(hooks, "started")
@@ -90,8 +90,8 @@ func TestTUIRemoveInterruptedDuringDialogExits130(t *testing.T) {
 	net := make(chan os.Signal, 1)
 	signal.Notify(net, syscall.SIGTERM)
 	defer signal.Stop(net)
-	e := coBundle(t)
-	e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
 	var out syncBuffer
 	wait := waitOutput(t, &out, "[y/N]")
 	in := newScript(t, true)
@@ -112,8 +112,8 @@ func TestTUIProgressShowsSignalInterruption(t *testing.T) {
 	signal.Notify(net, syscall.SIGTERM)
 	defer signal.Stop(net)
 	_, exited := stubEmergency(t)
-	e := coBundle(t)
-	o, primary := e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	o, primary := e.addRepo(t, "alpha")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	hooks := t.TempDir()
 	started := filepath.Join(hooks, "started")
@@ -151,7 +151,7 @@ func TestTUIProgressShowsSignalInterruption(t *testing.T) {
 // A git failure that looks like a credential prompt that could not be
 // shown gets a hint in TUI mode.
 func TestTUICredentialFailureHint(t *testing.T) {
-	e := coBundle(t)
+	e := newBundleEnv(t)
 	fake := filepath.Join(t.TempDir(), "fake-ssh")
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho 'git@sheaf-test.invalid: Permission denied (publickey).' >&2\nexit 255\n"), 0o755); err != nil {
 		t.Fatal(err)

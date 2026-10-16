@@ -120,8 +120,8 @@ func (e *env) runTUI(t *testing.T, in io.Reader, out *syncBuffer, args ...string
 
 func TestTUIDecisionIsInjectableAndPlainByDefault(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
 	// Not forced: the test streams are not terminals, remove needs --yes.
 	_, errs, code := e.run(t, "remove", "alpha")
 	if code != 1 || !strings.Contains(errs, "--yes") {
@@ -131,7 +131,7 @@ func TestTUIDecisionIsInjectableAndPlainByDefault(t *testing.T) {
 
 func TestTUIAddOrgMenuSelectsTwoOfThree(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
+	e := newBundleEnv(t)
 	for _, n := range []string{"a", "b", "c"} {
 		e.origin(t, "o", n, false)
 	}
@@ -162,7 +162,7 @@ func TestTUIAddOrgMenuSelectsTwoOfThree(t *testing.T) {
 
 func TestTUIAddOrgMenuShowsPresentAndCancelChangesNothing(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
+	e := newBundleEnv(t)
 	for _, n := range []string{"a", "b"} {
 		e.origin(t, "o", n, false)
 	}
@@ -280,8 +280,8 @@ func TestTUISyncDeclinedRemovalChangesNothing(t *testing.T) {
 }
 
 func TestTUIRemoveConfirmYes(t *testing.T) {
-	e := coBundle(t)
-	e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
 	var out syncBuffer
 	in := newScript(t, true, []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}})
 	errs, code := e.runTUI(t, in, &out, "remove", "alpha")
@@ -300,8 +300,8 @@ func TestTUIRemoveConfirmYes(t *testing.T) {
 }
 
 func TestTUIRemoveConfirmNo(t *testing.T) {
-	e := coBundle(t)
-	e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
 	var out syncBuffer
 	in := newScript(t, true, []key{{keys: "n", wait: waitOutput(t, &out, "[y/N]")}})
 	errs, code := e.runTUI(t, in, &out, "remove", "alpha")
@@ -315,8 +315,8 @@ func TestTUIRemoveConfirmNo(t *testing.T) {
 
 func TestTUIRemoveWithYesDoesNotAsk(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
 	var out syncBuffer
 	in := newScript(t, true)
 	errs, code := e.runTUI(t, in, &out, "remove", "--yes", "alpha")
@@ -329,11 +329,11 @@ func TestTUIRemoveWithYesDoesNotAsk(t *testing.T) {
 }
 
 func TestTUIWorktreeRemoveShowsLostCommits(t *testing.T) {
-	e := coBundle(t)
-	_, primary := e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	_, primary := e.addRepo(t, "alpha")
 	wt := filepath.Join(e.cwd, "alpha", "feat")
 	testutil.Git(t, primary, "worktree", "add", "-q", "-b", "feat", wt)
-	coWrite(t, filepath.Join(wt, "x.txt"), "x\n")
+	writeFile(t, filepath.Join(wt, "x.txt"), "x\n")
 	testutil.Git(t, wt, "add", "x.txt")
 	testutil.Git(t, wt, "commit", "-q", "-m", "local only")
 	var out syncBuffer
@@ -351,9 +351,9 @@ func TestTUIWorktreeRemoveShowsLostCommits(t *testing.T) {
 }
 
 func TestTUIPruneConfirms(t *testing.T) {
-	e := coBundle(t)
-	o, primary := e.coAddRepo(t, "alpha", "feat")
-	wt := coWorktree(t, primary, "feat", "feat")
+	e := newBundleEnv(t)
+	o, primary := e.addRepo(t, "alpha", "feat")
+	wt := addWorktree(t, primary, "feat", "feat")
 	testutil.Git(t, o.Path, "branch", "-D", "feat") // gone upstream
 	var out syncBuffer
 	in := newScript(t, true, []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}})
@@ -397,8 +397,8 @@ func TestTUIInitAdoptsSelectedCandidates(t *testing.T) {
 
 func TestTUIUpdateProgressAndSummary(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	o, _ := e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	o, _ := e.addRepo(t, "alpha")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	var out syncBuffer
 	in := newScript(t, true)

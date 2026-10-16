@@ -543,7 +543,7 @@ func recheckEntry(ctx context.Context, w *Workspace, name string, opts AdoptOpti
 		}
 		return "", fmt.Errorf("cannot re-examine %s: %w; adopt it first: sheaf adopt %s", name, repoNotFound(b, name), name)
 	}
-	primary, _, prob := coCheckPrimary(ctx, w.Root, cur)
+	primary, _, prob := checkPrimary(ctx, w.Root, cur)
 	if prob != nil {
 		return "", fmt.Errorf("cannot re-examine %s: %s: %w", name, prob.Path, prob.Err)
 	}

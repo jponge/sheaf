@@ -39,7 +39,7 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 	report := func(phase, msg string) {
 		emit(Event{Repo: r.Name, Phase: phase, Kind: KindProgress, Message: msg})
 	}
-	primary, _, prob := coCheckPrimary(ctx, w.Root, r)
+	primary, _, prob := checkPrimary(ctx, w.Root, r)
 	if prob != nil {
 		return WorktreeAddResult{}, prob
 	}
@@ -106,7 +106,7 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 		}
 		return WorktreeAddResult{}, fmt.Errorf("creating worktree %s: %w", path, err)
 	}
-	ev(fmt.Sprintf("checked out tag %s (commit %s) on a detached HEAD", tag, coShortID(oid)))
+	ev(fmt.Sprintf("checked out tag %s (commit %s) on a detached HEAD", tag, shortID(oid)))
 	for _, wmsg := range warnings {
 		ev("warning: " + wmsg)
 	}

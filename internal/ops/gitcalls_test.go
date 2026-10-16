@@ -37,8 +37,8 @@ func gitCallsBundle(t *testing.T, n int) *fixture {
 	}
 	for name, o := range origins {
 		primary := filepath.Join(f.w.Root, name, "main")
-		coAddWorktree(t, primary, "feat-a", "feat/a", true)
-		coAddWorktree(t, primary, "feat-b", "feat/b", true)
+		addWorktree(t, primary, "feat-a", "feat/a", true)
+		addWorktree(t, primary, "feat-b", "feat/b", true)
 		testutil.Git(t, o.Path, "branch", "-q", "-D", "feat/a")
 	}
 	return f

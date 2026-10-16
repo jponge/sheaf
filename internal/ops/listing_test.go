@@ -32,7 +32,7 @@ func wtListing(infos []WorktreeInfo) []string {
 	return out
 }
 
-func coListing(cs []Checkout) []string {
+func checkoutListing(cs []Checkout) []string {
 	var out []string
 	for _, c := range cs {
 		s := c.Name() + " " + c.Path
@@ -52,9 +52,9 @@ func coListing(cs []Checkout) []string {
 func TestListingsOutsideWorktreeOrder(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha", "feat", "zz", "aaa")
-	feat := coAddWorktree(t, alpha, "feat", "feat", true)
-	zz := coAddWorktree(t, alpha, "zz", "zz", true)
+	_, alpha := addRepoWith(t, f, "alpha", "feat", "zz", "aaa")
+	feat := addWorktree(t, alpha, "feat", "feat", true)
+	zz := addWorktree(t, alpha, "zz", "zz", true)
 	tmp, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestListingsOutsideWorktreeOrder(t *testing.T) {
 		t.Fatal(err, probs)
 	}
 	want = []string{"alpha/main " + alpha + " primary", "alpha/feat " + feat, "alpha/zz " + zz, "alpha/aaa " + far + " outside"}
-	if got := coListing(cs); !slices.Equal(got, want) {
+	if got := checkoutListing(cs); !slices.Equal(got, want) {
 		t.Errorf("ListCheckouts =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
@@ -86,8 +86,8 @@ func TestListingsOutsideWorktreeOrder(t *testing.T) {
 func TestListingsWorktreeOfAnotherRepository(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha", "feat")
-	feat := coAddWorktree(t, alpha, "feat", "feat", true)
+	_, alpha := addRepoWith(t, f, "alpha", "feat")
+	feat := addWorktree(t, alpha, "feat", "feat", true)
 	if err := os.RemoveAll(feat); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestListingsWorktreeOfAnotherRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := coListing(cs); !slices.Equal(got, []string{"alpha/main " + alpha + " primary"}) {
+	if got := checkoutListing(cs); !slices.Equal(got, []string{"alpha/main " + alpha + " primary"}) {
 		t.Errorf("ListCheckouts = %q", got)
 	}
 	if len(probs) != 1 || probs[0].Path != feat || !strings.HasPrefix(probs[0].Err.Error(), "worktree of another repository (") {
@@ -120,7 +120,7 @@ func TestListingsWorktreeOfAnotherRepository(t *testing.T) {
 func TestListingsPrimaryWithGitFile(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha")
+	_, alpha := addRepoWith(t, f, "alpha")
 	tmp, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +149,7 @@ func TestListingsPrimaryWithGitFile(t *testing.T) {
 func TestListingsWorktreeThroughSymlinkedParent(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha", "x")
+	_, alpha := addRepoWith(t, f, "alpha", "x")
 	tmp, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func TestListingsWorktreeThroughSymlinkedParent(t *testing.T) {
 		t.Fatal(err, probs)
 	}
 	want = []string{"alpha/main " + alpha + " primary", "alpha/x " + x + " outside"}
-	if got := coListing(cs); !slices.Equal(got, want) {
+	if got := checkoutListing(cs); !slices.Equal(got, want) {
 		t.Errorf("ListCheckouts =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
@@ -203,7 +203,7 @@ func listingFailures(t *testing.T, f *fixture) (wt, co []string) {
 		t.Fatal(err)
 	}
 	if len(cs) != 0 {
-		t.Errorf("ListCheckouts listed %q", coListing(cs))
+		t.Errorf("ListCheckouts listed %q", checkoutListing(cs))
 	}
 	for _, p := range probs {
 		co = append(co, p.Error())
@@ -220,7 +220,7 @@ func TestListingsRefuseSymlinks(t *testing.T) {
 		t.Run(which, func(t *testing.T) {
 			t.Parallel()
 			f := newFixture(t)
-			_, alpha := coAddRepoWith(t, f, "alpha")
+			_, alpha := addRepoWith(t, f, "alpha")
 			link := alpha
 			if which == "repository directory" {
 				link = filepath.Dir(alpha)
@@ -253,7 +253,7 @@ func TestListingsRefuseSymlinks(t *testing.T) {
 func TestListingsMissingRepoDir(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha")
+	_, alpha := addRepoWith(t, f, "alpha")
 	if err := os.RemoveAll(filepath.Dir(alpha)); err != nil {
 		t.Fatal(err)
 	}
@@ -268,8 +268,8 @@ func TestListingsMissingRepoDir(t *testing.T) {
 // by a clone of another repository and returns the primary and its path.
 func foreignWorktree(t *testing.T, f *fixture) (testutil.Origin, string, string) {
 	t.Helper()
-	o, alpha := coAddRepoWith(t, f, "alpha", "feat")
-	feat := coAddWorktree(t, alpha, "feat", "feat", true)
+	o, alpha := addRepoWith(t, f, "alpha", "feat")
+	feat := addWorktree(t, alpha, "feat", "feat", true)
 	if err := os.RemoveAll(feat); err != nil {
 		t.Fatal(err)
 	}
@@ -303,8 +303,8 @@ func TestWorktreeCommandsRefuseWorktreeOfAnotherRepository(t *testing.T) {
 func TestListWorktreesReportsWorktreeWithoutGit(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha", "feat")
-	feat := coAddWorktree(t, alpha, "feat", "feat", true)
+	_, alpha := addRepoWith(t, f, "alpha", "feat")
+	feat := addWorktree(t, alpha, "feat", "feat", true)
 	if err := os.Remove(filepath.Join(feat, ".git")); err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func TestPRWorktreeRefusesWorktreeOfAnotherRepository(t *testing.T) {
 func TestCommandsRefuseSymlinkedPrimary(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha")
+	_, alpha := addRepoWith(t, f, "alpha")
 	tmp, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -422,7 +422,7 @@ func TestCommandsRefuseSymlinkedPrimary(t *testing.T) {
 func TestListingsSymlinkInRepoDirToWorktreeElsewhere(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha", "x")
+	_, alpha := addRepoWith(t, f, "alpha", "x")
 	sym := filepath.Join(filepath.Dir(alpha), "symwt")
 	testutil.Git(t, alpha, "worktree", "add", "-q", "--track", "-b", "x", sym, "origin/x")
 	tmp, err := filepath.EvalSymlinks(t.TempDir())
@@ -450,7 +450,7 @@ func TestListingsSymlinkInRepoDirToWorktreeElsewhere(t *testing.T) {
 		t.Fatal(err, probs)
 	}
 	want = []string{"alpha/main " + alpha + " primary", "alpha/symwt " + sym + " outside"}
-	if got := coListing(cs); !slices.Equal(got, want) {
+	if got := checkoutListing(cs); !slices.Equal(got, want) {
 		t.Errorf("ListCheckouts =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
@@ -461,7 +461,7 @@ func TestDoctorWarnsAboutUnusableWorktrees(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	_, alpha, foreign := foreignWorktree(t, f)
-	nogit := coAddWorktree(t, alpha, "nogit", "nogit", false)
+	nogit := addWorktree(t, alpha, "nogit", "nogit", false)
 	if err := os.Remove(filepath.Join(nogit, ".git")); err != nil {
 		t.Fatal(err)
 	}
@@ -492,8 +492,8 @@ func TestDoctorWarnsAboutUnusableWorktrees(t *testing.T) {
 func TestRemoveWorktreeRechecksUsabilityUnderLock(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	o, alpha := coAddRepoWith(t, f, "alpha", "feat")
-	feat := coAddWorktree(t, alpha, "feat", "feat", true)
+	o, alpha := addRepoWith(t, f, "alpha", "feat")
+	feat := addWorktree(t, alpha, "feat", "feat", true)
 	confirm := func(WorktreeRemovePlan) bool {
 		if err := os.RemoveAll(feat); err != nil {
 			t.Error(err)
@@ -512,13 +512,13 @@ func TestRemoveWorktreeRechecksUsabilityUnderLock(t *testing.T) {
 }
 
 // enumerateRepo refuses a listing whose first entry is not the primary
-// checkout. coCheckPrimary makes this unreachable for the commands (a .git
+// checkout. checkPrimary makes this unreachable for the commands (a .git
 // directory that is its own common directory makes git list the checkout
 // first); here a primary with a separate git directory bypasses it.
 func TestEnumerateRepoRequiresPrimaryFirst(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha")
+	_, alpha := addRepoWith(t, f, "alpha")
 	tmp, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

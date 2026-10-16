@@ -28,7 +28,7 @@ func remoteOf(t *testing.T, dir, remote string) string {
 
 func TestAddReportsForkAndNoForkOptsOut(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
+	e := newBundleEnv(t)
 	fx := e.forked(t, "up", "x")
 	fy := e.forked(t, "up", "y")
 	out, errs, code := e.run(t, "add", "up/x")
@@ -73,7 +73,7 @@ func TestSyncAddNewDetectsForksUnlessNoFork(t *testing.T) {
 
 func TestCompleteBranchesOfForkedRepository(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
+	e := newBundleEnv(t)
 	fo := e.forked(t, "up", "x")
 	testutil.Git(t, fo.Fork.Path, "branch", "on-fork", "main")
 	testutil.Git(t, fo.Upstream.Path, "branch", "on-upstream", "main")

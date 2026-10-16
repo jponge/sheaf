@@ -19,8 +19,8 @@ import (
 // must kill what is left of the command's process group, even after the
 // group leader exited.
 func TestKillCommandsDuringGraceKillsLeftovers(t *testing.T) {
-	t.Cleanup(coResetCommands)
-	f, _ := coThreeCheckouts(t)
+	t.Cleanup(resetCommands)
+	f, _ := threeCheckouts(t)
 	pidfile := filepath.Join(t.TempDir(), "pids")    // the TERM-immune child
 	leaderfile := filepath.Join(t.TempDir(), "lead") // the group leader
 	ctx, cancel := context.WithCancel(context.Background())
@@ -29,19 +29,19 @@ func TestKillCommandsDuringGraceKillsLeftovers(t *testing.T) {
 	go func() {
 		defer close(done)
 		_, _ = RunCommand(ctx, f.w, RunOptions{
-			Jobs: 1, Shell: true, Grace: 20 * time.Second, Filter: CheckoutFilter{Repos: []string{"beta"}}, Sink: &coRecSink{},
+			Jobs: 1, Shell: true, Grace: 20 * time.Second, Filter: CheckoutFilter{Repos: []string{"beta"}}, Sink: &recSink{},
 			// The child records its pid only once its trap is installed, so
 			// a SIGTERM can never reach it before.
 			Args: []string{"sh -c \"trap '' TERM; echo \\$\\$ >> '" + pidfile + "'; exec sleep 30\" >/dev/null 2>&1 </dev/null &\n" +
 				"echo $$ >> '" + leaderfile + "'\nwait\n"},
 		})
 	}()
-	coWaitPIDs(t, pidfile, 1)
-	coWaitPIDs(t, leaderfile, 1)
-	leader := coPidsIn(t, leaderfile)[0]
+	waitPIDs(t, pidfile, 1)
+	waitPIDs(t, leaderfile, 1)
+	leader := pidsIn(t, leaderfile)[0]
 	cancel()
 	deadline := time.Now().Add(5 * time.Second)
-	for coAlive(leader) {
+	for alive(leader) {
 		if time.Now().After(deadline) {
 			t.Fatal("leader survived SIGTERM")
 		}
@@ -51,7 +51,7 @@ func TestKillCommandsDuringGraceKillsLeftovers(t *testing.T) {
 	if n := KillCommands(); n < 1 {
 		t.Errorf("KillCommands = %d during the grace period, want 1", n)
 	}
-	coWantGone(t, pidfile, 2*time.Second)
+	wantGone(t, pidfile, 2*time.Second)
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
@@ -64,9 +64,9 @@ func TestKillCommandsDuringGraceKillsLeftovers(t *testing.T) {
 func TestRunCommandBackgroundChildHoldingOutput(t *testing.T) {
 	for _, jobs := range []int{1, 2} {
 		t.Run("jobs="+string(rune('0'+jobs)), func(t *testing.T) {
-			f, _ := coThreeCheckouts(t)
+			f, _ := threeCheckouts(t)
 			pidfile := filepath.Join(t.TempDir(), "pids")
-			sink := &coRecSink{}
+			sink := &recSink{}
 			start := time.Now()
 			r, err := RunCommand(context.Background(), f.w, RunOptions{
 				Jobs: jobs, Stream: jobs == 1, Shell: true, Grace: 300 * time.Millisecond, Sink: sink,
@@ -83,7 +83,7 @@ func TestRunCommandBackgroundChildHoldingOutput(t *testing.T) {
 			if got := sink.output("beta/main"); got != "started-bg\n" {
 				t.Errorf("output %q", got)
 			}
-			coWantGone(t, pidfile, 2*time.Second)
+			wantGone(t, pidfile, 2*time.Second)
 			if el := time.Since(start); el > 5*time.Second {
 				t.Errorf("took %v", el)
 			}
@@ -91,8 +91,8 @@ func TestRunCommandBackgroundChildHoldingOutput(t *testing.T) {
 	}
 }
 
-// coSizeSink checks large outputs without keeping them.
-type coSizeSink struct {
+// sizeSink checks large outputs without keeping them.
+type sizeSink struct {
 	mu       sync.Mutex
 	cur      string
 	sizes    map[string]int
@@ -100,14 +100,14 @@ type coSizeSink struct {
 	maxWrite int
 }
 
-func (s *coSizeSink) Begin(c Checkout) io.Writer {
+func (s *sizeSink) Begin(c Checkout) io.Writer {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cur = c.Name()
 	return s
 }
 
-func (s *coSizeSink) Write(p []byte) (int, error) {
+func (s *sizeSink) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(p) > s.maxWrite {
@@ -123,19 +123,19 @@ func (s *coSizeSink) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (s *coSizeSink) End(RunResult) {}
+func (s *sizeSink) End(RunResult) {}
 
 // S3: large captured outputs are spilled to temporary files (removed
 // afterwards) instead of being held in memory, and come out intact.
 func TestRunCommandSpillsLargeOutput(t *testing.T) {
-	f, _ := coThreeCheckouts(t)
+	f, _ := threeCheckouts(t)
 	var mu sync.Mutex
 	var spilled []string
-	old := coSpillHook
-	t.Cleanup(func() { coSpillHook = old })
-	coSpillHook = func(p string) { mu.Lock(); spilled = append(spilled, p); mu.Unlock() }
+	old := spillHook
+	t.Cleanup(func() { spillHook = old })
+	spillHook = func(p string) { mu.Lock(); spilled = append(spilled, p); mu.Unlock() }
 	const size = 5 << 20
-	sink := &coSizeSink{sizes: map[string]int{}, bad: map[string]bool{}}
+	sink := &sizeSink{sizes: map[string]int{}, bad: map[string]bool{}}
 	r, err := RunCommand(context.Background(), f.w, RunOptions{
 		Jobs: 3, Shell: true, Sink: sink,
 		Args: []string{"head -c 5242880 /dev/zero | tr '\\0' x"},
@@ -166,10 +166,10 @@ func TestRunCommandSpillsLargeOutput(t *testing.T) {
 func TestRunCommandTerminatesLeftoverGroupAfterExit(t *testing.T) {
 	for _, code := range []int{0, 3} {
 		t.Run("exit="+string(rune('0'+code)), func(t *testing.T) {
-			f, _ := coThreeCheckouts(t)
+			f, _ := threeCheckouts(t)
 			pidfile := filepath.Join(t.TempDir(), "pids")
 			r, err := RunCommand(context.Background(), f.w, RunOptions{
-				Jobs: 1, Shell: true, Grace: 300 * time.Millisecond, Sink: &coRecSink{},
+				Jobs: 1, Shell: true, Grace: 300 * time.Millisecond, Sink: &recSink{},
 				Filter: CheckoutFilter{Repos: []string{"beta"}},
 				Args:   []string{"sleep 30 >/dev/null 2>&1 </dev/null &\necho $! >> '" + pidfile + "'\nexit " + string(rune('0'+code))},
 			})
@@ -179,7 +179,7 @@ func TestRunCommandTerminatesLeftoverGroupAfterExit(t *testing.T) {
 			if !strings.Contains(r.Results[0].Note, "background") {
 				t.Errorf("note %q does not mention the terminated background processes", r.Results[0].Note)
 			}
-			coWantGone(t, pidfile, 2*time.Second)
+			wantGone(t, pidfile, 2*time.Second)
 		})
 	}
 }
@@ -188,15 +188,15 @@ func TestRunCommandTerminatesLeftoverGroupAfterExit(t *testing.T) {
 // not leave spilled outputs behind: on Unix the temporary files are unlinked
 // as soon as they are created (the open descriptor keeps the data).
 func TestRunCommandSpillFilesNeverVisible(t *testing.T) {
-	f, _ := coThreeCheckouts(t)
+	f, _ := threeCheckouts(t)
 	tmp := t.TempDir()
 	t.Setenv("TMPDIR", tmp)
 	var mu sync.Mutex
 	var visible []string
 	spills := 0
-	old := coSpillHook
-	t.Cleanup(func() { coSpillHook = old })
-	coSpillHook = func(p string) {
+	old := spillHook
+	t.Cleanup(func() { spillHook = old })
+	spillHook = func(p string) {
 		mu.Lock()
 		defer mu.Unlock()
 		spills++
@@ -207,7 +207,7 @@ func TestRunCommandSpillFilesNeverVisible(t *testing.T) {
 			visible = append(visible, p)
 		}
 	}
-	sink := &coSizeSink{sizes: map[string]int{}, bad: map[string]bool{}}
+	sink := &sizeSink{sizes: map[string]int{}, bad: map[string]bool{}}
 	r, err := RunCommand(context.Background(), f.w, RunOptions{
 		Jobs: 3, Shell: true, Sink: sink, Args: []string{"head -c 3145728 /dev/zero | tr '\\0' x"},
 	})

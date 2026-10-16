@@ -16,9 +16,9 @@ import (
 func TestCollectStatusCountsAndCleanliness(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha", "feat")
-	coAddRepoWith(t, f, "beta")
-	wt := coAddWorktree(t, alpha, "feat", "feat", true)
+	_, alpha := addRepoWith(t, f, "alpha", "feat")
+	addRepoWith(t, f, "beta")
+	wt := addWorktree(t, alpha, "feat", "feat", true)
 	// alpha/main: 1 staged, 1 unstaged, 1 untracked, 1 stash (repo-wide).
 	writeFile(t, filepath.Join(alpha, "stash.txt"), "s\n")
 	testutil.Git(t, alpha, "stash", "push", "-q", "-u")
@@ -64,7 +64,7 @@ func TestCollectStatusCountsAndCleanliness(t *testing.T) {
 func TestCollectStatusFetchesOnlyWithFetchOption(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	o, _ := coAddRepoWith(t, f, "alpha")
+	o, _ := addRepoWith(t, f, "alpha")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	ctx := context.Background()
 
@@ -87,7 +87,7 @@ func TestCollectStatusFetchesOnlyWithFetchOption(t *testing.T) {
 func TestCollectStatusReportsProblems(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha")
+	_, alpha := addRepoWith(t, f, "alpha")
 	if err := os.RemoveAll(alpha); err != nil {
 		t.Fatal(err)
 	}
@@ -103,9 +103,9 @@ func TestCollectStatusReportsProblems(t *testing.T) {
 func TestFetchReposOneTaskPerRepository(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	o, alpha := coAddRepoWith(t, f, "alpha", "feat")
-	coAddRepoWith(t, f, "beta")
-	coAddWorktree(t, alpha, "feat", "feat", true)
+	o, alpha := addRepoWith(t, f, "alpha", "feat")
+	addRepoWith(t, f, "beta")
+	addWorktree(t, alpha, "feat", "feat", true)
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	want := testutil.Git(t, o.Path, "rev-parse", "main")
 
@@ -127,8 +127,8 @@ func TestFetchReposOneTaskPerRepository(t *testing.T) {
 func TestFetchReposMissingPrimaryFails(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha")
-	coAddRepoWith(t, f, "beta")
+	_, alpha := addRepoWith(t, f, "alpha")
+	addRepoWith(t, f, "beta")
 	if err := os.RemoveAll(alpha); err != nil {
 		t.Fatal(err)
 	}
@@ -143,13 +143,13 @@ func TestFetchReposMissingPrimaryFails(t *testing.T) {
 
 // Two bundle entries resolving to the same repository (here through a
 // symlinked repository directory) cannot be fetched concurrently: the
-// symlinked one is refused (see coCheckPrimary), the other is fetched.
+// symlinked one is refused (see checkPrimary), the other is fetched.
 // TestFetchSerializedPerCommonDirWorktrees covers the per-repository lock.
 func TestFetchSerializedPerCommonDir(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha")
-	coAddRepoWith(t, f, "beta")
+	_, alpha := addRepoWith(t, f, "alpha")
+	addRepoWith(t, f, "beta")
 	beta := filepath.Join(f.w.Root, "beta")
 	if err := os.RemoveAll(beta); err != nil {
 		t.Fatal(err)
@@ -173,13 +173,13 @@ func TestFetchSerializedPerCommonDir(t *testing.T) {
 // linked worktree) are serialized: they share the remote-tracking refs.
 func TestFetchSerializedPerCommonDirWorktrees(t *testing.T) {
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha", "feat")
-	feat := coAddWorktree(t, alpha, "feat", "feat", true)
+	_, alpha := addRepoWith(t, f, "alpha", "feat")
+	feat := addWorktree(t, alpha, "feat", "feat", true)
 	var mu sync.Mutex
 	active, maxActive := 0, 0
-	old := coFetchHook
-	t.Cleanup(func() { coFetchHook = old })
-	coFetchHook = func(string) {
+	old := fetchHook
+	t.Cleanup(func() { fetchHook = old })
+	fetchHook = func(string) {
 		mu.Lock()
 		active++
 		maxActive = max(maxActive, active)
@@ -191,7 +191,7 @@ func TestFetchSerializedPerCommonDirWorktrees(t *testing.T) {
 	}
 	errs := make(chan error, 2)
 	for _, dir := range []string{alpha, feat} {
-		go func() { errs <- coFetchRepo(context.Background(), dir, gitx.OriginRemotes) }()
+		go func() { errs <- fetchRepo(context.Background(), dir, gitx.OriginRemotes) }()
 	}
 	for range 2 {
 		if err := <-errs; err != nil {

@@ -78,17 +78,17 @@ type CheckoutFilter struct {
 	Paths []string
 }
 
-// coRepoCheckouts are the checkouts of one repository whose primary exists.
-type coRepoCheckouts struct {
+// repoCheckouts are the checkouts of one repository whose primary exists.
+type repoCheckouts struct {
 	name      string
 	remotes   gitx.Remotes
 	primary   string // path of the primary checkout
 	checkouts []Checkout
 }
 
-// coSelectRepos returns the repositories of b selected by patterns, sorted by
+// selectRepos returns the repositories of b selected by patterns, sorted by
 // name.
-func coSelectRepos(b *bundle.Bundle, patterns []string) ([]bundle.Repository, error) {
+func selectRepos(b *bundle.Bundle, patterns []string) ([]bundle.Repository, error) {
 	repos := slices.Clone(b.Repositories)
 	slices.SortFunc(repos, func(x, y bundle.Repository) int { return strings.Compare(x.Name, y.Name) })
 	if len(patterns) == 0 {
@@ -116,31 +116,31 @@ func coSelectRepos(b *bundle.Bundle, patterns []string) ([]bundle.Repository, er
 	return slices.DeleteFunc(repos, func(r bundle.Repository) bool { return !sel[r.Name] }), nil
 }
 
-// coPrimaryPath returns <root>/<repo>/<normalized default branch>.
-func coPrimaryPath(root string, r bundle.Repository) (string, error) {
+// primaryPath returns <root>/<repo>/<normalized default branch>.
+func primaryPath(root string, r bundle.Repository) (string, error) {
 	return bundle.WorktreeDir(root, r.Name, r.DefaultBranch)
 }
 
-// coCheckPrimary is the check of a repository's layout shared by every
+// checkPrimary is the check of a repository's layout shared by every
 // command: it returns a problem unless the repository directory
 // <root>/<repo> and the primary checkout in it are real directories (not
 // symbolic links, resolving to themselves), and the primary checkout is the
-// main work tree of its own repository (see coVerifyPrimary) with a .git
+// main work tree of its own repository (see verifyPrimary) with a .git
 // directory. With these, git lists the primary checkout as the main work
 // tree, which enumerateRepo also checks. It also returns the repository's
 // common git directory.
-func coCheckPrimary(ctx context.Context, root string, r bundle.Repository) (string, string, *Problem) {
-	p, err := coPrimaryPath(root, r)
+func checkPrimary(ctx context.Context, root string, r bundle.Repository) (string, string, *Problem) {
+	p, err := primaryPath(root, r)
 	if err != nil {
 		return "", "", &Problem{Repo: r.Name, Path: filepath.Join(root, r.Name), Err: err}
 	}
-	if err := coCheckRealDir(filepath.Dir(p), "repository directory"); err != nil {
+	if err := checkRealDir(filepath.Dir(p), "repository directory"); err != nil {
 		return p, "", &Problem{Repo: r.Name, Path: filepath.Dir(p), Err: err}
 	}
-	if err := coCheckRealDir(p, "primary checkout"); err != nil {
+	if err := checkRealDir(p, "primary checkout"); err != nil {
 		return p, "", &Problem{Repo: r.Name, Path: p, Err: err}
 	}
-	common, err := coVerifyPrimary(ctx, p)
+	common, err := verifyPrimary(ctx, p)
 	if err != nil {
 		return p, "", &Problem{Repo: r.Name, Path: p, Err: err}
 	}
@@ -150,9 +150,9 @@ func coCheckPrimary(ctx context.Context, root string, r bundle.Repository) (stri
 	return p, common, nil
 }
 
-// coCheckRealDir returns an error, naming dir as what, unless dir is a
+// checkRealDir returns an error, naming dir as what, unless dir is a
 // directory, not a symbolic link, that resolves to itself.
-func coCheckRealDir(dir, what string) error {
+func checkRealDir(dir, what string) error {
 	fi, err := os.Lstat(dir)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -212,8 +212,8 @@ func refuseRemovalUnlessRealDir(dir string, fi fs.FileInfo) error {
 	return nil
 }
 
-// coSameFile reports whether a and b resolve to the same path.
-func coSameFile(a, b string) bool {
+// sameFile reports whether a and b resolve to the same path.
+func sameFile(a, b string) bool {
 	ra, err1 := filepath.EvalSymlinks(a)
 	rb, err2 := filepath.EvalSymlinks(b)
 	if err1 != nil || err2 != nil {
@@ -222,55 +222,55 @@ func coSameFile(a, b string) bool {
 	return ra == rb
 }
 
-// coWorkTree is what coInspect learns about a checkout directory.
-type coWorkTree struct {
+// workTree is what inspect learns about a checkout directory.
+type workTree struct {
 	top, gitDir, commonDir string
 }
 
-// coInspect checks that dir is the top level of a git work tree of its own
+// inspect checks that dir is the top level of a git work tree of its own
 // and returns its git directories, with a single git invocation. git run in
 // a directory without .git walks up to an enclosing repository, which must
 // never be mistaken for the checkout: dir/.git must exist and the top level
 // must resolve to dir, otherwise the error is "not a git work tree (inside
 // repository X)".
-func coInspect(ctx context.Context, dir string) (coWorkTree, error) {
+func inspect(ctx context.Context, dir string) (workTree, error) {
 	_, gitErr := os.Lstat(filepath.Join(dir, ".git"))
 	out, err := gitx.Run(ctx, dir, "rev-parse", "--path-format=absolute", "--show-toplevel", "--absolute-git-dir", "--git-common-dir")
 	if err != nil {
 		if ctx.Err() != nil {
-			return coWorkTree{}, ctx.Err()
+			return workTree{}, ctx.Err()
 		}
-		return coWorkTree{}, fmt.Errorf("not a git work tree: %w", err)
+		return workTree{}, fmt.Errorf("not a git work tree: %w", err)
 	}
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) != 3 {
-		return coWorkTree{}, fmt.Errorf("unexpected git rev-parse output %q", out)
+		return workTree{}, fmt.Errorf("unexpected git rev-parse output %q", out)
 	}
-	wt := coWorkTree{top: lines[0], gitDir: lines[1], commonDir: lines[2]}
-	if gitErr != nil || !coSameFile(wt.top, dir) {
-		return coWorkTree{}, fmt.Errorf("not a git work tree (inside repository %s)", wt.top)
+	wt := workTree{top: lines[0], gitDir: lines[1], commonDir: lines[2]}
+	if gitErr != nil || !sameFile(wt.top, dir) {
+		return workTree{}, fmt.Errorf("not a git work tree (inside repository %s)", wt.top)
 	}
 	return wt, nil
 }
 
-// coVerifyPrimary checks that dir is a work tree (see coInspect) and the
+// verifyPrimary checks that dir is a work tree (see inspect) and the
 // main work tree of its repository, not a linked worktree. It returns the
 // repository's common git directory.
-func coVerifyPrimary(ctx context.Context, dir string) (string, error) {
-	wt, err := coInspect(ctx, dir)
+func verifyPrimary(ctx context.Context, dir string) (string, error) {
+	wt, err := inspect(ctx, dir)
 	if err != nil {
 		return "", err
 	}
-	if !coSameFile(wt.gitDir, wt.commonDir) {
+	if !sameFile(wt.gitDir, wt.commonDir) {
 		return "", errors.New("primary is a linked worktree of another checkout (" + wt.commonDir + ")")
 	}
 	return wt.commonDir, nil
 }
 
-// coListRepo lists the checkouts of r in the order of enumerateRepo; linked
+// listRepoCheckouts lists the checkouts of r in the order of enumerateRepo; linked
 // worktrees that cannot be used are returned as problems.
-func coListRepo(ctx context.Context, root string, r bundle.Repository, primaryOnly bool) (*coRepoCheckouts, []Problem) {
-	primary, common, prob := coCheckPrimary(ctx, root, r)
+func listRepoCheckouts(ctx context.Context, root string, r bundle.Repository, primaryOnly bool) (*repoCheckouts, []Problem) {
+	primary, common, prob := checkPrimary(ctx, root, r)
 	if prob != nil {
 		return nil, []Problem{*prob}
 	}
@@ -278,7 +278,7 @@ func coListRepo(ctx context.Context, root string, r bundle.Repository, primaryOn
 	if err != nil {
 		return nil, []Problem{{Repo: r.Name, Path: primary, Err: err}}
 	}
-	rc := &coRepoCheckouts{name: r.Name, primary: primary, remotes: RemotesOf(r)}
+	rc := &repoCheckouts{name: r.Name, primary: primary, remotes: RemotesOf(r)}
 	rc.checkouts = append(rc.checkouts, Checkout{Repo: r.Name, Dir: filepath.Base(primary), Path: primary, Primary: true,
 		Branch: entries[0].Branch, Detached: entries[0].Detached})
 	var probs []Problem
@@ -293,28 +293,28 @@ func coListRepo(ctx context.Context, root string, r bundle.Repository, primaryOn
 	return rc, probs
 }
 
-// coEnumerate lists the selected checkouts of w per repository (repositories
+// enumerate lists the selected checkouts of w per repository (repositories
 // sorted by name), listing up to jobs repositories in parallel.
-func coEnumerate(ctx context.Context, w *Workspace, f CheckoutFilter, jobs int) ([]*coRepoCheckouts, []Problem, error) {
-	repos, err := coSelectRepos(w.Bundle(), f.Repos)
+func enumerate(ctx context.Context, w *Workspace, f CheckoutFilter, jobs int) ([]*repoCheckouts, []Problem, error) {
+	repos, err := selectRepos(w.Bundle(), f.Repos)
 	if err != nil {
 		return nil, nil, err
 	}
-	sets := make([]*coRepoCheckouts, len(repos))
+	sets := make([]*repoCheckouts, len(repos))
 	probs := make([][]Problem, len(repos))
-	coForEach(jobs, len(repos), func(i int) {
-		sets[i], probs[i] = coListRepo(ctx, w.Root, repos[i], f.PrimaryOnly)
+	forEach(jobs, len(repos), func(i int) {
+		sets[i], probs[i] = listRepoCheckouts(ctx, w.Root, repos[i], f.PrimaryOnly)
 	})
-	sets = slices.DeleteFunc(sets, func(s *coRepoCheckouts) bool { return s == nil })
+	sets = slices.DeleteFunc(sets, func(s *repoCheckouts) bool { return s == nil })
 	all := slices.Concat(probs...)
 	if len(f.Paths) == 0 {
 		return sets, all, nil
 	}
-	return coKeepPaths(sets, all, f.Paths)
+	return keepPaths(sets, all, f.Paths)
 }
 
-// coKeepPaths applies CheckoutFilter.Paths.
-func coKeepPaths(sets []*coRepoCheckouts, probs []Problem, paths []string) ([]*coRepoCheckouts, []Problem, error) {
+// keepPaths applies CheckoutFilter.Paths.
+func keepPaths(sets []*repoCheckouts, probs []Problem, paths []string) ([]*repoCheckouts, []Problem, error) {
 	found := map[string]bool{}
 	for _, s := range sets {
 		s.checkouts = slices.DeleteFunc(s.checkouts, func(c Checkout) bool { return !slices.Contains(paths, c.Path) })
@@ -322,7 +322,7 @@ func coKeepPaths(sets []*coRepoCheckouts, probs []Problem, paths []string) ([]*c
 			found[c.Path] = true
 		}
 	}
-	sets = slices.DeleteFunc(sets, func(s *coRepoCheckouts) bool { return len(s.checkouts) == 0 })
+	sets = slices.DeleteFunc(sets, func(s *repoCheckouts) bool { return len(s.checkouts) == 0 })
 	probs = slices.DeleteFunc(probs, func(p Problem) bool { return !slices.Contains(paths, p.Path) })
 	for _, p := range probs {
 		found[p.Path] = true
@@ -343,7 +343,7 @@ func coKeepPaths(sets []*coRepoCheckouts, probs []Problem, paths []string) ([]*c
 // error is only set for an invalid filter. Up to jobs repositories are listed
 // in parallel.
 func ListCheckouts(ctx context.Context, w *Workspace, f CheckoutFilter, jobs int) ([]Checkout, []Problem, error) {
-	sets, probs, err := coEnumerate(ctx, w, f, jobs)
+	sets, probs, err := enumerate(ctx, w, f, jobs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -354,9 +354,9 @@ func ListCheckouts(ctx context.Context, w *Workspace, f CheckoutFilter, jobs int
 	return cs, probs, nil
 }
 
-// coForEach calls fn(0..n-1) with at most jobs (minimum 1) calls running at a
+// forEach calls fn(0..n-1) with at most jobs (minimum 1) calls running at a
 // time and returns when all have returned.
-func coForEach(jobs, n int, fn func(i int)) {
+func forEach(jobs, n int, fn func(i int)) {
 	if jobs < 1 {
 		jobs = 1
 	}
@@ -372,17 +372,17 @@ func coForEach(jobs, n int, fn func(i int)) {
 	wg.Wait()
 }
 
-// coFetchLocks serializes fetches per git common directory: worktrees share
+// fetchLocks serializes fetches per git common directory: worktrees share
 // the remote-tracking refs, and concurrent fetches into one repository fail
 // on ref locks (see gitx.FetchRemote).
-var coFetchLocks = struct {
+var fetchLocks = struct {
 	sync.Mutex
 	m map[string]*sync.Mutex
 }{m: map[string]*sync.Mutex{}}
 
-// coFetchHook, when set by a test, runs while a repository fetch holds its
+// fetchHook, when set by a test, runs while a repository fetch holds its
 // per-repository lock.
-var coFetchHook func(commonDir string)
+var fetchHook func(commonDir string)
 
 // RemotesOf returns the remotes of a repository of the bundle: origin
 // alone, or upstream (the repository) and origin (the user's fork) when a
@@ -400,7 +400,7 @@ func RemotesOf(r bundle.Repository) gitx.Remotes {
 
 // fetchRemotes fetches each remote of rs into the repository of dir
 // (reference first), stopping at the first failure. Callers serialize it
-// per repository (see coFetchRepo).
+// per repository (see fetchRepo).
 func fetchRemotes(ctx context.Context, dir string, rs gitx.Remotes) error {
 	if !rs.Forked() {
 		return gitx.FetchRemote(ctx, dir, rs.Reference)
@@ -430,11 +430,11 @@ func onlyForkFetchFailed(err error, rs gitx.Remotes) bool {
 	return rs.Forked() && errors.As(err, &rf) && rf.Remote == rs.Fork
 }
 
-// coFetchRepo fetches the remotes rs into the repository of dir (see
+// fetchRepo fetches the remotes rs into the repository of dir (see
 // fetchRemotes), serialized with the other fetches into the same
 // repository. Under a context made by gitx.WithInteractive, git keeps the
 // terminal.
-func coFetchRepo(ctx context.Context, dir string, rs gitx.Remotes) error {
+func fetchRepo(ctx context.Context, dir string, rs gitx.Remotes) error {
 	cd, err := gitx.CommonDir(ctx, dir)
 	if err != nil {
 		return err
@@ -442,17 +442,17 @@ func coFetchRepo(ctx context.Context, dir string, rs gitx.Remotes) error {
 	if r, err := filepath.EvalSymlinks(cd); err == nil {
 		cd = r
 	}
-	coFetchLocks.Lock()
-	l := coFetchLocks.m[cd]
+	fetchLocks.Lock()
+	l := fetchLocks.m[cd]
 	if l == nil {
 		l = &sync.Mutex{}
-		coFetchLocks.m[cd] = l
+		fetchLocks.m[cd] = l
 	}
-	coFetchLocks.Unlock()
+	fetchLocks.Unlock()
 	l.Lock()
 	defer l.Unlock()
-	if coFetchHook != nil {
-		coFetchHook(cd)
+	if fetchHook != nil {
+		fetchHook(cd)
 	}
 	return fetchRemotes(ctx, dir, rs)
 }
@@ -473,18 +473,18 @@ type FetchOptions struct {
 // an invalid filter.
 func FetchRepos(ctx context.Context, w *Workspace, opts FetchOptions, rep Reporter) (Summary, error) {
 	ctx = withCommandCache(ctx)
-	repos, err := coSelectRepos(w.Bundle(), opts.Repos)
+	repos, err := selectRepos(w.Bundle(), opts.Repos)
 	if err != nil {
 		return Summary{}, err
 	}
 	tasks := make([]Task, 0, len(repos))
 	for _, r := range repos {
 		tasks = append(tasks, Task{Repo: r.Name, Phase: PhaseFetch, Run: func(ctx context.Context, _ func(Event)) (string, error) {
-			primary, _, prob := coCheckPrimary(ctx, w.Root, r)
+			primary, _, prob := checkPrimary(ctx, w.Root, r)
 			if prob != nil {
 				return "", fmt.Errorf("%s: %w", prob.Path, prob.Err)
 			}
-			if err := coFetchRepo(ctx, primary, RemotesOf(r)); err != nil {
+			if err := fetchRepo(ctx, primary, RemotesOf(r)); err != nil {
 				return "", err
 			}
 			return "fetched " + RemotesOf(r).String(), nil

@@ -12,9 +12,9 @@ import (
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
-// coAddRepoWith adds o/<name> to the bundle, backed by a fresh origin with the
+// addRepoWith adds o/<name> to the bundle, backed by a fresh origin with the
 // given extra branches, and returns the origin and the primary checkout.
-func coAddRepoWith(t *testing.T, f *fixture, name string, branches ...string) (testutil.Origin, string) {
+func addRepoWith(t *testing.T, f *fixture, name string, branches ...string) (testutil.Origin, string) {
 	t.Helper()
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: branches})
 	f.fake.AddRepo(hosting.Repo{Owner: "o", Name: name, CloneURL: o.URL, DefaultBranch: "main"})
@@ -25,10 +25,10 @@ func coAddRepoWith(t *testing.T, f *fixture, name string, branches ...string) (t
 	return o, filepath.Join(f.w.Root, name, "main")
 }
 
-// coAddWorktree creates the sibling worktree <repo>/<dir> of primary. With
+// addWorktree creates the sibling worktree <repo>/<dir> of primary. With
 // track, branch is created tracking origin/<branch>; otherwise it is a new
 // local branch without upstream.
-func coAddWorktree(t *testing.T, primary, dir, branch string, track bool) string {
+func addWorktree(t *testing.T, primary, dir, branch string, track bool) string {
 	t.Helper()
 	p := filepath.Join(filepath.Dir(primary), dir)
 	if track {
@@ -39,7 +39,7 @@ func coAddWorktree(t *testing.T, primary, dir, branch string, track bool) string
 	return p
 }
 
-func coCheckoutNames(cs []Checkout) []string {
+func checkoutNames(cs []Checkout) []string {
 	var n []string
 	for _, c := range cs {
 		n = append(n, c.Name())
@@ -50,10 +50,10 @@ func coCheckoutNames(cs []Checkout) []string {
 func TestListCheckoutsPrimaryFirstThenWorktreesByDir(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, beta := coAddRepoWith(t, f, "beta")
-	_, alpha := coAddRepoWith(t, f, "alpha", "feat/b", "feat/a")
-	coAddWorktree(t, alpha, "feat-b", "feat/b", true)
-	coAddWorktree(t, alpha, "feat-a", "feat/a", true)
+	_, beta := addRepoWith(t, f, "beta")
+	_, alpha := addRepoWith(t, f, "alpha", "feat/b", "feat/a")
+	addWorktree(t, alpha, "feat-b", "feat/b", true)
+	addWorktree(t, alpha, "feat-a", "feat/a", true)
 	det := filepath.Join(filepath.Dir(alpha), "det")
 	testutil.Git(t, alpha, "worktree", "add", "-q", "--detach", det, "HEAD")
 	_ = beta
@@ -63,7 +63,7 @@ func TestListCheckoutsPrimaryFirstThenWorktreesByDir(t *testing.T) {
 		t.Fatalf("err %v, problems %v", err, probs)
 	}
 	want := []string{"alpha/main", "alpha/det", "alpha/feat-a", "alpha/feat-b", "beta/main"}
-	if got := coCheckoutNames(cs); !slices.Equal(got, want) {
+	if got := checkoutNames(cs); !slices.Equal(got, want) {
 		t.Fatalf("checkouts = %v, want %v", got, want)
 	}
 	if !cs[0].Primary || cs[1].Primary || cs[0].Branch != "main" || cs[0].Path != alpha {
@@ -80,10 +80,10 @@ func TestListCheckoutsPrimaryFirstThenWorktreesByDir(t *testing.T) {
 func TestListCheckoutsReportsMissingDirectoriesAsProblems(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha", "feat")
-	_, beta := coAddRepoWith(t, f, "beta")
-	coAddRepoWith(t, f, "gamma")
-	wt := coAddWorktree(t, alpha, "feat", "feat", true)
+	_, alpha := addRepoWith(t, f, "alpha", "feat")
+	_, beta := addRepoWith(t, f, "beta")
+	addRepoWith(t, f, "gamma")
+	wt := addWorktree(t, alpha, "feat", "feat", true)
 	if err := os.RemoveAll(wt); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestListCheckoutsReportsMissingDirectoriesAsProblems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := coCheckoutNames(cs); !slices.Equal(got, []string{"alpha/main", "gamma/main"}) {
+	if got := checkoutNames(cs); !slices.Equal(got, []string{"alpha/main", "gamma/main"}) {
 		t.Errorf("checkouts = %v", got)
 	}
 	if len(probs) != 2 || probs[0].Repo != "alpha" || probs[0].Path != wt || probs[1].Repo != "beta" || probs[1].Path != filepath.Dir(beta) {
@@ -111,24 +111,24 @@ func TestListCheckoutsReportsMissingDirectoriesAsProblems(t *testing.T) {
 func TestListCheckoutsFilters(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha", "feat")
-	coAddRepoWith(t, f, "alps")
-	coAddRepoWith(t, f, "beta")
-	coAddWorktree(t, alpha, "feat", "feat", true)
+	_, alpha := addRepoWith(t, f, "alpha", "feat")
+	addRepoWith(t, f, "alps")
+	addRepoWith(t, f, "beta")
+	addWorktree(t, alpha, "feat", "feat", true)
 	ctx := context.Background()
 
 	cs, _, err := ListCheckouts(ctx, f.w, CheckoutFilter{Repos: []string{"al*"}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := coCheckoutNames(cs); !slices.Equal(got, []string{"alpha/main", "alpha/feat", "alps/main"}) {
+	if got := checkoutNames(cs); !slices.Equal(got, []string{"alpha/main", "alpha/feat", "alps/main"}) {
 		t.Errorf("glob filter: %v", got)
 	}
 	cs, _, err = ListCheckouts(ctx, f.w, CheckoutFilter{Repos: []string{"beta", "alpha"}, PrimaryOnly: true}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := coCheckoutNames(cs); !slices.Equal(got, []string{"alpha/main", "beta/main"}) {
+	if got := checkoutNames(cs); !slices.Equal(got, []string{"alpha/main", "beta/main"}) {
 		t.Errorf("names + primary-only: %v", got)
 	}
 	for _, bad := range []string{"nope", "z*", "["} {

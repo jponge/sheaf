@@ -14,7 +14,7 @@ import (
 // resolved root.
 func tagBundle(t *testing.T) (*env, string, testutil.Origin) {
 	t.Helper()
-	e := coBundle(t)
+	e := newBundleEnv(t)
 	root := e.cwd
 	o := e.origin(t, "o", "a", false)
 	e.origin(t, "o", "b", false)

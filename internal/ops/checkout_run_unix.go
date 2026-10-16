@@ -11,19 +11,19 @@ import (
 	"time"
 )
 
-// coProcTree is the process group of one command of RunCommand.
-type coProcTree struct {
+// procTree is the process group of one command of RunCommand.
+type procTree struct {
 	cmd *exec.Cmd
 
 	mu       sync.Mutex
 	signaled time.Time // when SIGTERM was sent, zero if never
 }
 
-// coPrepareTree makes cmd start in a new session (so it and its children form
+// prepareTree makes cmd start in a new session (so it and its children form
 // one process group without controlling terminal) and makes cancellation send
 // SIGTERM to the whole group.
-func coPrepareTree(cmd *exec.Cmd) *coProcTree {
-	t := &coProcTree{cmd: cmd}
+func prepareTree(cmd *exec.Cmd) *procTree {
+	t := &procTree{cmd: cmd}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Cancel = func() error {
 		t.mu.Lock()
@@ -43,13 +43,13 @@ func coPrepareTree(cmd *exec.Cmd) *coProcTree {
 // leftovers reports whether the process group of the exited command still
 // has members (background processes). While it has members its id cannot be
 // reused, so the probe is safe.
-func (t *coProcTree) leftovers() bool {
+func (t *procTree) leftovers() bool {
 	return syscall.Kill(-t.cmd.Process.Pid, 0) == nil
 }
 
 // terminate sends SIGTERM to the group of an exited command whose leftover
 // background processes kept its output open; finish then escalates.
-func (t *coProcTree) terminate() {
+func (t *procTree) terminate() {
 	t.mu.Lock()
 	t.signaled = time.Now()
 	t.mu.Unlock()
@@ -60,7 +60,7 @@ func (t *coProcTree) terminate() {
 // (children ignoring SIGTERM that outlived the leader), it waits until grace
 // has elapsed since SIGTERM, then sends SIGKILL to the group. While the group
 // has members its id cannot be reused, so probing it is safe.
-func (t *coProcTree) finish(grace time.Duration) {
+func (t *procTree) finish(grace time.Duration) {
 	t.mu.Lock()
 	signaled := t.signaled
 	t.mu.Unlock()
@@ -78,12 +78,12 @@ func (t *coProcTree) finish(grace time.Duration) {
 	}
 }
 
-// coKillTree sends SIGKILL to the process group of a started, not yet reaped
+// killTree sends SIGKILL to the process group of a started, not yet reaped
 // command.
-func coKillTree(cmd *exec.Cmd) error {
+func killTree(cmd *exec.Cmd) error {
 	return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
 
-// coUnlinkOpen removes the name of an open temporary file; the data stays
+// unlinkOpen removes the name of an open temporary file; the data stays
 // reachable through the open descriptor.
-func coUnlinkOpen(name string) bool { return os.Remove(name) == nil }
+func unlinkOpen(name string) bool { return os.Remove(name) == nil }

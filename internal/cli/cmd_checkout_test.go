@@ -13,8 +13,8 @@ import (
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
-// coBundle creates a bundle and makes it the working directory.
-func coBundle(t *testing.T) *env {
+// newBundleEnv creates a bundle and makes it the working directory.
+func newBundleEnv(t *testing.T) *env {
 	t.Helper()
 	e := newEnv(t)
 	root := filepath.Join(t.TempDir(), "bundle")
@@ -24,9 +24,9 @@ func coBundle(t *testing.T) *env {
 	return e
 }
 
-// coAddRepo adds o/<name> with the given extra branches; it returns the
+// addRepo adds o/<name> with the given extra branches; it returns the
 // origin and the primary checkout.
-func (e *env) coAddRepo(t *testing.T, name string, branches ...string) (testutil.Origin, string) {
+func (e *env) addRepo(t *testing.T, name string, branches ...string) (testutil.Origin, string) {
 	t.Helper()
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: branches})
 	e.fake.AddRepo(hosting.Repo{Owner: "o", Name: name, CloneURL: o.URL, DefaultBranch: "main"})
@@ -34,22 +34,22 @@ func (e *env) coAddRepo(t *testing.T, name string, branches ...string) (testutil
 	return o, filepath.Join(e.cwd, name, "main")
 }
 
-// coWorktree adds the sibling worktree <dir> tracking origin/<branch>.
-func coWorktree(t *testing.T, primary, dir, branch string) string {
+// addWorktree adds the sibling worktree <dir> tracking origin/<branch>.
+func addWorktree(t *testing.T, primary, dir, branch string) string {
 	t.Helper()
 	p := filepath.Join(filepath.Dir(primary), dir)
 	testutil.Git(t, primary, "worktree", "add", "-q", "--track", "-b", branch, p, "origin/"+branch)
 	return p
 }
 
-func coWrite(t *testing.T, p, content string) {
+func writeFile(t *testing.T, p, content string) {
 	t.Helper()
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func coSeam[T any](t *testing.T, v *T, val T) {
+func setSeam[T any](t *testing.T, v *T, val T) {
 	t.Helper()
 	old := *v
 	*v = val
@@ -87,22 +87,22 @@ func TestUseColor(t *testing.T) {
 	}
 }
 
-var coAnsi = regexp.MustCompile("\x1b\\[")
+var ansiEscape = regexp.MustCompile("\x1b\\[")
 
 func TestStatusTable(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	_, alpha := e.coAddRepo(t, "alpha", "feat")
-	e.coAddRepo(t, "beta")
-	wt := coWorktree(t, alpha, "feat", "feat")
-	coWrite(t, filepath.Join(alpha, "stash.txt"), "s\n")
+	e := newBundleEnv(t)
+	_, alpha := e.addRepo(t, "alpha", "feat")
+	e.addRepo(t, "beta")
+	wt := addWorktree(t, alpha, "feat", "feat")
+	writeFile(t, filepath.Join(alpha, "stash.txt"), "s\n")
 	testutil.Git(t, alpha, "stash", "push", "-q", "-u")
-	coWrite(t, filepath.Join(wt, "file-1.txt"), "changed\n")
+	writeFile(t, filepath.Join(wt, "file-1.txt"), "changed\n")
 	testutil.Git(t, wt, "add", "file-1.txt")
-	coWrite(t, filepath.Join(wt, "u.txt"), "u\n")
+	writeFile(t, filepath.Join(wt, "u.txt"), "u\n")
 
 	out := e.mustRun(t, "status")
-	if coAnsi.MatchString(out) {
+	if ansiEscape.MatchString(out) {
 		t.Errorf("color escapes although stdout is not a terminal:\n%q", out)
 	}
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
@@ -144,23 +144,23 @@ func TestStatusTable(t *testing.T) {
 }
 
 func TestStatusColor(t *testing.T) {
-	e := coBundle(t)
-	e.coAddRepo(t, "alpha")
-	coSeam(t, &stdoutIsTerminal, func(io.Writer) bool { return true })
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
+	setSeam(t, &stdoutIsTerminal, func(io.Writer) bool { return true })
 	t.Setenv("NO_COLOR", "")
-	if out := e.mustRun(t, "status"); !coAnsi.MatchString(out) {
+	if out := e.mustRun(t, "status"); !ansiEscape.MatchString(out) {
 		t.Errorf("no color on a terminal:\n%q", out)
 	}
 	t.Setenv("NO_COLOR", "1")
-	if out := e.mustRun(t, "status"); coAnsi.MatchString(out) {
+	if out := e.mustRun(t, "status"); ansiEscape.MatchString(out) {
 		t.Errorf("color despite NO_COLOR:\n%q", out)
 	}
 }
 
 func TestStatusDetachedAndNoUpstream(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	_, alpha := e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	_, alpha := e.addRepo(t, "alpha")
 	testutil.Git(t, alpha, "worktree", "add", "-q", "--detach", filepath.Join(filepath.Dir(alpha), "det"), "HEAD")
 	testutil.Git(t, alpha, "worktree", "add", "-q", "-b", "local", filepath.Join(filepath.Dir(alpha), "local"))
 	out := e.mustRun(t, "status")
@@ -172,7 +172,7 @@ func TestStatusDetachedAndNoUpstream(t *testing.T) {
 	}
 }
 
-type coStatusJSON struct {
+type statusJSON struct {
 	Version      int    `json:"version"`
 	Bundle       string `json:"bundle"`
 	Repositories []struct {
@@ -205,12 +205,12 @@ type coStatusJSON struct {
 }
 
 func TestStatusJSON(t *testing.T) {
-	e := coBundle(t)
-	o, alpha := e.coAddRepo(t, "alpha", "feat")
-	wt := coWorktree(t, alpha, "feat", "feat")
-	coWrite(t, filepath.Join(wt, "u.txt"), "u\n")
+	e := newBundleEnv(t)
+	o, alpha := e.addRepo(t, "alpha", "feat")
+	wt := addWorktree(t, alpha, "feat", "feat")
+	writeFile(t, filepath.Join(wt, "u.txt"), "u\n")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
-	e.coAddRepo(t, "beta")
+	e.addRepo(t, "beta")
 	if err := os.RemoveAll(filepath.Join(e.cwd, "beta")); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestStatusJSON(t *testing.T) {
 	if code == 0 {
 		t.Errorf("exit 0 despite a problem; stderr %s", errs)
 	}
-	var s coStatusJSON
+	var s statusJSON
 	if err := json.Unmarshal([]byte(out), &s); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, out)
 	}
@@ -245,9 +245,9 @@ func TestStatusJSON(t *testing.T) {
 
 func TestStatusProblemsListedAndNonZero(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	_, alpha := e.coAddRepo(t, "alpha", "feat")
-	wt := coWorktree(t, alpha, "feat", "feat")
+	e := newBundleEnv(t)
+	_, alpha := e.addRepo(t, "alpha", "feat")
+	wt := addWorktree(t, alpha, "feat", "feat")
 	if err := os.RemoveAll(wt); err != nil {
 		t.Fatal(err)
 	}
@@ -259,9 +259,9 @@ func TestStatusProblemsListedAndNonZero(t *testing.T) {
 
 func TestFetchCommand(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	o, alpha := e.coAddRepo(t, "alpha")
-	e.coAddRepo(t, "beta")
+	e := newBundleEnv(t)
+	o, alpha := e.addRepo(t, "alpha")
+	e.addRepo(t, "beta")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	out, errs, code := e.run(t, "fetch")
 	if code != 0 || !strings.Contains(out, "2 done, 0 skipped, 0 failed") {
@@ -274,12 +274,12 @@ func TestFetchCommand(t *testing.T) {
 
 func TestUpdateCommand(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	o, alpha := e.coAddRepo(t, "alpha", "dirty")
-	dirty := coWorktree(t, alpha, "dirty", "dirty")
+	e := newBundleEnv(t)
+	o, alpha := e.addRepo(t, "alpha", "dirty")
+	dirty := addWorktree(t, alpha, "dirty", "dirty")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	testutil.AdvanceOrigin(t, o, "dirty", "r.txt", "r\n", "remote")
-	coWrite(t, filepath.Join(dirty, "file-1.txt"), "staged\n")
+	writeFile(t, filepath.Join(dirty, "file-1.txt"), "staged\n")
 	testutil.Git(t, dirty, "add", "file-1.txt")
 
 	out, errs, code := e.run(t, "update")
@@ -311,8 +311,8 @@ func TestUpdateCommand(t *testing.T) {
 
 func TestUpdateCommandFailureExitsNonZero(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	_, alpha := e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	_, alpha := e.addRepo(t, "alpha")
 	testutil.Git(t, alpha, "remote", "set-url", "origin", "file://"+filepath.Join(t.TempDir(), "missing.git"))
 	out, _, code := e.run(t, "update")
 	if code != 1 || !regexp.MustCompile(`failed\s+alpha/main\s+fetch failed`).MatchString(out) || !strings.Contains(out, "1 failed") {
@@ -322,10 +322,10 @@ func TestUpdateCommandFailureExitsNonZero(t *testing.T) {
 
 func TestRunCommandBlocksAndSummary(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	_, alpha := e.coAddRepo(t, "alpha", "feat")
-	e.coAddRepo(t, "beta")
-	coWorktree(t, alpha, "feat", "feat")
+	e := newBundleEnv(t)
+	_, alpha := e.addRepo(t, "alpha", "feat")
+	e.addRepo(t, "beta")
+	addWorktree(t, alpha, "feat", "feat")
 
 	// No "--" needed: flags after the command belong to it.
 	out := e.mustRun(t, "run", "-j", "4", "git", "rev-parse", "--abbrev-ref", "HEAD")

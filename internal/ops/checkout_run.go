@@ -75,10 +75,10 @@ type RunReport struct {
 	Problems []Problem
 }
 
-type coDiscardSink struct{}
+type discardSink struct{}
 
-func (coDiscardSink) Begin(Checkout) io.Writer { return io.Discard }
-func (coDiscardSink) End(RunResult)            {}
+func (discardSink) Begin(Checkout) io.Writer { return io.Discard }
+func (discardSink) End(RunResult)            {}
 
 // RunCommand runs a command in each selected checkout directory, up to Jobs
 // at a time. Standard output and error are combined; standard input is
@@ -109,7 +109,7 @@ func RunCommand(ctx context.Context, w *Workspace, opts RunOptions) (RunReport, 
 	if opts.Shell {
 		argv = append([]string{"sh", "-c", opts.Args[0], "sh"}, opts.Args[1:]...)
 	}
-	sets, probs, err := coEnumerate(ctx, w, opts.Filter, opts.Jobs)
+	sets, probs, err := enumerate(ctx, w, opts.Filter, opts.Jobs)
 	if err != nil {
 		return RunReport{}, err
 	}
@@ -119,7 +119,7 @@ func RunCommand(ctx context.Context, w *Workspace, opts RunOptions) (RunReport, 
 	}
 	if opts.DirtyOnly {
 		sts := make([]CheckoutStatus, len(cs))
-		coForEach(opts.Jobs, len(cs), func(i int) {
+		forEach(opts.Jobs, len(cs), func(i int) {
 			sts[i].Checkout = cs[i]
 			sts[i].Status, sts[i].Err = gitx.Status(ctx, cs[i].Path)
 		})
@@ -132,11 +132,11 @@ func RunCommand(ctx context.Context, w *Workspace, opts RunOptions) (RunReport, 
 				cs = append(cs, s.Checkout)
 			}
 		}
-		coSortProblems(probs)
+		sortProblems(probs)
 	}
 	sink := opts.Sink
 	if sink == nil {
-		sink = coDiscardSink{}
+		sink = discardSink{}
 	}
 	grace := opts.Grace
 	if grace <= 0 {
@@ -156,14 +156,14 @@ func RunCommand(ctx context.Context, w *Workspace, opts RunOptions) (RunReport, 
 				continue
 			}
 			out := sink.Begin(c)
-			results[i] = coRunIn(ctx, c, argv, coWriterOnly{out}, grace)
+			results[i] = runIn(ctx, c, argv, writerOnly{out}, grace)
 			sink.End(results[i])
 		}
 		return RunReport{Results: results, Problems: probs}, nil
 	}
 
 	var mu sync.Mutex
-	outputs := make([]*coSpillBuffer, len(cs))
+	outputs := make([]*spillBuffer, len(cs))
 	done := make([]bool, len(cs))
 	next := 0
 	flush := func() {
@@ -177,10 +177,10 @@ func RunCommand(ctx context.Context, w *Workspace, opts RunOptions) (RunReport, 
 			next++
 		}
 	}
-	coForEach(opts.Jobs, len(cs), func(i int) {
+	forEach(opts.Jobs, len(cs), func(i int) {
 		if !notStarted(i) {
-			buf := &coSpillBuffer{}
-			r := coRunIn(ctx, cs[i], argv, buf, grace)
+			buf := &spillBuffer{}
+			r := runIn(ctx, cs[i], argv, buf, grace)
 			mu.Lock()
 			results[i], outputs[i] = r, buf
 			mu.Unlock()
@@ -193,24 +193,24 @@ func RunCommand(ctx context.Context, w *Workspace, opts RunOptions) (RunReport, 
 	return RunReport{Results: results, Problems: probs}, nil
 }
 
-// coWriterOnly hides any other method of the writer (in particular *os.File's),
+// writerOnly hides any other method of the writer (in particular *os.File's),
 // so that exec always copies the output through a pipe: the command never
 // writes to sheaf's terminal directly (no pager, no terminal detection).
-type coWriterOnly struct{ w io.Writer }
+type writerOnly struct{ w io.Writer }
 
-func (w coWriterOnly) Write(p []byte) (int, error) { return w.w.Write(p) }
+func (w writerOnly) Write(p []byte) (int, error) { return w.w.Write(p) }
 
-// coSpillLimit is the size above which a captured output moves from memory
+// spillLimit is the size above which a captured output moves from memory
 // to a temporary file.
-const coSpillLimit = 1 << 20
+const spillLimit = 1 << 20
 
-// coSpillBuffer captures the combined output of one command (its writes are
-// serialized): in memory up to coSpillLimit, then in a temporary file of
+// spillBuffer captures the combined output of one command (its writes are
+// serialized): in memory up to spillLimit, then in a temporary file of
 // os.TempDir(). On Unix the file is unlinked as soon as it is created (the
 // open descriptor keeps the data), so nothing is left behind even when sheaf
 // exits without cleanup (emergency stop); elsewhere it is removed after
 // replay.
-type coSpillBuffer struct {
+type spillBuffer struct {
 	mu       sync.Mutex
 	unlinked bool
 	buf      bytes.Buffer
@@ -218,13 +218,13 @@ type coSpillBuffer struct {
 	err      error // first spill error; later output is dropped
 }
 
-func (s *coSpillBuffer) Write(p []byte) (int, error) {
+func (s *spillBuffer) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.err != nil {
 		return len(p), nil // keep the command running; the loss is reported
 	}
-	if s.f == nil && s.buf.Len()+len(p) > coSpillLimit {
+	if s.f == nil && s.buf.Len()+len(p) > spillLimit {
 		s.spill()
 		if s.err != nil {
 			return len(p), nil
@@ -240,16 +240,16 @@ func (s *coSpillBuffer) Write(p []byte) (int, error) {
 }
 
 // spill moves the buffered output to a new temporary file.
-func (s *coSpillBuffer) spill() {
+func (s *spillBuffer) spill() {
 	f, err := os.CreateTemp("", "sheaf-run-output-*")
 	if err != nil {
 		s.err = err
 		return
 	}
 	s.f = f
-	s.unlinked = coUnlinkOpen(f.Name())
-	if coSpillHook != nil {
-		coSpillHook(s.f.Name())
+	s.unlinked = unlinkOpen(f.Name())
+	if spillHook != nil {
+		spillHook(s.f.Name())
 	}
 	if _, err := s.f.Write(s.buf.Bytes()); err != nil {
 		s.err = err
@@ -260,7 +260,7 @@ func (s *coSpillBuffer) spill() {
 // replay writes the captured output to w in chunks of at most 64 KiB, then
 // releases the temporary file. It must be called once, after the command
 // finished.
-func (s *coSpillBuffer) replay(w io.Writer) {
+func (s *spillBuffer) replay(w io.Writer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.f == nil {
@@ -295,15 +295,15 @@ func (s *coSpillBuffer) replay(w io.Writer) {
 	}
 }
 
-// coCommands holds the running commands for KillCommands.
-var coCommands = struct {
+// runningCommands holds the running commands for KillCommands.
+var runningCommands = struct {
 	sync.Mutex
 	stopped bool
 	m       map[*exec.Cmd]bool
 }{m: map[*exec.Cmd]bool{}}
 
-// coErrCommandsKilled is the error of commands not started after KillCommands.
-var coErrCommandsKilled = errors.New("not started (killed on request)")
+// errCommandsKilled is the error of commands not started after KillCommands.
+var errCommandsKilled = errors.New("not started (killed on request)")
 
 // KillCommands sends SIGKILL to the process group (outside Unix: the process)
 // of every command started by RunCommand that is still running, and returns
@@ -311,38 +311,38 @@ var coErrCommandsKilled = errors.New("not started (killed on request)")
 // more. It is meant for an emergency stop right before the process exits
 // (like gitx.KillAll).
 func KillCommands() int {
-	coCommands.Lock()
-	defer coCommands.Unlock()
-	coCommands.stopped = true
+	runningCommands.Lock()
+	defer runningCommands.Unlock()
+	runningCommands.stopped = true
 	n := 0
-	for cmd := range coCommands.m {
-		if coKillTree(cmd) == nil {
+	for cmd := range runningCommands.m {
+		if killTree(cmd) == nil {
 			n++
 		}
 	}
 	return n
 }
 
-// coRunIn runs argv in c.Path with combined output written to out.
-func coRunIn(ctx context.Context, c Checkout, argv []string, out io.Writer, grace time.Duration) RunResult {
+// runIn runs argv in c.Path with combined output written to out.
+func runIn(ctx context.Context, c Checkout, argv []string, out io.Writer, grace time.Duration) RunResult {
 	res := RunResult{Checkout: c, ExitCode: -1}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = c.Path
 	cmd.Env = append(gitx.StripRepoEnv(os.Environ()), "SHEAF_REPO="+c.Repo, "SHEAF_DIR="+c.Dir, "SHEAF_BRANCH="+c.Branch)
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.WaitDelay = grace
-	t := coPrepareTree(cmd)
-	coCommands.Lock()
-	if coCommands.stopped {
-		coCommands.Unlock()
-		res.Err = coErrCommandsKilled
+	t := prepareTree(cmd)
+	runningCommands.Lock()
+	if runningCommands.stopped {
+		runningCommands.Unlock()
+		res.Err = errCommandsKilled
 		return res
 	}
 	err := cmd.Start()
 	if err == nil {
-		coCommands.m[cmd] = true
+		runningCommands.m[cmd] = true
 	}
-	coCommands.Unlock()
+	runningCommands.Unlock()
 	if err != nil {
 		res.Err = err
 		return res
@@ -361,9 +361,9 @@ func coRunIn(ctx context.Context, c Checkout, argv []string, out io.Writer, grac
 	t.finish(grace)
 	// Unregister only now: until finish returns, members of the group may
 	// still be alive (KillCommands must reach them).
-	coCommands.Lock()
-	delete(coCommands.m, cmd)
-	coCommands.Unlock()
+	runningCommands.Lock()
+	delete(runningCommands.m, cmd)
+	runningCommands.Unlock()
 	var ee *exec.ExitError
 	switch {
 	case bgHeld:
@@ -393,14 +393,14 @@ func coRunIn(ctx context.Context, c Checkout, argv []string, out io.Writer, grac
 	return res
 }
 
-// coSpillHook, when set by a test, is called with the path of each temporary
+// spillHook, when set by a test, is called with the path of each temporary
 // file used to hold a large output.
-var coSpillHook func(path string)
+var spillHook func(path string)
 
-// coResetCommands re-enables starting commands after KillCommands (tests
+// resetCommands re-enables starting commands after KillCommands (tests
 // only).
-func coResetCommands() {
-	coCommands.Lock()
-	coCommands.stopped = false
-	coCommands.Unlock()
+func resetCommands() {
+	runningCommands.Lock()
+	runningCommands.stopped = false
+	runningCommands.Unlock()
 }

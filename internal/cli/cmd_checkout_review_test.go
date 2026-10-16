@@ -18,8 +18,8 @@ import (
 // Failures keep git's full (multi-line) error in the update summary.
 func TestUpdateSummaryKeepsFullError(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	_, alpha := e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	_, alpha := e.addRepo(t, "alpha")
 	testutil.Git(t, alpha, "remote", "set-url", "origin", "file://"+filepath.Join(t.TempDir(), "missing.git"))
 	out, _, _ := e.run(t, "update")
 	if !strings.Contains(out, "Could not read from remote repository") {
@@ -29,10 +29,10 @@ func TestUpdateSummaryKeepsFullError(t *testing.T) {
 
 func TestUpdateUntrackedInTheWayShownAsSkipped(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	o, alpha := e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	o, alpha := e.addRepo(t, "alpha")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "remote\n", "remote")
-	coWrite(t, filepath.Join(alpha, "r.txt"), "mine\n")
+	writeFile(t, filepath.Join(alpha, "r.txt"), "mine\n")
 	out, _, code := e.run(t, "update")
 	if code != 0 || !regexp.MustCompile(`skipped\s+alpha/main\s+untracked files in the way: r.txt`).MatchString(out) {
 		t.Fatalf("exit %d\n%s", code, out)
@@ -48,7 +48,7 @@ func TestStatusTableStashOnFirstSuccessfulRow(t *testing.T) {
 		{Checkout: ops.Checkout{Repo: "a", Dir: "more", Branch: "more"}, Status: &gitx.RepoStatus{Branch: "more", Stashes: 2}},
 	}}
 	var b bytes.Buffer
-	coWriteStatusTable(&b, r, false)
+	writeStatusTable(&b, r, false)
 	lines := strings.Split(b.String(), "\n")
 	if f := strings.Fields(lines[2]); len(f) < 2 || f[len(f)-2] != "2" {
 		t.Errorf("stash count not on the first successful row:\n%s", b.String())
@@ -61,8 +61,8 @@ func TestStatusTableStashOnFirstSuccessfulRow(t *testing.T) {
 // Worktrees outside <bundle>/<repo>/ are marked in every output.
 func TestOutsideWorktreeMarked(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	_, alpha := e.coAddRepo(t, "alpha", "far")
+	e := newBundleEnv(t)
+	_, alpha := e.addRepo(t, "alpha", "far")
 	far := filepath.Join(t.TempDir(), "far")
 	testutil.Git(t, alpha, "worktree", "add", "-q", "--track", "-b", "far", far, "origin/far")
 	far, _ = filepath.EvalSymlinks(far)
@@ -84,7 +84,7 @@ func TestOutsideWorktreeMarked(t *testing.T) {
 func TestNotStartedEventWording(t *testing.T) {
 	t.Parallel()
 	var b bytes.Buffer
-	r := coCheckoutRenderer{plainRenderer{&b}}
+	r := checkoutRenderer{plainRenderer{&b}}
 	r.Report(ops.Event{Repo: "a", Worktree: "main", Phase: ops.PhaseUpdate, Kind: ops.KindFailed, Message: "not started (interrupted)", Err: context.Canceled})
 	r.Report(ops.Event{Repo: "b", Phase: ops.PhaseFetch, Kind: ops.KindFailed, Message: "not started", Err: context.Canceled})
 	want := "a/main: update not started (interrupted)\nb: fetch not started (interrupted)\n"
@@ -95,9 +95,9 @@ func TestNotStartedEventWording(t *testing.T) {
 
 func TestUpdateSummaryPluralization(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	_, alpha := e.coAddRepo(t, "alpha")
-	e.coAddRepo(t, "beta")
+	e := newBundleEnv(t)
+	_, alpha := e.addRepo(t, "alpha")
+	e.addRepo(t, "beta")
 	if err := os.RemoveAll(alpha); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestUpdateSummaryPluralization(t *testing.T) {
 func TestRunBlockShowsNote(t *testing.T) {
 	t.Parallel()
 	var b bytes.Buffer
-	s := &coBlockSink{w: &b}
+	s := &blockSink{w: &b}
 	w := s.Begin(ops.Checkout{Repo: "a", Dir: "main"})
 	_, _ = w.Write([]byte("x\n"))
 	s.End(ops.RunResult{Started: true, Note: "output may be truncated"})

@@ -14,7 +14,7 @@ import (
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
-func coUpdatesByName(r UpdateReport) map[string]CheckoutUpdate {
+func updatesByName(r UpdateReport) map[string]CheckoutUpdate {
 	m := map[string]CheckoutUpdate{}
 	for _, c := range r.Checkouts {
 		m[c.Name()] = c
@@ -25,13 +25,13 @@ func coUpdatesByName(r UpdateReport) map[string]CheckoutUpdate {
 func TestUpdateClassifiesEveryCheckout(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	o, alpha := coAddRepoWith(t, f, "alpha", "clean", "dirty", "gone", "div")
-	coAddRepoWith(t, f, "beta")
-	coAddWorktree(t, alpha, "clean", "clean", true)
-	dirty := coAddWorktree(t, alpha, "dirty", "dirty", true)
-	coAddWorktree(t, alpha, "gone", "gone", true)
-	div := coAddWorktree(t, alpha, "div", "div", true)
-	coAddWorktree(t, alpha, "local", "local", false)
+	o, alpha := addRepoWith(t, f, "alpha", "clean", "dirty", "gone", "div")
+	addRepoWith(t, f, "beta")
+	addWorktree(t, alpha, "clean", "clean", true)
+	dirty := addWorktree(t, alpha, "dirty", "dirty", true)
+	addWorktree(t, alpha, "gone", "gone", true)
+	div := addWorktree(t, alpha, "div", "div", true)
+	addWorktree(t, alpha, "local", "local", false)
 	testutil.Git(t, alpha, "worktree", "add", "-q", "--detach", filepath.Join(filepath.Dir(alpha), "det"), "HEAD")
 
 	oldMain := testutil.Git(t, alpha, "rev-parse", "HEAD")
@@ -57,7 +57,7 @@ func TestUpdateClassifiesEveryCheckout(t *testing.T) {
 	if len(r.Problems) != 0 {
 		t.Fatalf("problems: %v", r.Problems)
 	}
-	m := coUpdatesByName(r)
+	m := updatesByName(r)
 	if len(m) != 8 {
 		t.Fatalf("got %d checkouts: %+v", len(m), r.Checkouts)
 	}
@@ -110,7 +110,7 @@ func TestUpdateClassifiesEveryCheckout(t *testing.T) {
 func TestUpdateFetchFailureFailsTheRepositoryCheckouts(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha")
+	_, alpha := addRepoWith(t, f, "alpha")
 	testutil.Git(t, alpha, "remote", "set-url", "origin", "file://"+filepath.Join(t.TempDir(), "missing.git"))
 	r, err := Update(context.Background(), f.w, UpdateOptions{Jobs: 1}, Discard)
 	if err != nil {
@@ -125,15 +125,15 @@ func TestUpdateFetchFailureFailsTheRepositoryCheckouts(t *testing.T) {
 // repository is reported as failed with the context's error.
 func TestUpdateCancelledDuringFetchStartsNoMerge(t *testing.T) {
 	f := newFixture(t)
-	o, alpha := coAddRepoWith(t, f, "alpha", "feat")
-	coAddWorktree(t, alpha, "feat", "feat", true)
+	o, alpha := addRepoWith(t, f, "alpha", "feat")
+	addWorktree(t, alpha, "feat", "feat", true)
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	before := testutil.Git(t, alpha, "rev-parse", "HEAD")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	old := coFetchHook
-	t.Cleanup(func() { coFetchHook = old })
-	coFetchHook = func(string) { cancel() }
+	old := fetchHook
+	t.Cleanup(func() { fetchHook = old })
+	fetchHook = func(string) { cancel() }
 	r, _ := Update(ctx, f.w, UpdateOptions{Jobs: 1}, Discard)
 	if len(r.Checkouts) != 2 {
 		t.Fatalf("report = %+v", r)
@@ -148,14 +148,14 @@ func TestUpdateCancelledDuringFetchStartsNoMerge(t *testing.T) {
 	}
 }
 
-// coBlockingMergeRepo returns a bundle whose alpha/main fast-forward runs a
+// blockingMergeRepo returns a bundle whose alpha/main fast-forward runs a
 // post-merge hook that signals started and then waits for release to exist.
 // alpha also has a worktree "feat" that is behind.
-func coBlockingMergeRepo(t *testing.T) (f *fixture, alpha, started, release string) {
+func blockingMergeRepo(t *testing.T) (f *fixture, alpha, started, release string) {
 	t.Helper()
 	f = newFixture(t)
-	o, alpha := coAddRepoWith(t, f, "alpha", "feat")
-	coAddWorktree(t, alpha, "feat", "feat", true)
+	o, alpha := addRepoWith(t, f, "alpha", "feat")
+	addWorktree(t, alpha, "feat", "feat", true)
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote main")
 	testutil.AdvanceOrigin(t, o, "feat", "r.txt", "r\n", "remote feat")
 	hooks := t.TempDir()
@@ -169,7 +169,7 @@ func coBlockingMergeRepo(t *testing.T) (f *fixture, alpha, started, release stri
 	return f, alpha, started, release
 }
 
-func coWaitFile(t *testing.T, p string) {
+func waitFile(t *testing.T, p string) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
@@ -186,7 +186,7 @@ func coWaitFile(t *testing.T, p string) {
 // First Ctrl-C: the in-progress fast-forward completes, a waiting event is
 // reported for it, and the next checkout is not started.
 func TestUpdateCancelLetsInProgressFastForwardFinish(t *testing.T) {
-	f, alpha, started, release := coBlockingMergeRepo(t)
+	f, alpha, started, release := blockingMergeRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	waiting := make(chan Event, 4)
@@ -200,7 +200,7 @@ func TestUpdateCancelLetsInProgressFastForwardFinish(t *testing.T) {
 		r, _ := Update(ctx, f.w, UpdateOptions{Jobs: 1}, rep)
 		done <- r
 	}()
-	coWaitFile(t, started)
+	waitFile(t, started)
 	cancel()
 	select {
 	case e := <-waiting:
@@ -222,7 +222,7 @@ func TestUpdateCancelLetsInProgressFastForwardFinish(t *testing.T) {
 	if n := len(waiting); n != 0 {
 		t.Errorf("%d extra waiting events, want exactly one (for the started merge)", n)
 	}
-	m := coUpdatesByName(r)
+	m := updatesByName(r)
 	if u := m["alpha/main"]; u.Outcome != gitx.PullFastForwarded {
 		t.Errorf("alpha/main = %+v, want fast-forwarded despite cancellation", u)
 	}
@@ -234,7 +234,7 @@ func TestUpdateCancelLetsInProgressFastForwardFinish(t *testing.T) {
 
 // Second Ctrl-C: the force channel kills the in-progress merge.
 func TestUpdateForceKillsInProgressFastForward(t *testing.T) {
-	f, _, started, _ := coBlockingMergeRepo(t)
+	f, _, started, _ := blockingMergeRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	force := make(chan struct{})
@@ -243,12 +243,12 @@ func TestUpdateForceKillsInProgressFastForward(t *testing.T) {
 		r, _ := Update(ctx, f.w, UpdateOptions{Jobs: 1, Force: force}, Discard)
 		done <- r
 	}()
-	coWaitFile(t, started)
+	waitFile(t, started)
 	cancel()
 	close(force)
 	select {
 	case r := <-done:
-		u := coUpdatesByName(r)["alpha/main"]
+		u := updatesByName(r)["alpha/main"]
 		if u.Outcome != gitx.PullFailed || !errors.Is(u.Err, gitx.ErrForceKilled) {
 			t.Fatalf("alpha/main = %+v, want failed with ErrForceKilled", u)
 		}

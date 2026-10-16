@@ -166,9 +166,9 @@ const readNext = `; IFS= read -r line; printf 'GOT=[%s]END\n' "$line"`
 func TestTUIFastExitLeavesNoQueryReplies(t *testing.T) {
 	for _, delay := range []time.Duration{0, 100 * time.Millisecond} {
 		t.Run(delay.String(), func(t *testing.T) {
-			e := coBundle(t)
-			e.coAddRepo(t, "alpha")
-			e.coAddRepo(t, "beta")
+			e := newBundleEnv(t)
+			e.addRepo(t, "alpha")
+			e.addRepo(t, "beta")
 			s := startPTYShell(t, e.cwd, `"$SHEAF" fetch; echo SHEAF-EXIT=$?`+readNext, delay)
 			s.waitFor(`SHEAF-EXIT=0`)
 			if !strings.Contains(s.output(), "\x1b[?2026$p") {
@@ -184,8 +184,8 @@ func TestTUIFastExitLeavesNoQueryReplies(t *testing.T) {
 // End to end on a pty: the removal dialog answered n restores the terminal
 // (modes, raw mode, kitty keyboard stack) and leaves nothing in its input.
 func TestTUIRemoveDialogOnPTY(t *testing.T) {
-	e := coBundle(t)
-	e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
 	s := startPTYShell(t, e.cwd, `B=$(stty -g); "$SHEAF" remove alpha; echo SHEAF-EXIT=$?; `+
 		`if [ "$(stty -g)" = "$B" ]; then echo STTY-SAME; else echo STTY-CHANGED; fi`+readNext, 0)
 	s.waitFor(`\[y/N\]`)

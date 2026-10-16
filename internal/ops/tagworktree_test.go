@@ -227,14 +227,14 @@ func TestTagWorktreeStatusUpdatePrune(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u, ok := coUpdatesByName(r)["a/v1"]
+	u, ok := updatesByName(r)["a/v1"]
 	if !ok {
 		t.Fatalf("a/v1 not updated: %+v", r.Checkouts)
 	}
 	if !u.Pinned || u.Skipped() || u.Outcome == gitx.PullFailed || u.Reason != "pinned at tag v1" {
 		t.Errorf("update a/v1 = %+v, want pinned, not skipped", u)
 	}
-	if m := coUpdatesByName(r)["a/main"]; m.Pinned || m.Outcome != gitx.PullFastForwarded {
+	if m := updatesByName(r)["a/main"]; m.Pinned || m.Outcome != gitx.PullFastForwarded {
 		t.Errorf("update a/main = %+v", m)
 	}
 	if after := testutil.Git(t, tw.Path, "rev-parse", "HEAD"); after != before {
@@ -431,7 +431,7 @@ func TestUpdateTagWorktreePinnedWithoutFetch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := coUpdatesByName(r)
+	m := updatesByName(r)
 	if u := m["a/v1"]; !u.Pinned || u.Outcome == gitx.PullFailed || u.Reason != "pinned at tag v1" {
 		t.Errorf("fetch failed: a/v1 = %+v, want pinned", u)
 	}
@@ -468,7 +468,7 @@ func TestTagWorktreeMoved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u := coUpdatesByName(r)["a/v1"]
+	u := updatesByName(r)["a/v1"]
 	want := "detached (was pinned at tag v1; moved to " + head[:10] + ")"
 	if u.Pinned || !u.Skipped() || u.Outcome != gitx.PullSkippedDetached || u.Reason != want {
 		t.Errorf("update a/v1 = %+v, want skipped with reason %q", u, want)

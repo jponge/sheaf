@@ -36,8 +36,8 @@ func shellCmd(t *testing.T, shell, script string, args ...string) *exec.Cmd {
 func TestShellFunctionIgnoresChildrenWritingTheCDFile(t *testing.T) {
 	t.Parallel()
 	bin := sheafBinary(t)
-	e := coBundle(t)
-	e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
 	child := `if [ -n "${SHEAF_CD_FILE:-}" ]; then printf %s /etc > "$SHEAF_CD_FILE"; fi`
 	scripts := map[string]string{
 		"bash": `eval "$(sheaf shell-init bash)"; cd "$1"; sheaf --no-tui run -- sh -c "$2" >/dev/null 2>&1; echo "rc=$? PWD=$PWD"`,
@@ -64,8 +64,8 @@ func TestShellFunctionIgnoresChildrenWritingTheCDFile(t *testing.T) {
 // S1, in the process: Execute takes SHEAF_CD_FILE out of the environment
 // before running anything, so children do not inherit it.
 func TestExecuteHidesTheCDFileFromChildren(t *testing.T) {
-	e := coBundle(t)
-	e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
 	t.Setenv(cdFileVar, filepath.Join(t.TempDir(), "cd"))
 	var out, errb bytes.Buffer
 	code := Execute([]string{"--bundle", e.cwd, "--no-tui", "run", "--shell", "--", `echo "CD=${SHEAF_CD_FILE-unset}"`},

@@ -15,7 +15,7 @@ import (
 func TestUpdateUntrackedFilesInTheWayIsSkipped(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	o, alpha := coAddRepoWith(t, f, "alpha")
+	o, alpha := addRepoWith(t, f, "alpha")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "remote\n", "remote")
 	writeFile(t, filepath.Join(alpha, "r.txt"), "local untracked\n")
 	r, err := Update(context.Background(), f.w, UpdateOptions{Jobs: 1}, Discard)
@@ -38,8 +38,8 @@ func TestUpdateUntrackedFilesInTheWayIsSkipped(t *testing.T) {
 func TestListCheckoutsMarksOutsideWorktrees(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, alpha := coAddRepoWith(t, f, "alpha", "feat", "far")
-	coAddWorktree(t, alpha, "feat", "feat", true)
+	_, alpha := addRepoWith(t, f, "alpha", "feat", "far")
+	addWorktree(t, alpha, "feat", "feat", true)
 	far := filepath.Join(t.TempDir(), "far")
 	testutil.Git(t, alpha, "worktree", "add", "-q", "--track", "-b", "far", far, "origin/far")
 	cs, probs, err := ListCheckouts(context.Background(), f.w, CheckoutFilter{}, 1)

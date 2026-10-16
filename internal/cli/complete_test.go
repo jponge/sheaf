@@ -49,7 +49,7 @@ func (e *env) wantComplete(t *testing.T, want []string, args ...string) {
 // feat/x; extra local branch local-only in the primary) and b.
 func complBundle(t *testing.T) (*env, string) {
 	t.Helper()
-	e := coBundle(t)
+	e := newBundleEnv(t)
 	root := e.cwd
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x", "dev", "topic/y"}})
 	e.fake.AddRepo(hosting.Repo{Owner: "o", Name: "a", CloneURL: o.URL, DefaultBranch: "main"})

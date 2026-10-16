@@ -194,11 +194,11 @@ func ListWorktrees(ctx context.Context, w *Workspace, repo string) ([]WorktreeIn
 
 // listRepo returns the checkouts of r in the order of enumerateRepo and its
 // primary checkout, after checking them (see
-// coCheckPrimary). A linked worktree that cannot be used is listed with
+// checkPrimary). A linked worktree that cannot be used is listed with
 // WorktreeInfo.unusable set, unless only its directory is missing (it is
 // then listed, prunable).
 func listRepo(ctx context.Context, root string, r bundle.Repository) (infos []WorktreeInfo, primary string, err error) {
-	primary, common, prob := coCheckPrimary(ctx, root, r)
+	primary, common, prob := checkPrimary(ctx, root, r)
 	if prob != nil {
 		return nil, "", fmt.Errorf("%s: %w", prob.Path, prob.Err)
 	}
@@ -212,7 +212,7 @@ func listRepo(ctx context.Context, root string, r bundle.Repository) (infos []Wo
 // worktrees (unusable is never set), for collision checks; it returns the
 // repository directory instead of the primary checkout.
 func listRepoUnverified(ctx context.Context, root string, r bundle.Repository) (infos []WorktreeInfo, repoDir string, err error) {
-	primary, common, prob := coCheckPrimary(ctx, root, r)
+	primary, common, prob := checkPrimary(ctx, root, r)
 	if prob != nil {
 		return nil, "", fmt.Errorf("%s: %w", prob.Path, prob.Err)
 	}
@@ -220,7 +220,7 @@ func listRepoUnverified(ctx context.Context, root string, r bundle.Repository) (
 }
 
 // listCheckedRepo is listRepo (listRepoUnverified without verify) for a
-// primary checkout already accepted by coCheckPrimary.
+// primary checkout already accepted by checkPrimary.
 func listCheckedRepo(ctx context.Context, r bundle.Repository, primary, common string, verify bool) (infos []WorktreeInfo, repoDir string, err error) {
 	entries, err := enumerateRepo(ctx, primary, common, enumPolicy{keepMissing: true, noVerify: !verify})
 	if err != nil {
@@ -428,7 +428,7 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 	report := func(phase, msg string) {
 		emit(Event{Repo: r.Name, Phase: phase, Kind: KindProgress, Message: msg})
 	}
-	primary, _, prob := coCheckPrimary(ctx, w.Root, r)
+	primary, _, prob := checkPrimary(ctx, w.Root, r)
 	if prob != nil {
 		return WorktreeAddResult{}, prob
 	}
@@ -829,7 +829,7 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 	if err != nil {
 		return "", err
 	}
-	primary, common, prob := coCheckPrimary(ctx, w.Root, r)
+	primary, common, prob := checkPrimary(ctx, w.Root, r)
 	if prob != nil {
 		return "", fmt.Errorf("%s: %s: %w", r.Name, prob.Path, prob.Err)
 	}

@@ -11,21 +11,21 @@ import (
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
-// coNestedBundle builds a bundle inside the work tree of an outer clone
+// nestedBundle builds a bundle inside the work tree of an outer clone
 // whose upstream is ahead (fetched), with repository r1 whose primary lost
 // its .git. It returns the fixture, the outer clone and r1's primary.
-func coNestedBundle(t *testing.T) (*fixture, string, string) {
+func nestedBundle(t *testing.T) (*fixture, string, string) {
 	t.Helper()
-	f, outer, primary := coNestedBundleIntact(t, "r1")
+	f, outer, primary := nestedBundleIntact(t, "r1")
 	if err := os.RemoveAll(filepath.Join(primary, ".git")); err != nil {
 		t.Fatal(err)
 	}
 	return f, outer, primary
 }
 
-// coNestedBundleIntact is coNestedBundle without breaking the primary; the
+// nestedBundleIntact is nestedBundle without breaking the primary; the
 // repository has an extra branch "feat".
-func coNestedBundleIntact(t *testing.T, name string) (*fixture, string, string) {
+func nestedBundleIntact(t *testing.T, name string) (*fixture, string, string) {
 	t.Helper()
 	testutil.IsolateGit(t)
 	oo := testutil.NewOrigin(t, testutil.OriginOpts{})
@@ -42,11 +42,11 @@ func coNestedBundleIntact(t *testing.T, name string) (*fixture, string, string) 
 		t.Fatal(err)
 	}
 	f := &fixture{w: w, fake: hosting.NewFake()}
-	_, primary := coAddRepoWith(t, f, name, "feat")
+	_, primary := addRepoWith(t, f, name, "feat")
 	return f, outer, primary
 }
 
-func coWantNotWorkTree(t *testing.T, what string, probs []Problem, primary string) {
+func wantNotWorkTree(t *testing.T, what string, probs []Problem, primary string) {
 	t.Helper()
 	if len(probs) != 1 || probs[0].Repo != "r1" || probs[0].Path != primary || !strings.Contains(probs[0].Error(), "not a git work tree") {
 		t.Errorf("%s: problems = %v, want r1 not a git work tree", what, probs)
@@ -57,7 +57,7 @@ func coWantNotWorkTree(t *testing.T, what string, probs []Problem, primary strin
 // mistaken for the enclosing repository.
 func TestCheckoutsPrimaryWithoutGitInsideOuterRepo(t *testing.T) {
 	t.Parallel()
-	f, outer, primary := coNestedBundle(t)
+	f, outer, primary := nestedBundle(t)
 	ctx := context.Background()
 	before := testutil.Git(t, outer, "rev-parse", "HEAD")
 
@@ -65,19 +65,19 @@ func TestCheckoutsPrimaryWithoutGitInsideOuterRepo(t *testing.T) {
 	if err != nil || len(cs) != 0 {
 		t.Errorf("list: %v %v", err, checkoutNamesOf(cs))
 	}
-	coWantNotWorkTree(t, "list", probs, primary)
+	wantNotWorkTree(t, "list", probs, primary)
 
 	u, err := Update(ctx, f.w, UpdateOptions{Jobs: 1}, Discard)
 	if err != nil || len(u.Checkouts) != 0 {
 		t.Errorf("update: %v %+v", err, u.Checkouts)
 	}
-	coWantNotWorkTree(t, "update", u.Problems, primary)
+	wantNotWorkTree(t, "update", u.Problems, primary)
 
 	s, err := CollectStatus(ctx, f.w, StatusOptions{Jobs: 1}, Discard)
 	if err != nil || len(s.Checkouts) != 0 {
 		t.Errorf("status: %v %+v", err, s.Checkouts)
 	}
-	coWantNotWorkTree(t, "status", s.Problems, primary)
+	wantNotWorkTree(t, "status", s.Problems, primary)
 
 	marker := filepath.Join(t.TempDir(), "ran")
 	r, err := RunCommand(ctx, f.w, RunOptions{Jobs: 1, Shell: true, Args: []string{"touch '" + marker + "'"}})
@@ -103,7 +103,7 @@ func TestCheckoutsPrimaryWithoutGitInsideOuterRepo(t *testing.T) {
 func TestCheckoutsPrimaryThatIsALinkedWorktree(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	_, primary := coAddRepoWith(t, f, "r1", "dev")
+	_, primary := addRepoWith(t, f, "r1", "dev")
 	repoDir := filepath.Dir(primary)
 	dev := filepath.Join(repoDir, "dev")
 	// Make dev the main work tree and main a linked worktree of it.
@@ -122,15 +122,15 @@ func TestCheckoutsPrimaryThatIsALinkedWorktree(t *testing.T) {
 	}
 }
 
-func checkoutNamesOf(cs []Checkout) []string { return coCheckoutNames(cs) }
+func checkoutNamesOf(cs []Checkout) []string { return checkoutNames(cs) }
 
 // B1': a linked worktree that lost its .git file inside an enclosing work
 // tree is a problem, never the enclosing repository; the primary is still
 // processed.
 func TestCheckoutsLinkedWorktreeWithoutGitInsideOuterRepo(t *testing.T) {
 	t.Parallel()
-	f, outer, primary := coNestedBundleIntact(t, "r1")
-	wt := coAddWorktree(t, primary, "feat", "feat", true)
+	f, outer, primary := nestedBundleIntact(t, "r1")
+	wt := addWorktree(t, primary, "feat", "feat", true)
 	if err := os.Remove(filepath.Join(wt, ".git")); err != nil {
 		t.Fatal(err)
 	}

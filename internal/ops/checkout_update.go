@@ -50,9 +50,9 @@ type UpdateReport struct {
 	Problems  []Problem
 }
 
-// coInflight tracks the checkouts whose fast-forward is running, to report
+// inflight tracks the checkouts whose fast-forward is running, to report
 // PhaseWaitFastForward when the context is cancelled.
-type coInflight struct {
+type inflight struct {
 	mu        sync.Mutex
 	cancelled bool
 	running   map[Checkout]bool
@@ -62,7 +62,7 @@ type coInflight struct {
 // start registers c, whose merge is starting (it runs to completion even if
 // the context is cancelled); if the cancellation was already reported, the
 // waiting event for c is reported at once.
-func (f *coInflight) start(c Checkout) {
+func (f *inflight) start(c Checkout) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.running[c] = true
@@ -71,18 +71,18 @@ func (f *coInflight) start(c Checkout) {
 	}
 }
 
-func (f *coInflight) reportWait(c Checkout) {
+func (f *inflight) reportWait(c Checkout) {
 	f.report(Event{Repo: c.Repo, Worktree: c.Dir, Phase: PhaseWaitFastForward, Kind: KindProgress,
 		Message: "waiting for the in-progress fast-forward to finish"})
 }
 
-func (f *coInflight) end(c Checkout) {
+func (f *inflight) end(c Checkout) {
 	f.mu.Lock()
 	delete(f.running, c)
 	f.mu.Unlock()
 }
 
-func (f *coInflight) onCancel() {
+func (f *inflight) onCancel() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancelled = true
@@ -114,18 +114,18 @@ func (f *coInflight) onCancel() {
 // its directory name). The error is only set for an invalid filter.
 func Update(ctx context.Context, w *Workspace, opts UpdateOptions, rep Reporter) (UpdateReport, error) {
 	ctx = withCommandCache(ctx)
-	sets, probs, err := coEnumerate(ctx, w, opts.Filter, opts.Jobs)
+	sets, probs, err := enumerate(ctx, w, opts.Filter, opts.Jobs)
 	if err != nil {
 		return UpdateReport{}, err
 	}
-	report := coSerialize(rep)
-	fl := &coInflight{running: map[Checkout]bool{}, report: report}
+	report := serialize(rep)
+	fl := &inflight{running: map[Checkout]bool{}, report: report}
 	stop := context.AfterFunc(ctx, fl.onCancel)
 	defer stop()
 	results := make([][]CheckoutUpdate, len(sets))
 	fetchProbs := make([]*Problem, len(sets))
-	coForEach(opts.Jobs, len(sets), func(i int) {
-		results[i], fetchProbs[i] = coUpdateRepo(ctx, sets[i], opts, report, fl)
+	forEach(opts.Jobs, len(sets), func(i int) {
+		results[i], fetchProbs[i] = updateRepo(ctx, sets[i], opts, report, fl)
 	})
 	var out []CheckoutUpdate
 	for i, r := range results {
@@ -134,13 +134,13 @@ func Update(ctx context.Context, w *Workspace, opts UpdateOptions, rep Reporter)
 			probs = append(probs, *fetchProbs[i])
 		}
 	}
-	coSortProblems(probs)
+	sortProblems(probs)
 	return UpdateReport{Checkouts: out, Problems: probs}, nil
 }
 
-// coUpdateRepo updates the checkouts of s. The problem is set when only the
+// updateRepo updates the checkouts of s. The problem is set when only the
 // fork of a forked repository could not be fetched (see Update).
-func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, report func(Event), fl *coInflight) ([]CheckoutUpdate, *Problem) {
+func updateRepo(ctx context.Context, s *repoCheckouts, opts UpdateOptions, report func(Event), fl *inflight) ([]CheckoutUpdate, *Problem) {
 	out := make([]CheckoutUpdate, 0, len(s.checkouts))
 	emit := func(u CheckoutUpdate) {
 		e := Event{Repo: u.Repo, Worktree: u.Dir, Phase: PhaseUpdate, Message: u.Reason}
@@ -170,7 +170,7 @@ func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, r
 			return false
 		case c.TagMovedTo != "":
 			emit(CheckoutUpdate{Checkout: c, Outcome: gitx.PullSkippedDetached,
-				Reason: "detached (was pinned at tag " + c.Tag + "; moved to " + coShortID(c.TagMovedTo) + ")"})
+				Reason: "detached (was pinned at tag " + c.Tag + "; moved to " + shortID(c.TagMovedTo) + ")"})
 		default:
 			emit(CheckoutUpdate{Checkout: c, Outcome: gitx.PullSkippedDetached, Pinned: true, Reason: "pinned at tag " + c.Tag})
 		}
@@ -185,7 +185,7 @@ func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, r
 		return out, nil
 	}
 	report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindStart})
-	fetchErr := coFetchRepo(ctx, s.primary, s.remotes)
+	fetchErr := fetchRepo(ctx, s.primary, s.remotes)
 	// Only the fork could not be fetched: the checkouts tracking it fail,
 	// the others are updated from the reference as usual.
 	forkFailed := fetchErr != nil && ctx.Err() == nil && onlyForkFetchFailed(fetchErr, s.remotes)
@@ -228,7 +228,7 @@ func coUpdateRepo(ctx context.Context, s *coRepoCheckouts, opts UpdateOptions, r
 		o.OnMergeStart = func() { started = true; fl.start(c) }
 		r := gitx.FastForwardWithOptions(ctx, c.Path, o)
 		fl.end(c)
-		u := coClassifyUpdate(ctx, c, r)
+		u := classifyUpdate(ctx, c, r)
 		if !started && u.Outcome == gitx.PullFailed && ctx.Err() != nil && errors.Is(r.Err, ctx.Err()) {
 			u.Reason = "not started (interrupted)"
 		}
@@ -253,10 +253,10 @@ func (u CheckoutUpdate) Skipped() bool {
 	return false
 }
 
-// coUntrackedInTheWay extracts the files of git's "untracked working tree
+// untrackedInTheWay extracts the files of git's "untracked working tree
 // files would be overwritten by merge" error (one tab-indented path per
 // line), or returns nil.
-func coUntrackedInTheWay(err error) []string {
+func untrackedInTheWay(err error) []string {
 	var ge *gitx.GitError
 	if !errors.As(err, &ge) {
 		return nil
@@ -276,17 +276,17 @@ func coUntrackedInTheWay(err error) []string {
 	return files
 }
 
-func coShortID(id string) string {
+func shortID(id string) string {
 	if len(id) > 10 {
 		return id[:10]
 	}
 	return id
 }
 
-// coClassifyUpdate turns a pull result into a CheckoutUpdate with a Reason. For
+// classifyUpdate turns a pull result into a CheckoutUpdate with a Reason. For
 // skips it re-reads the status (ignoring ctx's cancellation, bounded) to give
 // the counts and the upstream.
-func coClassifyUpdate(ctx context.Context, c Checkout, r gitx.PullResult) CheckoutUpdate {
+func classifyUpdate(ctx context.Context, c Checkout, r gitx.PullResult) CheckoutUpdate {
 	u := CheckoutUpdate{Checkout: c, Outcome: r.Outcome, Old: r.Old, New: r.New, Err: r.Err}
 	st := func() *gitx.RepoStatus {
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
@@ -299,7 +299,7 @@ func coClassifyUpdate(ctx context.Context, c Checkout, r gitx.PullResult) Checko
 	}
 	switch r.Outcome {
 	case gitx.PullFastForwarded:
-		u.Reason = coShortID(r.Old) + ".." + coShortID(r.New)
+		u.Reason = shortID(r.Old) + ".." + shortID(r.New)
 	case gitx.PullUpToDate:
 		u.Reason = "up to date"
 	case gitx.PullSkippedDetached:
@@ -318,7 +318,7 @@ func coClassifyUpdate(ctx context.Context, c Checkout, r gitx.PullResult) Checko
 		u.Reason = "no upstream branch configured"
 		if s := st(); s != nil && s.Upstream != "" && s.UpstreamGone {
 			u.Reason = "upstream " + s.Upstream + " is gone (deleted on the remote)"
-		} else if why := coPullRequestReason(ctx, c); why != "" {
+		} else if why := pullRequestReason(ctx, c); why != "" {
 			u.Reason = why
 		}
 	case gitx.PullSkippedDiverged:
@@ -327,7 +327,7 @@ func coClassifyUpdate(ctx context.Context, c Checkout, r gitx.PullResult) Checko
 			u.Reason = fmt.Sprintf("diverged from %s (%d ahead, %d behind): merge or rebase manually", s.Upstream, s.Ahead, s.Behind)
 		}
 	case gitx.PullFailed:
-		if files := coUntrackedInTheWay(r.Err); len(files) > 0 {
+		if files := untrackedInTheWay(r.Err); len(files) > 0 {
 			u.UntrackedInTheWay = files
 			u.Reason = "untracked files in the way: " + strings.Join(files, ", ") + " (move or remove them, then update again)"
 			break

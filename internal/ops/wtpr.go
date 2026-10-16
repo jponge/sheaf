@@ -87,12 +87,12 @@ func AddPRWorktree(ctx context.Context, w *Workspace, h hosting.Hosting, repo st
 	if err != nil {
 		return PRWorktreeResult{}, fmt.Errorf("pull request #%d of %s: %w", number, r.Slug, err)
 	}
-	primary, _, prob := coCheckPrimary(ctx, w.Root, r)
+	primary, _, prob := checkPrimary(ctx, w.Root, r)
 	if prob != nil {
 		return PRWorktreeResult{}, prob
 	}
 	report("fetching " + RemotesOf(r).String())
-	if err := coFetchRepo(ctx, primary, RemotesOf(r)); err != nil {
+	if err := fetchRepo(ctx, primary, RemotesOf(r)); err != nil {
 		if ctx.Err() != nil {
 			return PRWorktreeResult{}, ctx.Err()
 		}
@@ -347,7 +347,7 @@ func updatePRBranch(ctx context.Context, root string, r bundle.Repository, prima
 		return "", nil
 	case local != before:
 		return "", fmt.Errorf("local branch %s changed while %s was being fetched (from %s to %s: another sheaf or git command?); nothing was changed: run this command again",
-			branch, pullRef, coShortID(before), coShortID(local))
+			branch, pullRef, shortID(before), shortID(local))
 	case isAncestor(ctx, primary, local, head):
 		// Compare-and-swap: refused if the branch moved since it was read
 		// under the lock (by a git command, which does not take it).
@@ -440,7 +440,7 @@ func refreshPR(ctx context.Context, r bundle.Repository, path, pullRef string, r
 		return res, nil
 	case !isAncestor(ctx, path, st.Head, head):
 		return PRWorktreeResult{}, fmt.Errorf("%s of pull request #%d cannot be fast-forwarded to %s (%s): it was rewritten (force-pushed?) or has local commits; nothing was changed",
-			res.Branch, res.Number, pullRef, coShortID(head))
+			res.Branch, res.Number, pullRef, shortID(head))
 	}
 	if err := ctx.Err(); err != nil {
 		return PRWorktreeResult{}, err
@@ -450,9 +450,9 @@ func refreshPR(ctx context.Context, r bundle.Repository, path, pullRef string, r
 	mctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gitx.DefaultMergeTimeout)
 	defer cancel()
 	if _, err := gitx.Run(mctx, path, "merge", "--quiet", "--ff-only", "--no-autostash", head); err != nil {
-		return PRWorktreeResult{}, fmt.Errorf("fast-forwarding %s to %s: %w", path, coShortID(head), err)
+		return PRWorktreeResult{}, fmt.Errorf("fast-forwarding %s to %s: %w", path, shortID(head), err)
 	}
-	res.Message = fmt.Sprintf("fast-forwarded pull request #%d at %s (%s..%s)", res.Number, path, coShortID(st.Head), coShortID(head))
+	res.Message = fmt.Sprintf("fast-forwarded pull request #%d at %s (%s..%s)", res.Number, path, shortID(st.Head), shortID(head))
 	return res, nil
 }
 
@@ -472,10 +472,10 @@ func branchMerge(ctx context.Context, dir, branch string) string {
 	return strings.TrimSpace(out)
 }
 
-// coPullRequestReason explains why update skips a checkout on a pull request
+// pullRequestReason explains why update skips a checkout on a pull request
 // branch (whose upstream refs/pull/<n>/head has no remote-tracking ref), or
 // returns "".
-func coPullRequestReason(ctx context.Context, c Checkout) string {
+func pullRequestReason(ctx context.Context, c Checkout) string {
 	if c.Branch == "" {
 		return ""
 	}

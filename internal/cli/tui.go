@@ -245,7 +245,7 @@ type progressOpts struct {
 // program ends first (input closed), the remaining events are printed on
 // stderr like in CLI mode, and questions are answered no.
 func (s *tuiSession) progress(title string, o progressOpts, work func(ctx context.Context, rep ops.Reporter, ask askFunc)) {
-	plain := coCheckoutRenderer{plainRenderer{s.errw}}
+	plain := checkoutRenderer{plainRenderer{s.errw}}
 	model := tui.NewProgress(title).WithInterrupt(s.ctl.interrupt)
 	p, err := tui.NewProgram(model, s.in, s.out, tea.WithoutSignalHandler())
 	if err != nil {

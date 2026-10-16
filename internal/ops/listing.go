@@ -29,7 +29,7 @@ type repoEntry struct {
 }
 
 // enumPolicy holds what the two views built on enumerateRepo need
-// differently: listRepo (worktree commands, WorktreeInfo) and coListRepo
+// differently: listRepo (worktree commands, WorktreeInfo) and listRepoCheckouts
 // (checkout commands, Checkout). Their other differences are in the views
 // themselves (backlog B3): the fields (Checkout.Dir is set for an outside
 // worktree and Checkout.Path of the primary is the bundle path, while
@@ -54,7 +54,7 @@ type enumPolicy struct {
 var errNotMainWorkTree = errors.New("not the main work tree of its repository")
 
 // enumerateRepo lists the work trees of the repository of primary, a primary
-// checkout accepted by coCheckPrimary (common is its common git directory),
+// checkout accepted by checkPrimary (common is its common git directory),
 // with one `git worktree list`, plus at most one git invocation per linked
 // work tree to verify it (none with pol.noVerify). The primary comes first,
 // then the work trees in the repository directory by directory name (then
@@ -65,10 +65,10 @@ func enumerateRepo(ctx context.Context, primary, common string, pol enumPolicy) 
 	if err != nil {
 		return nil, err
 	}
-	// An invariant for a primary accepted by coCheckPrimary (its .git is a
+	// An invariant for a primary accepted by checkPrimary (its .git is a
 	// directory that is its own common directory, so git lists it first and
 	// not bare); checked anyway, as cheap defence in depth.
-	if len(wts) == 0 || wts[0].Bare || !coSameFile(wts[0].Path, primary) {
+	if len(wts) == 0 || wts[0].Bare || !sameFile(wts[0].Path, primary) {
 		return nil, errNotMainWorkTree
 	}
 	if pol.primaryOnly {
@@ -127,7 +127,7 @@ func (e *foreignWorktreeError) Error() string {
 
 // verifyLinked checks that the linked work tree at path of the repository of
 // primary exists and is a work tree of that repository, whose common git
-// directory is common (see coInspect). With keepMissing, a missing directory
+// directory is common (see inspect). With keepMissing, a missing directory
 // is not a problem. A directory without .git is reported without running
 // git, with the command that restores the .git file (`git worktree prune`
 // would only drop git's entry and leave the directory).
@@ -144,8 +144,8 @@ func verifyLinked(ctx context.Context, path, primary, common string, keepMissing
 	if _, err := os.Lstat(filepath.Join(path, ".git")); errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("not a git work tree: its .git file is missing (`git -C %s worktree repair %s` restores it)", primary, path)
 	}
-	insp, err := coInspect(ctx, path)
-	if err == nil && !coSameFile(insp.commonDir, common) {
+	insp, err := inspect(ctx, path)
+	if err == nil && !sameFile(insp.commonDir, common) {
 		err = &foreignWorktreeError{commonDir: insp.commonDir}
 	}
 	return err

@@ -44,27 +44,27 @@ func checkoutContext(c *cobra.Command) context.Context {
 // and not when NO_COLOR is set to a non-empty value (https://no-color.org).
 func useColor(tty bool, noColor string) bool { return tty && noColor == "" }
 
-func coColorFor(w io.Writer) bool { return useColor(stdoutIsTerminal(w), os.Getenv("NO_COLOR")) }
+func colorFor(w io.Writer) bool { return useColor(stdoutIsTerminal(w), os.Getenv("NO_COLOR")) }
 
 const (
-	coAnsiReset  = "\x1b[0m"
-	coAnsiRed    = "\x1b[31m"
-	coAnsiGreen  = "\x1b[32m"
-	coAnsiYellow = "\x1b[33m"
+	ansiReset  = "\x1b[0m"
+	ansiRed    = "\x1b[31m"
+	ansiGreen  = "\x1b[32m"
+	ansiYellow = "\x1b[33m"
 )
 
-func coPaint(on bool, color, s string) string {
+func paint(on bool, color, s string) string {
 	if !on {
 		return s
 	}
-	return color + s + coAnsiReset
+	return color + s + ansiReset
 }
 
-// coCheckoutRenderer is the plain renderer plus the phases of the checkout
+// checkoutRenderer is the plain renderer plus the phases of the checkout
 // commands that need their own wording.
-type coCheckoutRenderer struct{ plainRenderer }
+type checkoutRenderer struct{ plainRenderer }
 
-func (r coCheckoutRenderer) Report(e ops.Event) {
+func (r checkoutRenderer) Report(e ops.Event) {
 	if e.Phase == ops.PhaseWaitFastForward {
 		fmt.Fprintf(r.w, "waiting for in-progress fast-forward in %s/%s to finish (Ctrl-C again to force)\n", e.Repo, e.Worktree)
 		return
@@ -86,42 +86,42 @@ func addCheckoutCommands(root *cobra.Command, d Deps) {
 	root.AddCommand(newStatusCmd(d), newFetchCmd(d), newUpdateCmd(d), newRunCmd(d))
 }
 
-// coAddFilterFlags registers --repo and, when primaryOnly, --primary-only.
-func coAddFilterFlags(c *cobra.Command, f *ops.CheckoutFilter, primaryOnly bool) {
+// addFilterFlags registers --repo and, when primaryOnly, --primary-only.
+func addFilterFlags(c *cobra.Command, f *ops.CheckoutFilter, primaryOnly bool) {
 	c.Flags().StringArrayVar(&f.Repos, "repo", nil, "only this repository; a name or a glob pattern such as 'smallrye-*' (repeatable)")
 	if primaryOnly {
 		c.Flags().BoolVar(&f.PrimaryOnly, "primary-only", false, "only the primary checkouts, not the worktrees")
 	}
 }
 
-// coPlural returns "<n> <word>" with an "s" unless n is 1.
-func coPlural(n int, word string) string {
+// plural returns "<n> <word>" with an "s" unless n is 1.
+func plural(n int, word string) string {
 	if n == 1 {
 		return "1 " + word
 	}
 	return fmt.Sprintf("%d %ss", n, word)
 }
 
-func coProblemsErr(n int) error { return errors.New(coPlural(n, "problem")) }
+func problemsErr(n int) error { return errors.New(plural(n, "problem")) }
 
-// coDisplayName is the name of a checkout in summaries and run headers;
+// displayName is the name of a checkout in summaries and run headers;
 // worktrees outside <bundle>/<repo>/ carry their path.
-func coDisplayName(c ops.Checkout) string {
+func displayName(c ops.Checkout) string {
 	if c.Outside {
 		return c.Name() + " (outside: " + c.Path + ")"
 	}
 	return c.Name()
 }
 
-// coDisplayDir is the DIR cell of the status table.
-func coDisplayDir(c ops.Checkout) string {
+// displayDir is the DIR cell of the status table.
+func displayDir(c ops.Checkout) string {
 	if c.Outside {
 		return c.Dir + " (outside)"
 	}
 	return c.Dir
 }
 
-const coStatusLong = `Show the state of every checkout of the bundle: the primary checkout of each
+const statusLong = `Show the state of every checkout of the bundle: the primary checkout of each
 repository and its worktrees, ordered by repository, primary first, then worktrees
 by directory name (those outside <bundle>/<repo>/ last). Status does not access
 the network: ahead/behind counts are relative to the remote-tracking refs of the
@@ -172,7 +172,7 @@ func newStatusCmd(d Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show branch, upstream and changes of every checkout and worktree",
-		Long:  coStatusLong,
+		Long:  statusLong,
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			w, err := openWorkspace(c, d)
@@ -180,17 +180,17 @@ func newStatusCmd(d Deps) *cobra.Command {
 				return err
 			}
 			opts.Jobs = OptionsFrom(c).Jobs
-			r, err := ops.CollectStatus(checkoutContext(c), w, opts, coCheckoutRenderer{plainRenderer{c.ErrOrStderr()}})
+			r, err := ops.CollectStatus(checkoutContext(c), w, opts, checkoutRenderer{plainRenderer{c.ErrOrStderr()}})
 			if err != nil {
 				return err
 			}
 			out := c.OutOrStdout()
 			if asJSON {
-				if err := coWriteStatusJSON(out, w.Root, r); err != nil {
+				if err := writeStatusJSON(out, w.Root, r); err != nil {
 					return err
 				}
 			} else {
-				coWriteStatusTable(out, r, coColorFor(out))
+				writeStatusTable(out, r, colorFor(out))
 			}
 			n := len(r.Problems)
 			for _, s := range r.Checkouts {
@@ -199,26 +199,26 @@ func newStatusCmd(d Deps) *cobra.Command {
 				}
 			}
 			if n > 0 {
-				return coProblemsErr(n)
+				return problemsErr(n)
 			}
 			return nil
 		},
 	}
-	coAddFilterFlags(cmd, &opts.Filter, true)
+	addFilterFlags(cmd, &opts.Filter, true)
 	cmd.Flags().BoolVar(&opts.DirtyOnly, "dirty-only", false, "only checkouts that are not clean")
 	cmd.Flags().BoolVar(&opts.Fetch, "fetch", false, "fetch origin (upstream and origin for a clone of your fork) into each repository first")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON document (schema in --help)")
 	return cmd
 }
 
-func coShortHead(h string) string {
+func abbrevHead(h string) string {
 	if len(h) > 7 {
 		return h[:7]
 	}
 	return h
 }
 
-func coWriteStatusTable(out io.Writer, r ops.StatusReport, color bool) {
+func writeStatusTable(out io.Writer, r ops.StatusReport, color bool) {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "REPO\tDIR\tBRANCH\tUPSTREAM\tAHEAD\tBEHIND\tSTAGED\tUNSTAGED\tUNTRACKED\tCONFLICTS\tSTASHES\tSTATE")
 	stashShown := ""
@@ -234,15 +234,15 @@ func coWriteStatusTable(out io.Writer, r ops.StatusReport, color bool) {
 		if c.Err != nil {
 			// The state (last column) carries the error; the colored part is
 			// last so escapes do not disturb the alignment.
-			fmt.Fprintf(tw, "%s\t%s\t%s\t-\t-\t-\t-\t-\t-\t-\t-\t%s\n", c.Repo, coDisplayDir(c.Checkout), branch,
-				coPaint(color, coAnsiRed, "error: "+firstLine(c.Err.Error())))
+			fmt.Fprintf(tw, "%s\t%s\t%s\t-\t-\t-\t-\t-\t-\t-\t-\t%s\n", c.Repo, displayDir(c.Checkout), branch,
+				paint(color, ansiRed, "error: "+firstLine(c.Err.Error())))
 			continue
 		}
 		s := c.Status
 		if c.Tag != "" {
 			branch = tagLabel(c.Tag, c.TagMovedTo)
 		} else if c.Detached {
-			branch = "(detached " + coShortHead(s.Head) + ")"
+			branch = "(detached " + abbrevHead(s.Head) + ")"
 		} else if s.Unborn {
 			branch += " (unborn)"
 		}
@@ -256,24 +256,24 @@ func coWriteStatusTable(out io.Writer, r ops.StatusReport, color bool) {
 		if stashShown != c.Repo {
 			stashes, stashShown = strconv.Itoa(s.Stashes), c.Repo
 		}
-		state := coPaint(color, coAnsiGreen, "clean")
+		state := paint(color, ansiGreen, "clean")
 		if !c.Clean() {
-			state = coPaint(color, coAnsiYellow, "dirty")
+			state = paint(color, ansiYellow, "dirty")
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\n", c.Repo, coDisplayDir(c.Checkout), branch, upstream, ahead, behind,
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\n", c.Repo, displayDir(c.Checkout), branch, upstream, ahead, behind,
 			s.Staged, s.Unstaged, s.Untracked, s.Conflicted, stashes, state)
 	}
 	_ = tw.Flush()
-	coWriteProblems(out, r.Problems, color)
+	writeProblems(out, r.Problems, color)
 }
 
-func coWriteProblems(out io.Writer, ps []ops.Problem, color bool) {
+func writeProblems(out io.Writer, ps []ops.Problem, color bool) {
 	for _, p := range ps {
-		fmt.Fprintf(out, "%s %s\n", coPaint(color, coAnsiRed, "problem:"), p.Error())
+		fmt.Fprintf(out, "%s %s\n", paint(color, ansiRed, "problem:"), p.Error())
 	}
 }
 
-type coJSONCheckout struct {
+type jsonCheckout struct {
 	Dir          string `json:"dir"`
 	Path         string `json:"path"`
 	Primary      bool   `json:"primary"`
@@ -296,35 +296,35 @@ type coJSONCheckout struct {
 	Error        string `json:"error,omitempty"`
 }
 
-type coJSONRepo struct {
-	Name      string           `json:"name"`
-	Stashes   int              `json:"stashes"`
-	Checkouts []coJSONCheckout `json:"checkouts"`
+type jsonRepo struct {
+	Name      string         `json:"name"`
+	Stashes   int            `json:"stashes"`
+	Checkouts []jsonCheckout `json:"checkouts"`
 }
 
-type coJSONProblem struct {
+type jsonProblem struct {
 	Repo  string `json:"repo"`
 	Path  string `json:"path"`
 	Error string `json:"error"`
 }
 
-type coJSONStatus struct {
-	Version      int             `json:"version"`
-	Bundle       string          `json:"bundle"`
-	Repositories []coJSONRepo    `json:"repositories"`
-	Problems     []coJSONProblem `json:"problems"`
+type jsonStatus struct {
+	Version      int           `json:"version"`
+	Bundle       string        `json:"bundle"`
+	Repositories []jsonRepo    `json:"repositories"`
+	Problems     []jsonProblem `json:"problems"`
 }
 
-func coWriteStatusJSON(out io.Writer, root string, r ops.StatusReport) error {
-	doc := coJSONStatus{Version: 1, Bundle: root, Repositories: []coJSONRepo{}, Problems: []coJSONProblem{}}
+func writeStatusJSON(out io.Writer, root string, r ops.StatusReport) error {
+	doc := jsonStatus{Version: 1, Bundle: root, Repositories: []jsonRepo{}, Problems: []jsonProblem{}}
 	stashKnown := false
 	for _, c := range r.Checkouts {
 		if n := len(doc.Repositories); n == 0 || doc.Repositories[n-1].Name != c.Repo {
-			doc.Repositories = append(doc.Repositories, coJSONRepo{Name: c.Repo, Checkouts: []coJSONCheckout{}})
+			doc.Repositories = append(doc.Repositories, jsonRepo{Name: c.Repo, Checkouts: []jsonCheckout{}})
 			stashKnown = false
 		}
 		repo := &doc.Repositories[len(doc.Repositories)-1]
-		jc := coJSONCheckout{Dir: c.Dir, Path: c.Path, Primary: c.Primary, Outside: c.Outside, Branch: c.Branch, Detached: c.Detached, Tag: c.Tag, TagMoved: c.TagMovedTo != ""}
+		jc := jsonCheckout{Dir: c.Dir, Path: c.Path, Primary: c.Primary, Outside: c.Outside, Branch: c.Branch, Detached: c.Detached, Tag: c.Tag, TagMoved: c.TagMovedTo != ""}
 		if c.Err != nil {
 			jc.Error = c.Err.Error()
 		} else {
@@ -342,7 +342,7 @@ func coWriteStatusJSON(out io.Writer, root string, r ops.StatusReport) error {
 		repo.Checkouts = append(repo.Checkouts, jc)
 	}
 	for _, p := range r.Problems {
-		doc.Problems = append(doc.Problems, coJSONProblem{Repo: p.Repo, Path: p.Path, Error: p.Err.Error()})
+		doc.Problems = append(doc.Problems, jsonProblem{Repo: p.Repo, Path: p.Path, Error: p.Err.Error()})
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
@@ -377,7 +377,7 @@ func newFetchCmd(d Deps) *cobra.Command {
 				}
 				return err
 			}
-			s, err := ops.FetchRepos(checkoutContext(c), w, opts, coCheckoutRenderer{plainRenderer{c.ErrOrStderr()}})
+			s, err := ops.FetchRepos(checkoutContext(c), w, opts, checkoutRenderer{plainRenderer{c.ErrOrStderr()}})
 			if err != nil {
 				return err
 			}
@@ -420,19 +420,19 @@ func newUpdateCmd(d Deps) *cobra.Command {
 				return tuiUpdate(c, w, opts, strict)
 			}
 			opts.Force = forceFrom(c.Context())
-			r, err := ops.Update(checkoutContext(c), w, opts, coCheckoutRenderer{plainRenderer{c.ErrOrStderr()}})
+			r, err := ops.Update(checkoutContext(c), w, opts, checkoutRenderer{plainRenderer{c.ErrOrStderr()}})
 			if err != nil {
 				return err
 			}
-			return coPrintUpdateSummary(c.OutOrStdout(), r, strict)
+			return printUpdateSummary(c.OutOrStdout(), r, strict)
 		},
 	}
-	coAddFilterFlags(cmd, &opts.Filter, true)
+	addFilterFlags(cmd, &opts.Filter, true)
 	cmd.Flags().BoolVar(&strict, "strict", false, "exit with 1 when a checkout was skipped")
 	return cmd
 }
 
-func coPrintUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error {
+func printUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	var ff, upToDate, pinned, skipped, failed int
 	var details []string
@@ -461,29 +461,29 @@ func coPrintUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error 
 				}
 				detail += firstLine(u.Err.Error())
 				if msg := u.Err.Error(); msg != firstLine(msg) {
-					details = append(details, coDisplayName(u.Checkout)+":\n    "+strings.ReplaceAll(msg, "\n", "\n    "))
+					details = append(details, displayName(u.Checkout)+":\n    "+strings.ReplaceAll(msg, "\n", "\n    "))
 				}
 			}
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", label, coDisplayName(u.Checkout), detail)
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", label, displayName(u.Checkout), detail)
 	}
 	_ = tw.Flush()
 	for _, d := range details {
 		fmt.Fprintln(out, d)
 	}
-	coWriteProblems(out, r.Problems, false)
+	writeProblems(out, r.Problems, false)
 	fmt.Fprintf(out, "%d fast-forwarded, %d up to date, ", ff, upToDate)
 	if pinned > 0 {
 		fmt.Fprintf(out, "%d pinned, ", pinned)
 	}
 	fmt.Fprintf(out, "%d skipped, %d failed", skipped, failed)
 	if n := len(r.Problems); n > 0 {
-		fmt.Fprintf(out, ", %s", coPlural(n, "problem"))
+		fmt.Fprintf(out, ", %s", plural(n, "problem"))
 	}
 	fmt.Fprintln(out)
 	switch {
 	case failed > 0 || len(r.Problems) > 0:
-		return fmt.Errorf("update: %d failed, %s", failed, coPlural(len(r.Problems), "problem"))
+		return fmt.Errorf("update: %d failed, %s", failed, plural(len(r.Problems), "problem"))
 	case strict && skipped > 0:
 		return fmt.Errorf("update: %d skipped (--strict)", skipped)
 	}
@@ -519,49 +519,49 @@ func newRunCmd(d Deps) *cobra.Command {
 			opts.Args = args
 			opts.Jobs = OptionsFrom(c).Jobs
 			opts.Stream = opts.Jobs == 1
-			sink := &coBlockSink{w: out}
+			sink := &blockSink{w: out}
 			opts.Sink = sink
 			r, err := ops.RunCommand(c.Context(), w, opts)
 			if err != nil {
 				return err
 			}
-			return coPrintRunSummary(out, r)
+			return printRunSummary(out, r)
 		},
 	}
 	cmd.Flags().SetInterspersed(false)
-	coAddFilterFlags(cmd, &opts.Filter, true)
+	addFilterFlags(cmd, &opts.Filter, true)
 	cmd.Flags().BoolVar(&opts.DirtyOnly, "dirty-only", false, "only checkouts that are not clean")
 	cmd.Flags().BoolVar(&opts.Shell, "shell", false, "run the first argument as a script with sh -c")
 	return cmd
 }
 
-// coBlockSink prints each checkout's output as a block: a header, the output
+// blockSink prints each checkout's output as a block: a header, the output
 // (a missing final newline is added), the failure if any, and a blank line.
-type coBlockSink struct {
+type blockSink struct {
 	w    io.Writer
 	last byte // last byte written by the command, 0 if none
 }
 
-func (s *coBlockSink) Begin(c ops.Checkout) io.Writer {
-	fmt.Fprintf(s.w, "==> %s <==\n", coDisplayName(c))
+func (s *blockSink) Begin(c ops.Checkout) io.Writer {
+	fmt.Fprintf(s.w, "==> %s <==\n", displayName(c))
 	s.last = 0
 	return s
 }
 
 // Write is the output of the current block.
-func (s *coBlockSink) Write(p []byte) (int, error) {
+func (s *blockSink) Write(p []byte) (int, error) {
 	if len(p) > 0 {
 		s.last = p[len(p)-1]
 	}
 	return s.w.Write(p)
 }
 
-func (s *coBlockSink) End(r ops.RunResult) {
+func (s *blockSink) End(r ops.RunResult) {
 	if s.last != 0 && s.last != '\n' {
 		fmt.Fprintln(s.w)
 	}
 	if r.Failed() {
-		fmt.Fprintf(s.w, "[%s]\n", coRunFailure(r))
+		fmt.Fprintf(s.w, "[%s]\n", runFailure(r))
 	}
 	if r.Note != "" {
 		fmt.Fprintf(s.w, "[note: %s]\n", r.Note)
@@ -569,7 +569,7 @@ func (s *coBlockSink) End(r ops.RunResult) {
 	fmt.Fprintln(s.w)
 }
 
-func coRunFailure(r ops.RunResult) string {
+func runFailure(r ops.RunResult) string {
 	switch {
 	case !r.Started && r.Err != nil && errors.Is(r.Err, context.Canceled):
 		return "not started (interrupted)"
@@ -580,7 +580,7 @@ func coRunFailure(r ops.RunResult) string {
 	}
 }
 
-func coPrintRunSummary(out io.Writer, r ops.RunReport) error {
+func printRunSummary(out io.Writer, r ops.RunReport) error {
 	var failed []ops.RunResult
 	for _, res := range r.Results {
 		if res.Failed() {
@@ -589,14 +589,14 @@ func coPrintRunSummary(out io.Writer, r ops.RunReport) error {
 	}
 	fmt.Fprintf(out, "%d succeeded, %d failed\n", len(r.Results)-len(failed), len(failed))
 	for _, res := range failed {
-		fmt.Fprintf(out, "failed: %s (%s)\n", coDisplayName(res.Checkout), coRunFailure(res))
+		fmt.Fprintf(out, "failed: %s (%s)\n", displayName(res.Checkout), runFailure(res))
 	}
-	coWriteProblems(out, r.Problems, false)
+	writeProblems(out, r.Problems, false)
 	switch {
 	case len(failed) > 0:
 		return fmt.Errorf("%d of %d commands failed", len(failed), len(r.Results))
 	case len(r.Problems) > 0:
-		return coProblemsErr(len(r.Problems))
+		return problemsErr(len(r.Problems))
 	}
 	return nil
 }

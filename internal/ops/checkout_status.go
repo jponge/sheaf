@@ -50,8 +50,8 @@ type StatusReport struct {
 	Problems []Problem
 }
 
-// coSerialize wraps rep so that concurrent callers report one at a time.
-func coSerialize(rep Reporter) func(Event) {
+// serialize wraps rep so that concurrent callers report one at a time.
+func serialize(rep Reporter) func(Event) {
 	if rep == nil {
 		rep = Discard
 	}
@@ -63,18 +63,18 @@ func coSerialize(rep Reporter) func(Event) {
 	}
 }
 
-// coFetchSets fetches each repository of sets once (up to jobs in parallel),
+// fetchSets fetches each repository of sets once (up to jobs in parallel),
 // reporting fetch events, and returns the problems of failed fetches.
-func coFetchSets(ctx context.Context, sets []*coRepoCheckouts, jobs int, report func(Event)) []Problem {
+func fetchSets(ctx context.Context, sets []*repoCheckouts, jobs int, report func(Event)) []Problem {
 	probs := make([]*Problem, len(sets))
-	coForEach(jobs, len(sets), func(i int) {
+	forEach(jobs, len(sets), func(i int) {
 		s := sets[i]
 		if err := ctx.Err(); err != nil {
 			probs[i] = &Problem{Repo: s.name, Path: s.primary, Err: fmt.Errorf("fetch not started (interrupted): %w", err)}
 			return
 		}
 		report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindStart})
-		if err := coFetchRepo(ctx, s.primary, s.remotes); err != nil {
+		if err := fetchRepo(ctx, s.primary, s.remotes); err != nil {
 			probs[i] = &Problem{Repo: s.name, Path: s.primary, Err: fmt.Errorf("fetch failed: %w", err)}
 			report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindFailed, Err: err})
 			return
@@ -90,7 +90,7 @@ func coFetchSets(ctx context.Context, sets []*coRepoCheckouts, jobs int, report 
 	return out
 }
 
-func coSortProblems(ps []Problem) {
+func sortProblems(ps []Problem) {
 	slices.SortStableFunc(ps, func(a, b Problem) int {
 		return cmp.Or(strings.Compare(a.Repo, b.Repo), strings.Compare(a.Path, b.Path))
 	})
@@ -103,12 +103,12 @@ func coSortProblems(ps []Problem) {
 // invalid filter.
 func CollectStatus(ctx context.Context, w *Workspace, opts StatusOptions, rep Reporter) (StatusReport, error) {
 	ctx = withCommandCache(ctx)
-	sets, probs, err := coEnumerate(ctx, w, opts.Filter, opts.Jobs)
+	sets, probs, err := enumerate(ctx, w, opts.Filter, opts.Jobs)
 	if err != nil {
 		return StatusReport{}, err
 	}
 	if opts.Fetch {
-		probs = append(probs, coFetchSets(ctx, sets, opts.Jobs, coSerialize(rep))...)
+		probs = append(probs, fetchSets(ctx, sets, opts.Jobs, serialize(rep))...)
 	}
 	var cs []CheckoutStatus
 	for _, s := range sets {
@@ -116,12 +116,12 @@ func CollectStatus(ctx context.Context, w *Workspace, opts StatusOptions, rep Re
 			cs = append(cs, CheckoutStatus{Checkout: c})
 		}
 	}
-	coForEach(opts.Jobs, len(cs), func(i int) {
+	forEach(opts.Jobs, len(cs), func(i int) {
 		cs[i].Status, cs[i].Err = gitx.Status(ctx, cs[i].Path)
 	})
 	if opts.DirtyOnly {
 		cs = slices.DeleteFunc(cs, CheckoutStatus.Clean)
 	}
-	coSortProblems(probs)
+	sortProblems(probs)
 	return StatusReport{Checkouts: cs, Problems: probs}, nil
 }

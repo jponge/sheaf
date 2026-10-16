@@ -30,7 +30,7 @@ func TestSecondSignalClosesForceBeforeKilling(t *testing.T) {
 	var force <-chan struct{}
 	forcedAtKill := make(chan bool, 1)
 	exited := make(chan int, 1)
-	coSeam(t, &killAll, func() int {
+	setSeam(t, &killAll, func() int {
 		mu.Lock()
 		f := force
 		mu.Unlock()
@@ -42,7 +42,7 @@ func TestSecondSignalClosesForceBeforeKilling(t *testing.T) {
 		}
 		return 0
 	})
-	coSeam(t, &exit, func(code int) { exited <- code })
+	setSeam(t, &exit, func(code int) { exited <- code })
 
 	root := NewRootCmd(Streams{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}})
 	root.AddCommand(&cobra.Command{Use: "probe", RunE: func(c *cobra.Command, _ []string) error {
@@ -80,16 +80,16 @@ func TestSecondSignalClosesForceBeforeKilling(t *testing.T) {
 // The emergency stop kills git and the commands of `sheaf run`.
 func TestKillAllKillsGitAndRunCommands(t *testing.T) {
 	var calls []string
-	coSeam(t, &killGit, func() int { calls = append(calls, "git"); return 2 })
-	coSeam(t, &killCommands, func() int { calls = append(calls, "commands"); return 1 })
+	setSeam(t, &killGit, func() int { calls = append(calls, "git"); return 2 })
+	setSeam(t, &killCommands, func() int { calls = append(calls, "commands"); return 1 })
 	if n := defaultKillAll(); n != 3 || strings.Join(calls, ",") != "git,commands" {
 		t.Fatalf("defaultKillAll = %d, calls %v", n, calls)
 	}
 }
 
-// coWatchWriter is a goroutine-safe writer that runs onMatch once when the
+// watchWriter is a goroutine-safe writer that runs onMatch once when the
 // written text contains match.
-type coWatchWriter struct {
+type watchWriter struct {
 	mu      sync.Mutex
 	b       bytes.Buffer
 	match   string
@@ -97,7 +97,7 @@ type coWatchWriter struct {
 	fired   bool
 }
 
-func (w *coWatchWriter) Write(p []byte) (int, error) {
+func (w *watchWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	n, err := w.b.Write(p)
@@ -108,7 +108,7 @@ func (w *coWatchWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func (w *coWatchWriter) String() string {
+func (w *watchWriter) String() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.b.String()
@@ -120,9 +120,9 @@ func TestUpdateFirstInterruptWaitsForFastForward(t *testing.T) {
 	net := make(chan os.Signal, 2)
 	signal.Notify(net, syscall.SIGINT)
 	defer signal.Stop(net)
-	e := coBundle(t)
-	o, alpha := e.coAddRepo(t, "alpha", "feat")
-	coWorktree(t, alpha, "feat", "feat")
+	e := newBundleEnv(t)
+	o, alpha := e.addRepo(t, "alpha", "feat")
+	addWorktree(t, alpha, "feat", "feat")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	testutil.AdvanceOrigin(t, o, "feat", "r.txt", "r\n", "remote")
 	before := testutil.Git(t, alpha, "rev-parse", "HEAD")
@@ -137,7 +137,7 @@ func TestUpdateFirstInterruptWaitsForFastForward(t *testing.T) {
 	}
 	testutil.Git(t, alpha, "config", "core.hooksPath", hooks)
 
-	errw := &coWatchWriter{
+	errw := &watchWriter{
 		match:   "waiting for in-progress fast-forward in alpha/main to finish (Ctrl-C again to force)",
 		onMatch: func() { _ = os.WriteFile(release, nil, 0o644) },
 	}
@@ -181,8 +181,8 @@ func TestSheafProcessHelper(t *testing.T) {
 // killed by SIGPIPE; the broken pipe cancels the run (commands terminated)
 // and sheaf exits with 141 after its cleanup.
 func TestRunBrokenStdoutPipe(t *testing.T) {
-	e := coBundle(t)
-	e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
 	pidfile := filepath.Join(t.TempDir(), "pid")
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -225,7 +225,7 @@ func TestRunBrokenStdoutPipe(t *testing.T) {
 	b, _ := os.ReadFile(pidfile)
 	if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
 		deadline := time.Now().Add(3 * time.Second)
-		for syscall.Kill(pid, 0) == nil && !coZombie(pid) {
+		for syscall.Kill(pid, 0) == nil && !zombie(pid) {
 			if time.Now().After(deadline) {
 				_ = syscall.Kill(pid, syscall.SIGKILL)
 				t.Fatalf("command %d survived sheaf", pid)
@@ -237,7 +237,7 @@ func TestRunBrokenStdoutPipe(t *testing.T) {
 	}
 }
 
-func coZombie(pid int) bool {
+func zombie(pid int) bool {
 	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if err != nil {
 		return false

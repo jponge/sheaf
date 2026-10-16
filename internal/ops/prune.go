@@ -112,11 +112,11 @@ type PrunePlan struct {
 // (PruneSkip.Tag). The error is only set for an invalid repository filter.
 func PlanPrune(ctx context.Context, w *Workspace, opts PruneOptions, rep Reporter) (PrunePlan, error) {
 	ctx = withCommandCache(ctx)
-	repos, err := coSelectRepos(w.Bundle(), opts.Repos)
+	repos, err := selectRepos(w.Bundle(), opts.Repos)
 	if err != nil {
 		return PrunePlan{}, err
 	}
-	report := coSerialize(rep)
+	report := serialize(rep)
 	type repoPlan struct {
 		cands    []PruneCandidate
 		skips    []PruneSkip
@@ -124,7 +124,7 @@ func PlanPrune(ctx context.Context, w *Workspace, opts PruneOptions, rep Reporte
 		distrust forkDistrust
 	}
 	plans := make([]repoPlan, len(repos))
-	coForEach(opts.Jobs, len(repos), func(i int) {
+	forEach(opts.Jobs, len(repos), func(i int) {
 		p := &plans[i]
 		p.cands, p.skips, p.probs, p.distrust = planPruneRepo(ctx, w.Root, repos[i], opts, report)
 	})
@@ -145,7 +145,7 @@ func PlanPrune(ctx context.Context, w *Workspace, opts PruneOptions, rep Reporte
 
 func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts PruneOptions, report func(Event)) ([]PruneCandidate, []PruneSkip, []Problem, forkDistrust) {
 	var distrust forkDistrust
-	primary, common, prob := coCheckPrimary(ctx, root, r)
+	primary, common, prob := checkPrimary(ctx, root, r)
 	if prob != nil {
 		return nil, nil, []Problem{*prob}, distrust
 	}
@@ -155,7 +155,7 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 	rs := RemotesOf(r)
 	if !opts.Offline {
 		report(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindStart})
-		if err := coFetchRepo(ctx, primary, rs); err != nil {
+		if err := fetchRepo(ctx, primary, rs); err != nil {
 			var rf *remoteFetchError
 			if ctx.Err() != nil || !onlyForkFetchFailed(err, rs) || !errors.As(err, &rf) || !forkGoneError(rf.Err, rs.Fork) {
 				report(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindFailed, Err: err})
@@ -364,7 +364,7 @@ func ApplyPrune(ctx context.Context, w *Workspace, plan PrunePlan, opts PruneOpt
 	// Every read re-checks the plan: never answered from a cache the caller
 	// may share with the planning.
 	ctx = gitx.WithFreshReads(ctx)
-	report := coSerialize(rep)
+	report := serialize(rep)
 	wd := opts.WorkingDir
 	if wd == "" {
 		wd, _ = os.Getwd()
@@ -408,9 +408,9 @@ func pruneWorktree(ctx context.Context, w *Workspace, c PruneCandidate, opts Pru
 				changed = fmt.Sprintf("worktree %s is now on %s, not %s", c.Dir, branchOrDetached(p.Worktree), c.Branch)
 			case p.Worktree.Head != c.Head:
 				if isAncestor(ctx, c.Path, c.Head, p.Worktree.Head) {
-					changed = fmt.Sprintf("branch %s has new commits since it was proposed (now %s)", c.Branch, coShortID(p.Worktree.Head))
+					changed = fmt.Sprintf("branch %s has new commits since it was proposed (now %s)", c.Branch, shortID(p.Worktree.Head))
 				} else {
-					changed = fmt.Sprintf("branch %s moved from %s to %s since it was proposed", c.Branch, coShortID(c.Head), coShortID(p.Worktree.Head))
+					changed = fmt.Sprintf("branch %s moved from %s to %s since it was proposed", c.Branch, shortID(c.Head), shortID(p.Worktree.Head))
 				}
 			default:
 				return true
@@ -467,7 +467,7 @@ func pruneBranch(ctx context.Context, w *Workspace, c PruneCandidate, distrust f
 	if err != nil {
 		return failed(err)
 	}
-	primary, _, prob := coCheckPrimary(ctx, w.Root, r)
+	primary, _, prob := checkPrimary(ctx, w.Root, r)
 	if prob != nil {
 		return failed(prob)
 	}
@@ -488,7 +488,7 @@ func pruneBranch(ctx context.Context, w *Workspace, c PruneCandidate, distrust f
 		return failed(err)
 	}
 	if plan.branchOID != c.Head {
-		return kept(fmt.Sprintf("it moved from %s to %s since it was proposed; run prune again", coShortID(c.Head), coShortID(plan.branchOID)))
+		return kept(fmt.Sprintf("it moved from %s to %s since it was proposed; run prune again", shortID(c.Head), shortID(plan.branchOID)))
 	}
 	if plan.Unmerged != "" {
 		return kept(plan.Unmerged + " (delete it with `git branch -D " + c.Branch + "` if you are sure)")

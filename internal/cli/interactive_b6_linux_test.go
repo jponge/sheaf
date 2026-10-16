@@ -30,19 +30,19 @@ func TestSingleRepoCommandsInteractiveGitModeIgnoreJobs(t *testing.T) {
 			testutil.Git(t, primary, "worktree", "add", "-q", "--track", "-b", "feat", filepath.Join(root, "a", "feat"), "origin/feat")
 			testutil.Git(t, primary, "config", "remote.origin.url", "ssh://sheaf-test.invalid/o/a.git")
 			testutil.Git(t, primary, "config", "ssh.variant", "ssh")
-			rec := coFakeSSH(t)
-			coSeam(t, &stdinIsTerminal, func(io.Reader) bool { return true })
+			rec := fakeSSH(t)
+			setSeam(t, &stdinIsTerminal, func(io.Reader) bool { return true })
 			e.run(t, args...) // the fake ssh fails the fetch
-			coWantSelfSession(t, name, rec)
+			wantSelfSession(t, name, rec)
 			// Still not interactive when stdin is not a terminal.
 			os.Remove(rec)
-			coSeam(t, &stdinIsTerminal, func(io.Reader) bool { return false })
+			setSeam(t, &stdinIsTerminal, func(io.Reader) bool { return false })
 			e.run(t, args...)
 			b, err := os.ReadFile(rec)
 			if err != nil {
 				t.Fatal("stdin not a terminal: fake ssh never ran")
 			}
-			if strings.TrimSpace(string(b)) == coSessionOf(t, "self") {
+			if strings.TrimSpace(string(b)) == sessionOf(t, "self") {
 				t.Fatal("stdin not a terminal: ssh ran in sheaf's session")
 			}
 		})

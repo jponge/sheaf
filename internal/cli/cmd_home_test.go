@@ -49,13 +49,13 @@ func ovKeys(t *testing.T, out *syncBuffer, marker string, n int, ks ...string) [
 // fetched.
 func homeBundle(t *testing.T) (e *env, alpha, feat, beta string, o testutil.Origin) {
 	t.Helper()
-	e = coBundle(t)
-	o, alpha = e.coAddRepo(t, "alpha", "feat")
-	_, beta = e.coAddRepo(t, "beta")
-	feat = coWorktree(t, alpha, "feat", "feat")
+	e = newBundleEnv(t)
+	o, alpha = e.addRepo(t, "alpha", "feat")
+	_, beta = e.addRepo(t, "beta")
+	feat = addWorktree(t, alpha, "feat", "feat")
 	testutil.AdvanceOrigin(t, o, "feat", "f.txt", "f\n", "remote feat")
 	testutil.Git(t, alpha, "fetch", "-q", "origin")
-	coWrite(t, filepath.Join(feat, "new.txt"), "n\n")
+	writeFile(t, filepath.Join(feat, "new.txt"), "n\n")
 	testutil.AdvanceOrigin(t, o, "main", "m1.txt", "1\n", "remote main 1")
 	testutil.AdvanceOrigin(t, o, "main", "m2.txt", "2\n", "remote main 2")
 	return e, alpha, feat, beta, o
@@ -79,8 +79,8 @@ func helpOf(t *testing.T, e *env) string {
 // are exactly those of a root command without the home screen.
 func TestBareSheafPlainBehavesAsANonRunnableRoot(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
-	e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
 	for _, args := range [][]string{
 		{}, {"--no-tui"}, {"-j", "0"}, {"--bundle", "/nonexistent"}, {"--help"}, {"-h"}, {"help"},
 		{"nosuch"}, {"__complete", ""}, {"__complete", "--"}, {"__complete", "st"}, {"--no-tui", "status", "--help"},
@@ -186,7 +186,7 @@ func TestHomeEnterWritesTheCDFileOfTheShellWrapper(t *testing.T) {
 	t.Parallel()
 	e, _, feat, _, _ := homeBundle(t)
 	cdFile := filepath.Join(t.TempDir(), "cd")
-	coWrite(t, cdFile, "")
+	writeFile(t, cdFile, "")
 	d := e.deps()
 	d.Getenv = func(k string) string {
 		if k == "SHEAF_CD_FILE" {
@@ -210,7 +210,7 @@ func TestHomeEnterWritesTheCDFileOfTheShellWrapper(t *testing.T) {
 func TestHomeUpdateSelectedCheckoutThenReturns(t *testing.T) {
 	t.Parallel()
 	e, alpha, feat, _, o := homeBundle(t)
-	coWrite(t, filepath.Join(feat, "new.txt"), "") // untracked files do not block update
+	writeFile(t, filepath.Join(feat, "new.txt"), "") // untracked files do not block update
 	oldMain := testutil.Git(t, alpha, "rev-parse", "HEAD")
 	var out syncBuffer
 	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", " ", "u"), keys(), ovKeys(t, &out, "update: done", 1, "q"))
@@ -346,8 +346,8 @@ func TestHomeRemoveDeclinedKeepsWorktree(t *testing.T) {
 
 func TestHomePruneDoctorAndSync(t *testing.T) {
 	e, root := syncBundle(t)
-	o, primary := e.coAddRepo(t, "alpha", "feat")
-	wt := coWorktree(t, primary, "feat", "feat")
+	o, primary := e.addRepo(t, "alpha", "feat")
+	wt := addWorktree(t, primary, "feat", "feat")
 	testutil.Git(t, o.Path, "branch", "-D", "feat") // gone upstream: a prune candidate
 	d := probeDeps(e, nil)
 	var out syncBuffer

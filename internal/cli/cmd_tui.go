@@ -77,7 +77,7 @@ func tuiUpdate(c *cobra.Command, w *ops.Workspace, opts ops.UpdateOptions, stric
 	if uerr != nil {
 		return uerr
 	}
-	return coPrintUpdateSummary(c.OutOrStdout(), r, strict)
+	return printUpdateSummary(c.OutOrStdout(), r, strict)
 }
 
 // tuiInitAdopt offers the checkouts found by init (all preselected) and
@@ -230,7 +230,7 @@ func tuiPrune(c *cobra.Command, w *ops.Workspace, opts ops.PruneOptions, yes boo
 			for _, cand := range plan.Candidates {
 				lines = append(lines, pruneCandidateLines(cand)...)
 			}
-			if !ask(fmt.Sprintf("Prune %s?", coPlural(len(plan.Candidates), "candidate")), lines) {
+			if !ask(fmt.Sprintf("Prune %s?", plural(len(plan.Candidates), "candidate")), lines) {
 				wasDeclined = true
 				return
 			}

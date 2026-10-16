@@ -29,7 +29,7 @@ func TestInterruptControllerNotifies(t *testing.T) {
 // Ctrl-C in a menu interrupts the command like SIGINT: exit 130.
 func TestTUIMenuCtrlCExits130(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
+	e := newBundleEnv(t)
 	e.origin(t, "o", "a", false)
 	before := readYAML(t, e.cwd)
 	var out syncBuffer
@@ -44,8 +44,8 @@ func TestTUIMenuCtrlCExits130(t *testing.T) {
 
 // Ctrl-C in a dialog of the progress view: no, and exit 130.
 func TestTUIRemoveDialogCtrlCExits130(t *testing.T) {
-	e := coBundle(t)
-	e.coAddRepo(t, "alpha")
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
 	var out syncBuffer
 	in := newScript(t, true, []key{{keys: "\x03", wait: waitOutput(t, &out, "[y/N]")}})
 	errs, code := e.runTUI(t, in, &out, "remove", "alpha")
@@ -150,7 +150,7 @@ func TestCredentialHint(t *testing.T) {
 // organization, like --repo with them or --all would.
 func TestTUIAddOrgPresentOnlyTracksSource(t *testing.T) {
 	t.Parallel()
-	e := coBundle(t)
+	e := newBundleEnv(t)
 	e.origin(t, "o", "a", false)
 	e.origin(t, "o", "b", false)
 	e.mustRun(t, "add", "o/a")

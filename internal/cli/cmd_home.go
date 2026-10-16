@@ -147,7 +147,7 @@ func (h *home) overview() (tui.Overview, error) {
 	for i := range r.Checkouts {
 		cs := &r.Checkouts[i]
 		h.rows[cs.Path] = homeRow{checkout: cs}
-		rows = append(rows, tui.Row{Key: cs.Path, Cells: []string{cs.Repo, coDisplayDir(cs.Checkout), homeBranch(*cs), homeState(*cs)}, Alert: cs.Err != nil})
+		rows = append(rows, tui.Row{Key: cs.Path, Cells: []string{cs.Repo, displayDir(cs.Checkout), homeBranch(*cs), homeState(*cs)}, Alert: cs.Err != nil})
 	}
 	for i := range r.Problems {
 		p := &r.Problems[i]
@@ -164,7 +164,7 @@ func homeBranch(c ops.CheckoutStatus) string {
 	case c.Tag != "":
 		return tagLabel(c.Tag, c.TagMovedTo)
 	case c.Detached && c.Status != nil:
-		return "(detached " + coShortHead(c.Status.Head) + ")"
+		return "(detached " + abbrevHead(c.Status.Head) + ")"
 	case c.Detached:
 		return "(detached)"
 	case c.Status != nil && c.Status.Unborn:

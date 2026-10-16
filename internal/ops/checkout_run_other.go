@@ -7,20 +7,20 @@ import (
 	"time"
 )
 
-// coProcTree is a no-op outside Unix: cancellation kills the command process
+// procTree is a no-op outside Unix: cancellation kills the command process
 // only (exec.CommandContext's default).
-type coProcTree struct{}
+type procTree struct{}
 
-func coPrepareTree(*exec.Cmd) *coProcTree { return &coProcTree{} }
+func prepareTree(*exec.Cmd) *procTree { return &procTree{} }
 
-func (*coProcTree) finish(time.Duration) {}
+func (*procTree) finish(time.Duration) {}
 
-func (*coProcTree) terminate() {}
+func (*procTree) terminate() {}
 
-func coKillTree(cmd *exec.Cmd) error { return cmd.Process.Kill() }
+func killTree(cmd *exec.Cmd) error { return cmd.Process.Kill() }
 
-func (*coProcTree) leftovers() bool { return false }
+func (*procTree) leftovers() bool { return false }
 
-// coUnlinkOpen does nothing outside Unix: an open file cannot be removed
+// unlinkOpen does nothing outside Unix: an open file cannot be removed
 // there; it is removed after replay.
-func coUnlinkOpen(string) bool { return false }
+func unlinkOpen(string) bool { return false }

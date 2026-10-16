@@ -48,7 +48,7 @@ func TestUpdateForkFetchesBothRemotesAndFollowsUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := coUpdatesByName(rep)
+	got := updatesByName(rep)
 	if u := got["x/main"]; u.Outcome != gitx.PullFastForwarded {
 		t.Fatalf("primary: %+v", u)
 	}
@@ -121,7 +121,7 @@ func TestUpdateForkFailedForkFetchUpdatesWhatWasFetched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := coUpdatesByName(rep)
+	got := updatesByName(rep)
 	if u := got["x/main"]; u.Outcome != gitx.PullFastForwarded || head(t, primary, "HEAD") != head(t, fo.Upstream.Path, "main") {
 		t.Fatalf("main (tracks upstream) must be fast-forwarded: %+v", u)
 	}
