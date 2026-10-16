@@ -1,0 +1,296 @@
+package cli
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+)
+
+// vtScreen is a minimal terminal emulator for tests: it applies the
+// output of a program (text, line feeds, cursor movements, erasures) to a
+// screen of rows×cols cells, and keeps the lines scrolled off the top in
+// a scrollback, so that a test can check what a user sees in the terminal
+// and above it after a session. Attributes (colors, bold) are ignored.
+// Sequences it does not implement are counted in unknown, so that a test
+// can tell whether its emulation is complete enough.
+type vtScreen struct {
+	rows, cols int
+	// newline makes a line feed also return the carriage, as a terminal
+	// with output post-processing (onlcr) does: set it for the output of a
+	// program writing to something else than a terminal, which then uses
+	// bare line feeds as newlines.
+	newline bool
+	grid    [][]rune
+	x, y    int
+	wrap    bool // the cursor is past the last column (deferred wrap)
+	sx, sy  int  // saved cursor
+
+	scrollback []string
+	unknown    map[string]int
+}
+
+func newVTScreen(rows, cols int) *vtScreen {
+	s := &vtScreen{rows: rows, cols: cols, unknown: map[string]int{}}
+	for range rows {
+		s.grid = append(s.grid, s.blank())
+	}
+	return s
+}
+
+func (s *vtScreen) blank() []rune {
+	l := make([]rune, s.cols)
+	for i := range l {
+		l[i] = ' '
+	}
+	return l
+}
+
+// write applies out to the screen.
+func (s *vtScreen) write(out string) {
+	p := ansi.NewParser()
+	var state byte
+	for len(out) > 0 {
+		seq, width, n, newState := ansi.DecodeSequence(out, state, p)
+		state = newState
+		out = out[n:]
+		switch {
+		case width > 0:
+			s.print(seq, width)
+		case len(seq) == 1 && seq[0] < 0x20:
+			s.control(seq[0])
+		case strings.HasPrefix(seq, "\x1b["):
+			s.csi(seq, ansi.Cmd(p.Command()), p.Params())
+		case strings.HasPrefix(seq, "\x1b]"), strings.HasPrefix(seq, "\x1bP"), strings.HasPrefix(seq, "\x1b_"):
+			// OSC, DCS, APC: no effect on the screen.
+		case len(seq) == 2 && seq[0] == 0x1b:
+			s.esc(seq[1])
+		default:
+			s.unknown[seq]++
+		}
+	}
+}
+
+func (s *vtScreen) print(g string, width int) {
+	if s.wrap {
+		s.x, s.wrap = 0, false
+		s.lineFeed()
+	}
+	r := []rune(g)[0]
+	s.grid[s.y][s.x] = r
+	for i := 1; i < width && s.x+i < s.cols; i++ {
+		s.grid[s.y][s.x+i] = 0 // continuation of a wide character
+	}
+	s.x += width
+	if s.x >= s.cols {
+		s.x, s.wrap = s.cols-1, true
+	}
+}
+
+func (s *vtScreen) lineFeed() {
+	if s.y < s.rows-1 {
+		s.y++
+		return
+	}
+	s.scrollback = append(s.scrollback, lineText(s.grid[0]))
+	s.grid = append(s.grid[1:], s.blank())
+}
+
+func (s *vtScreen) control(b byte) {
+	switch b {
+	case '\r':
+		s.x, s.wrap = 0, false
+	case '\n', '\v', '\f':
+		s.wrap = false
+		if s.newline {
+			s.x = 0
+		}
+		s.lineFeed()
+	case '\b':
+		s.wrap = false
+		s.x = max(0, s.x-1)
+	case '\t':
+		s.x = min(s.cols-1, (s.x/8+1)*8)
+	case '\a':
+	default:
+		s.unknown[string(b)]++
+	}
+}
+
+func (s *vtScreen) esc(final byte) {
+	switch final {
+	case '7':
+		s.sx, s.sy = s.x, s.y
+	case '8':
+		s.x, s.y, s.wrap = s.sx, s.sy, false
+	case 'M': // reverse index
+		if s.y > 0 {
+			s.y--
+		} else {
+			s.grid = append([][]rune{s.blank()}, s.grid[:s.rows-1]...)
+		}
+	case 'D':
+		s.lineFeed()
+	case 'E':
+		s.x = 0
+		s.lineFeed()
+	case '=', '>', '\\':
+	default:
+		s.unknown["\x1b"+string(final)]++
+	}
+}
+
+func (s *vtScreen) csi(seq string, cmd ansi.Cmd, params ansi.Params) {
+	n := func(i, def int) int {
+		v, _, _ := params.Param(i, def)
+		if v == 0 && def > 0 {
+			return def
+		}
+		return v
+	}
+	if cmd.Prefix() != 0 || cmd.Intermediate() != 0 {
+		switch cmd.Final() {
+		case 'h', 'l', 'u', 'p', 'm', 'q', 'c', 'n', 'W': // modes, keyboard, queries, tab stops
+			return
+		}
+		s.unknown[seq]++
+		return
+	}
+	clear := func(row []rune, from, to int) {
+		for i := max(0, from); i < min(s.cols, to); i++ {
+			row[i] = ' '
+		}
+	}
+	s.wrap = false
+	switch cmd.Final() {
+	case 'A':
+		s.y = max(0, s.y-n(0, 1))
+	case 'B':
+		s.y = min(s.rows-1, s.y+n(0, 1))
+	case 'C':
+		s.x = min(s.cols-1, s.x+n(0, 1))
+	case 'D':
+		s.x = max(0, s.x-n(0, 1))
+	case 'E':
+		s.x, s.y = 0, min(s.rows-1, s.y+n(0, 1))
+	case 'F':
+		s.x, s.y = 0, max(0, s.y-n(0, 1))
+	case 'G', '`':
+		s.x = min(s.cols-1, n(0, 1)-1)
+	case 'd':
+		s.y = min(s.rows-1, n(0, 1)-1)
+	case 'H', 'f':
+		s.y, s.x = min(s.rows-1, n(0, 1)-1), min(s.cols-1, n(1, 1)-1)
+	case 'J':
+		switch n(0, 0) {
+		case 0:
+			clear(s.grid[s.y], s.x, s.cols)
+			for y := s.y + 1; y < s.rows; y++ {
+				s.grid[y] = s.blank()
+			}
+		case 1:
+			clear(s.grid[s.y], 0, s.x+1)
+			for y := 0; y < s.y; y++ {
+				s.grid[y] = s.blank()
+			}
+		case 2, 3:
+			for y := range s.grid {
+				s.grid[y] = s.blank()
+			}
+		}
+	case 'K':
+		switch n(0, 0) {
+		case 0:
+			clear(s.grid[s.y], s.x, s.cols)
+		case 1:
+			clear(s.grid[s.y], 0, s.x+1)
+		case 2:
+			s.grid[s.y] = s.blank()
+		}
+	case 'X':
+		clear(s.grid[s.y], s.x, s.x+n(0, 1))
+	case 'P':
+		row, k := s.grid[s.y], n(0, 1)
+		copy(row[s.x:], row[min(s.cols, s.x+k):])
+		clear(row, s.cols-k, s.cols)
+	case '@':
+		row, k := s.grid[s.y], n(0, 1)
+		copy(row[min(s.cols, s.x+k):], row[s.x:])
+		clear(row, s.x, s.x+k)
+	case 'L':
+		for range n(0, 1) {
+			s.grid = append(s.grid[:s.y], append([][]rune{s.blank()}, s.grid[s.y:s.rows-1]...)...)
+		}
+	case 'M':
+		for range n(0, 1) {
+			s.grid = append(append(s.grid[:s.y:s.y], s.grid[s.y+1:]...), s.blank())
+		}
+	case 'S':
+		for range n(0, 1) {
+			s.scrollback = append(s.scrollback, lineText(s.grid[0]))
+			s.grid = append(s.grid[1:], s.blank())
+		}
+	case 'm', 'h', 'l', 'n', 'c', 'r', 't', 'q':
+		// attributes, modes, reports, scroll region (unused by inline programs)
+	default:
+		s.unknown[seq]++
+	}
+}
+
+func lineText(row []rune) string {
+	var b strings.Builder
+	for _, r := range row {
+		if r != 0 {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimRight(b.String(), " ")
+}
+
+// lines returns the scrollback followed by the screen, trailing empty
+// lines of the screen removed.
+func (s *vtScreen) lines() []string {
+	out := append([]string(nil), s.scrollback...)
+	for _, row := range s.grid {
+		out = append(out, lineText(row))
+	}
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return out
+}
+
+// The emulator itself: erasures, cursor movements, deferred wrap, line
+// feeds with and without carriage return, and the scrollback.
+func TestVTScreen(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, out string
+		newline   bool
+		want      []string
+	}{
+		{"erase line right", "abcd\r\x1b[2C\x1b[K", false, []string{"ab"}},
+		{"erase line left", "abcd\x1b[2D\x1b[1K", false, []string{"  cd"}},
+		{"erase whole line", "abcd\x1b[2K", false, nil},
+		{"erase below", "a\r\nb\r\nc\x1b[A\r\x1b[J", false, []string{"a"}},
+		{"erase above", "a\r\nb\r\ncde\x1b[2D\x1b[1J", false, []string{"", "", "  e"}},
+		{"cursor moves", "ab\x1b[2;3Hx\x1b[Ay\x1b[1Gz", false, []string{"zb y", "  x"}},
+		{"deferred wrap", "abcd", false, []string{"abcd"}},
+		{"wrap", "abcde", false, []string{"abcd", "e"}},
+		{"bare line feed", "ab\ncd", false, []string{"ab", "  cd"}},
+		{"newline mode", "ab\ncd", true, []string{"ab", "cd"}},
+		{"scrollback", "1\r\n2\r\n3\r\n4", false, []string{"1", "2", "3", "4"}},
+	} {
+		vt := newVTScreen(3, 4)
+		vt.newline = tc.newline
+		vt.write(tc.out)
+		if got := vt.lines(); strings.Join(got, "|") != strings.Join(tc.want, "|") || len(vt.unknown) > 0 {
+			t.Errorf("%s: lines %q (unknown %v), want %q", tc.name, got, vt.unknown, tc.want)
+		}
+	}
+	vt := newVTScreen(3, 4)
+	vt.write("1\r\n2\r\n3\r\n4")
+	if strings.Join(vt.scrollback, "|") != "1" {
+		t.Errorf("scrollback %q, want [1]", vt.scrollback)
+	}
+}

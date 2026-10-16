@@ -98,8 +98,9 @@ func NewOverview(title string, header []string, rows []Row, actions []OverviewAc
 	st := DefaultStyles()
 	h.Styles = st.Help
 	keys := newMultiSelectKeys()
-	keys.Toggle.SetHelp("space", "select")
-	keys.Cancel.SetHelp("q", "quit")
+	// The keys are those of MultiSelect, with the same help except that
+	// esc and q quit the program rather than cancel a menu.
+	keys.Cancel.SetHelp("esc/q", "quit")
 	m := Overview{
 		title:    title,
 		header:   slices.Clone(header),
@@ -135,6 +136,30 @@ func (m Overview) WithCursor(key string) Overview {
 func (m Overview) WithFilter(f string) Overview {
 	m.setFilter(dropControl(f))
 	return m
+}
+
+// WithSelected returns a copy of m in which the rows of keys are selected
+// (keys of no row are ignored), e.g. the selection of a previous overview.
+func (m Overview) WithSelected(keys []string) Overview {
+	m.selected = map[string]bool{}
+	for _, r := range m.rows {
+		if slices.Contains(keys, r.Key) {
+			m.selected[r.Key] = true
+		}
+	}
+	return m
+}
+
+// SelectedKeys returns the keys of the selected rows, filtered or not, in
+// row order.
+func (m Overview) SelectedKeys() []string {
+	var keys []string
+	for _, r := range m.rows {
+		if m.selected[r.Key] {
+			keys = append(keys, r.Key)
+		}
+	}
+	return keys
 }
 
 // Init implements tea.Model.

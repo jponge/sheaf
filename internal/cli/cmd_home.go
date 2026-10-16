@@ -85,6 +85,15 @@ type home struct {
 
 	cursor, filter, message string
 	rows                    map[string]homeRow // by row key, of the last overview
+	// selected are the selected rows of the next overview: those of the
+	// last one, unless its action applied to them and succeeded.
+	selected []string
+	// succeeded tells whether every run of the last action succeeded (see
+	// outcome).
+	succeeded bool
+	// unchanged is the note of the last command that changed nothing (see
+	// Deps.unchanged), reset before each action.
+	unchanged string
 }
 
 // homeRow is what a row of the overview shows: a checkout, or a problem.
@@ -115,7 +124,7 @@ func (h *home) loop() error {
 			return nil
 		}
 		name, targets := m.Chosen()
-		h.cursor, h.filter = m.CurrentKey(), m.Filter()
+		h.cursor, h.filter, h.selected = m.CurrentKey(), m.Filter(), m.SelectedKeys()
 		switch name {
 		case "": // quit, or input closed
 			return nil
@@ -125,6 +134,9 @@ func (h *home) loop() error {
 		h.message = h.act(name, targets)
 		if err := h.s.ctx.Err(); err != nil {
 			return err // interrupted during the action: exit 130
+		}
+		if h.succeeded && h.scope(name) == tui.ScopeRows {
+			h.selected = nil // the selection was acted upon
 		}
 	}
 }
@@ -156,7 +168,17 @@ func (h *home) overview() (tui.Overview, error) {
 		rows = append(rows, tui.Row{Key: key, Cells: []string{p.Repo, filepath.Base(p.Path), "-", "problem: " + firstLine(p.Err.Error())}, Alert: true})
 	}
 	ov := tui.NewOverview("sheaf: "+w.Root, []string{"REPO", "DIR", "BRANCH", "STATE"}, rows, h.actions())
-	return ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message), nil
+	return ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected), nil
+}
+
+// scope returns the scope of the action name.
+func (h *home) scope(name string) tui.Scope {
+	for _, a := range h.actions() {
+		if a.Name == name {
+			return a.Scope
+		}
+	}
+	return tui.ScopeNone
 }
 
 func homeBranch(c ops.CheckoutStatus) string {
@@ -247,6 +269,7 @@ func (h *home) cd(r homeRow) error {
 // act runs the action name on targets and returns the message the next
 // overview displays.
 func (h *home) act(name string, targets []string) string {
+	h.unchanged = ""
 	var repos []string
 	for _, k := range targets {
 		if r := h.rows[k].repo(); !slices.Contains(repos, r) {
@@ -290,7 +313,13 @@ func (h *home) act(name string, targets []string) string {
 
 // add asks for a branch or a tag and adds the worktree with `wt add`.
 func (h *home) add(repo string) string {
-	final, err := h.s.run(tui.NewPrompt("New worktree of "+repo, []string{"branch", "tag"}))
+	// The hints follow wt add: an existing branch (local, then origin's),
+	// else a new one from the default branch; --tag pins a detached
+	// worktree at the tag.
+	prompt := tui.NewPrompt("New worktree of "+repo, []string{"branch", "tag"}).WithHints(
+		"an existing local or remote branch, else a new branch from the default branch",
+		"a tag: a detached worktree pinned at it")
+	final, err := h.s.run(prompt)
 	if err != nil {
 		return h.outcome("add", []error{err})
 	}
@@ -311,6 +340,7 @@ func (h *home) add(repo string) string {
 func (h *home) command(args ...string) error {
 	d := h.d
 	d.ctl = h.s.ctl // the home screen's controller, with its context
+	d.unchanged = func(note string) { h.unchanged = note }
 	root := NewRootCmdWithDeps(Streams{In: h.c.InOrStdin(), Out: h.c.OutOrStdout(), Err: h.c.ErrOrStderr()}, d)
 	root.SetArgs(append([]string{"--bundle=" + h.root, "--jobs=" + strconv.Itoa(h.jobs)}, args...))
 	return root.ExecuteContext(h.s.ctx)
@@ -318,8 +348,9 @@ func (h *home) command(args ...string) error {
 
 // outcome prints the errors of an action like execute does (cancellations
 // excepted) and returns the message for the overview: "<name>: done",
-// "<name>: cancelled", "<name> failed: <error>", or the counts when the
-// action ran several times.
+// "<name>: <note>" when the command changed nothing (e.g. "prune: nothing
+// to prune"), "<name>: cancelled", "<name> failed: <error>", or the counts
+// when the action ran several times.
 func (h *home) outcome(name string, errs []error) string {
 	var done, cancelled, failed int
 	var last error
@@ -337,6 +368,7 @@ func (h *home) outcome(name string, errs []error) string {
 			}
 		}
 	}
+	h.succeeded = cancelled == 0 && failed == 0
 	switch {
 	case len(errs) > 1:
 		return fmt.Sprintf("%s: %d done, %d cancelled, %d failed", name, done, cancelled, failed)
@@ -344,6 +376,8 @@ func (h *home) outcome(name string, errs []error) string {
 		return name + " failed: " + firstLine(last.Error())
 	case cancelled > 0:
 		return name + ": cancelled"
+	case h.unchanged != "":
+		return name + ": " + h.unchanged
 	}
 	return name + ": done"
 }

@@ -6,13 +6,18 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/jponge/sheaf/internal/testutil"
 	"github.com/spf13/cobra"
 )
 
@@ -107,10 +112,41 @@ func TestSecondSignalKillsGitAndExits(t *testing.T) {
 	if code := execute(root, ctl, []string{"probe"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
-	for _, want := range []string{"sheaf adopt", ".sheaf-adopt-"} {
-		if !strings.Contains(errb.String(), want) {
-			t.Errorf("emergency stop message lacks %q:\n%s", want, errb.String())
+	if !strings.Contains(errb.String(), "killing git processes") {
+		t.Errorf("emergency stop message:\n%s", errb.String())
+	}
+	// The probe neither adopts, adds nor updates: no advice about them.
+	for _, unwanted := range []string{"sheaf adopt", ".sheaf-adopt-", "partial clone", "fast-forward"} {
+		if strings.Contains(errb.String(), unwanted) {
+			t.Errorf("emergency stop message mentions %q:\n%s", unwanted, errb.String())
 		}
+	}
+}
+
+// The emergency stop gives the advice registered by the operations running
+// at that moment (during), and only that.
+func TestEmergencyStopMentionsOnlyRunningOperations(t *testing.T) {
+	t.Parallel()
+	stop := func(register func(c *interruptCtl)) string {
+		var errb bytes.Buffer
+		c := newInterruptCtl()
+		stubEmergency(c)
+		c.bind(func() {}, &errb)
+		register(c)
+		c.interrupt()
+		c.interrupt()
+		return errb.String()
+	}
+	msg := stop(func(c *interruptCtl) { c.during(noteAdopt) })
+	if !strings.Contains(msg, "killing git processes") || !strings.Contains(msg, ".sheaf-adopt-") || strings.Contains(msg, "fast-forward") {
+		t.Errorf("during an adopt:\n%s", msg)
+	}
+	msg = stop(func(c *interruptCtl) {
+		c.during(noteClone)
+		c.during(noteFastForward)()
+	})
+	if !strings.Contains(msg, "partial clone") || strings.Contains(msg, "fast-forward") || strings.Contains(msg, "adopt") {
+		t.Errorf("during an add, after an update:\n%s", msg)
 	}
 }
 
@@ -153,4 +189,80 @@ func TestSignalThenKeyIsEmergencyStop(t *testing.T) {
 	if code := execute(root, d.ctl, []string{"probe"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
+}
+
+// notesDuring runs sheaf args with the TUI forced on when in is not nil,
+// and returns the emergency notes registered while it ran (see
+// interruptCtl.during); every note must be released when it returns.
+func notesDuring(t *testing.T, e *env, in io.Reader, args ...string) []string {
+	t.Helper()
+	var mu sync.Mutex
+	var notes []string
+	ctl := newInterruptCtl()
+	ctl.registered = func(n string) {
+		mu.Lock()
+		defer mu.Unlock()
+		notes = append(notes, n)
+	}
+	d := e.deps()
+	d.ctl = ctl
+	if in != nil {
+		d.UseTUI = func(io.Reader, io.Writer, bool) bool { return true }
+	} else {
+		in = strings.NewReader("")
+	}
+	var out, errb syncBuffer
+	if code := executeDeps(Streams{In: in, Out: &out, Err: &errb}, d, args); code != 0 {
+		t.Fatalf("sheaf %v: exit %d\nstdout:\n%s\nstderr:\n%s", args, code, out.String(), errb.String())
+	}
+	ctl.mu.Lock()
+	defer ctl.mu.Unlock()
+	if len(ctl.notes) > 0 {
+		t.Errorf("sheaf %v: notes still registered after it returned: %q", args, ctl.notes)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	return notes
+}
+
+// Each command that clones, adopts or fast-forwards registers the advice
+// of the emergency stop about it while it runs, in plain and TUI mode.
+func TestCommandsRegisterTheirEmergencyNotes(t *testing.T) {
+	t.Parallel()
+	want := func(name string, got []string, note string) {
+		t.Helper()
+		if !slices.Equal(got, []string{note}) {
+			t.Errorf("%s: notes %q, want %q", name, got, []string{note})
+		}
+	}
+	clones := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		o := testutil.NewOrigin(t, testutil.OriginOpts{})
+		testutil.Git(t, dir, "clone", "-q", o.URL, filepath.Join(dir, "p"))
+		return dir
+	}
+
+	e, _ := syncBundle(t) // a tracked; b and c new in o
+	want("add", notesDuring(t, e, nil, "add", "o/b"), noteClone)
+	want("sync --add-new", notesDuring(t, e, nil, "sync", "--add-new"), noteClone)
+
+	e, _ = syncBundle(t)
+	want("TUI add", notesDuring(t, e, newScript(t, true), "add", "o/b"), noteClone)
+	want("TUI sync", notesDuring(t, e, newScript(t, true, keys(" ", "\r")), "sync"), noteClone)
+
+	e = newBundleEnv(t)
+	o, _ := e.addRepo(t, "alpha")
+	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
+	want("update", notesDuring(t, e, nil, "update"), noteFastForward)
+	plain := testutil.NewOrigin(t, testutil.OriginOpts{})
+	testutil.Git(t, e.cwd, "clone", "-q", plain.URL, filepath.Join(e.cwd, "p"))
+	want("adopt", notesDuring(t, e, nil, "adopt", "p"), noteAdopt)
+	if got := notesDuring(t, e, nil, "adopt", "--recheck", "p"); len(got) != 0 {
+		t.Errorf("adopt --recheck moves nothing: notes %q", got)
+	}
+
+	e = newEnv(t)
+	want("init --adopt-all", notesDuring(t, e, nil, "init", clones(t), "--adopt-all"), noteAdopt)
+	want("TUI init", notesDuring(t, e, newScript(t, true, keys("\r")), "init", clones(t)), noteAdopt)
 }

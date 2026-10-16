@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 
+	"github.com/jponge/sheaf/internal/bundle"
 	"github.com/jponge/sheaf/internal/hosting"
 	"github.com/jponge/sheaf/internal/ops"
+	"github.com/jponge/sheaf/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -30,7 +33,7 @@ func tuiAdd(c *cobra.Command, d Deps, w *ops.Workspace, h hosting.Hosting, req o
 			return err
 		}
 		items := orgRepoItems(sel.Available, w.Bundle())
-		keys, err := s.multiSelect("Add repositories of "+sel.Org, items)
+		keys, err := s.pick(tui.NewMultiSelect("Add repositories of "+sel.Org, items).WithLockedLabel("present"))
 		if err != nil {
 			return err
 		}
@@ -45,6 +48,8 @@ func tuiAdd(c *cobra.Command, d Deps, w *ops.Workspace, h hosting.Hosting, req o
 	}
 	var sum ops.Summary
 	var addErr error
+	before := w.Bundle()
+	defer s.ctl.during(noteClone)()
 	s.progress("Adding repositories", progressOpts{}, func(ctx context.Context, rep ops.Reporter, _ askFunc) {
 		sum, addErr = ops.Add(ctx, w, h, req, jobs, rep)
 	})
@@ -52,7 +57,19 @@ func tuiAdd(c *cobra.Command, d Deps, w *ops.Workspace, h hosting.Hosting, req o
 		return addErr
 	}
 	printFailureDetails(c.ErrOrStderr(), sum)
-	return printSummary(out, sum)
+	err := printSummary(out, sum)
+	printNewSources(out, before, w.Bundle())
+	return err
+}
+
+// printNewSources tells which organizations are tracked in after (the
+// bundle after an add) and were not in before.
+func printNewSources(w io.Writer, before, after *bundle.Bundle) {
+	for _, src := range after.Sources {
+		if !slices.ContainsFunc(before.Sources, func(b bundle.Source) bool { return strings.EqualFold(b.Org, src.Org) }) {
+			fmt.Fprintf(w, "now tracking %s: sync will propose its new repositories\n", src.Org)
+		}
+	}
 }
 
 // tuiSummary runs an operation returning a Summary in a progress view and
@@ -71,6 +88,7 @@ func tuiUpdate(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.UpdateOption
 	opts.Force = s.ctl.force
 	var r ops.UpdateReport
 	var uerr error
+	defer s.ctl.during(noteFastForward)()
 	s.progress("Updating", progressOpts{Aside: ops.PhaseFetch}, func(ctx context.Context, rep ops.Reporter, _ askFunc) {
 		r, uerr = ops.Update(ctx, w, opts, rep)
 	})
@@ -107,11 +125,22 @@ func tuiInitAdopt(c *cobra.Command, d Deps, root string, cands []ops.Candidate, 
 		return err
 	}
 	var sum ops.Summary
+	defer s.ctl.during(noteAdopt)()
 	s.progress("Adopting checkouts", progressOpts{}, func(ctx context.Context, rep ops.Reporter, _ askFunc) {
 		sum = ops.AdoptAll(ctx, w, paths, ops.AdoptOptions{}, jobs, rep)
 	})
 	printFailureDetails(c.ErrOrStderr(), sum)
-	return printSummary(out, sum)
+	err = printSummary(out, sum)
+	var left []string
+	for _, cand := range cands {
+		if !slices.Contains(paths, cand.Path) {
+			left = append(left, cand.Name)
+		}
+	}
+	if len(left) > 0 {
+		fmt.Fprintf(out, "not adopted: %s; adopt later with: sheaf adopt %s\n", strings.Join(left, ", "), strings.Join(left, " "))
+	}
+	return err
 }
 
 // tuiRemove removes a repository with a progress view; without --yes the
@@ -120,7 +149,11 @@ func tuiRemove(c *cobra.Command, d Deps, w *ops.Workspace, name string, opts ops
 	s := newTUISession(c, d)
 	var msg string
 	var rerr error
-	s.progress("Removing "+name, progressOpts{Single: name}, func(ctx context.Context, rep ops.Reporter, ask askFunc) {
+	title, removing := "Checking "+name+" for removal", "Removing "+name
+	if yes {
+		title = removing
+	}
+	s.progress(title, progressOpts{Single: name, Confirmed: removing}, func(ctx context.Context, rep ops.Reporter, ask askFunc) {
 		emit := func(e ops.Event) { // like CLI mode's
 			if e.Repo == "" {
 				e.Repo = name
@@ -161,7 +194,7 @@ func tuiRemove(c *cobra.Command, d Deps, w *ops.Workspace, name string, opts ops
 func finalEvent(emit func(ops.Event), msg string, err error) {
 	switch {
 	case errors.Is(err, ops.ErrNotConfirmed):
-		emit(ops.Event{Kind: ops.KindSkipped, Message: "cancelled"})
+		emit(ops.Event{Kind: ops.KindSkipped, Message: "cancelled", Err: err})
 	case err != nil:
 		emit(ops.Event{Kind: ops.KindFailed, Err: err})
 	default:
@@ -176,7 +209,12 @@ func tuiWorktreeRemove(c *cobra.Command, d Deps, w *ops.Workspace, repo string, 
 	s := newTUISession(c, d)
 	var msg string
 	var rerr error
-	s.progress("Removing worktree "+target.Name+" of "+repo, progressOpts{Single: repo + "/" + target.Name}, func(ctx context.Context, rep ops.Reporter, ask askFunc) {
+	removing := "Removing worktree " + target.Name + " of " + repo
+	title := "Checking worktree " + target.Name + " of " + repo + " for removal"
+	if yes {
+		title = removing
+	}
+	s.progress(title, progressOpts{Single: repo + "/" + target.Name, Confirmed: removing}, func(ctx context.Context, rep ops.Reporter, ask askFunc) {
 		emit := func(e ops.Event) { // like CLI mode's eventSink
 			if e.Repo == "" {
 				e.Repo = repo
@@ -220,7 +258,11 @@ func tuiPrune(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.PruneOptions,
 	var results []ops.PruneResult
 	var perr error
 	wasDeclined := false
-	s.progress("Pruning", progressOpts{Aside: ops.PhaseFetch}, func(ctx context.Context, rep ops.Reporter, ask askFunc) {
+	title := "Checking prune candidates"
+	if yes {
+		title = "Pruning"
+	}
+	s.progress(title, progressOpts{Aside: ops.PhaseFetch, Confirmed: "Pruning"}, func(ctx context.Context, rep ops.Reporter, ask askFunc) {
 		plan, perr = ops.PlanPrune(ctx, w, opts, rep)
 		if perr != nil || len(plan.Candidates) == 0 {
 			return
@@ -228,7 +270,7 @@ func tuiPrune(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.PruneOptions,
 		if !yes {
 			var lines []string
 			for _, cand := range plan.Candidates {
-				lines = append(lines, pruneCandidateLines(cand)...)
+				lines = append(lines, pruneCandidateLines(cand, true, opts.DeleteBranches)...)
 			}
 			if !ask(fmt.Sprintf("Prune %s?", plural(len(plan.Candidates), "candidate")), lines) {
 				wasDeclined = true
@@ -242,6 +284,9 @@ func tuiPrune(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.PruneOptions,
 	}
 	if wasDeclined {
 		return errCancelled
+	}
+	if len(plan.Candidates) == 0 {
+		d.reportUnchanged("nothing to prune")
 	}
 	printPrune(c.OutOrStdout(), plan, results, false)
 	return pruneErr(s.ctx, plan, results)
@@ -258,6 +303,7 @@ func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noF
 	out := c.OutOrStdout()
 	if len(rep.Proposals) == 0 {
 		syWriteProposals(out, rep, false)
+		d.reportUnchanged("nothing to sync")
 		return rep.Err()
 	}
 	keys, err := s.multiSelect("Sync: choose the changes to apply", proposalItems(rep.Proposals))
@@ -289,6 +335,7 @@ func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noF
 	}
 	if len(add) == 0 && len(gone) == 0 {
 		fmt.Fprintln(out, "nothing selected; nothing changed")
+		d.reportUnchanged("nothing selected; nothing changed")
 		return rep.Err()
 	}
 	errs := []error{rep.Err()}
@@ -298,6 +345,9 @@ func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noF
 	}
 	jobs := OptionsFrom(c).Jobs
 	var addSum, rmSum ops.Summary
+	if len(add) > 0 {
+		defer s.ctl.during(noteClone)()
+	}
 	s.progress("Syncing", progressOpts{}, func(ctx context.Context, r ops.Reporter, _ askFunc) {
 		if len(add) > 0 {
 			addSum = ops.SyncAddNewWithOptions(ctx, w, add, ops.CloneOptions{Hosting: d.hosting(), NoFork: noFork}, jobs, r)

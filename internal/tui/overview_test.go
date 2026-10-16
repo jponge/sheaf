@@ -70,7 +70,7 @@ func TestOverviewRendersAlignedTable(t *testing.T) {
 			t.Fatalf("view lacks line %q:\n%s", want, v)
 		}
 	}
-	if !strings.Contains(v, "enter cd") || !strings.Contains(v, "u update") || !strings.Contains(v, "q quit") {
+	if !strings.Contains(v, "enter cd") || !strings.Contains(v, "u update") || !strings.Contains(v, "esc/q quit") {
 		t.Fatalf("help line lacks the actions:\n%s", v)
 	}
 }
@@ -91,7 +91,7 @@ func TestOverviewHelpShowsEveryActionAt80Columns(t *testing.T) {
 			t.Errorf("help lacks %q:\n%s", a.Key+" "+a.Help, v)
 		}
 	}
-	if !strings.Contains(v, "q quit") || strings.Contains(v, "…") {
+	if !strings.Contains(v, "esc/q quit") || strings.Contains(v, "…") {
 		t.Errorf("help cut:\n%s", v)
 	}
 }
@@ -414,9 +414,25 @@ func TestOverviewHelpShowsSelectAllAndNone(t *testing.T) {
 	var m tea.Model = newOv()
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	v := view(m)
-	for _, want := range []string{"space select", "a all", "n none", "w add worktree"} {
+	for _, want := range []string{"space toggle", "a all", "n none", "w add worktree"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("help lacks %q:\n%s", want, v)
 		}
 	}
+}
+
+// A new overview can start with the selection of a previous one (keys of
+// rows that no longer exist are ignored), and returns its selection.
+func TestOverviewWithSelectedRestoresTheSelection(t *testing.T) {
+	t.Parallel()
+	m := newOv().WithSelected([]string{"/b/bravo/main", "/b/gone/main"})
+	if v := view(m); !strings.Contains(v, "1/3 selected") || !hasLine(v, "  [x] bravo  main    main    clean") {
+		t.Fatalf("view:\n%s", v)
+	}
+	next, _ := press(m, "space")
+	if got := asOv(t, next).SelectedKeys(); !reflect.DeepEqual(got, []string{"/b/a/main", "/b/bravo/main"}) {
+		t.Fatalf("SelectedKeys() = %q", got)
+	}
+	next, _ = press(next, "u")
+	assertChosen(t, next, "update", "/b/a/main", "/b/bravo/main")
 }

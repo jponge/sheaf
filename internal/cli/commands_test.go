@@ -405,3 +405,23 @@ func TestAdoptRecheckByRepositoryName(t *testing.T) {
 		t.Fatalf("entry = %+v", r)
 	}
 }
+
+// When add starts tracking an organization (a new source in sheaf.yaml),
+// it says so; adding again from a tracked organization says nothing.
+func TestAddOrgSaysWhenItStartsTracking(t *testing.T) {
+	t.Parallel()
+	e := newBundleEnv(t)
+	for _, n := range []string{"a", "b"} {
+		e.origin(t, "o", n, false)
+	}
+	const tracking = "now tracking o: sync will propose its new repositories"
+	if out := e.mustRun(t, "add", "o/a"); strings.Contains(out, "now tracking") {
+		t.Fatalf("add owner/repo tracks nothing:\n%s", out)
+	}
+	if out := e.mustRun(t, "add", "--org", "o", "--repo", "a"); !strings.Contains(out, tracking) {
+		t.Fatalf("stdout lacks %q:\n%s", tracking, out)
+	}
+	if out := e.mustRun(t, "add", "--org", "o", "--all"); strings.Contains(out, "now tracking") {
+		t.Fatalf("o was already tracked:\n%s", out)
+	}
+}

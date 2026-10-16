@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -42,10 +44,22 @@ type Deps struct {
 	// update; nil when the commands do not run through execute (a TUI
 	// session then makes its own, see newTUISession).
 	ctl *interruptCtl
+	// unchanged, if set, is told when a command ends without changing
+	// anything (e.g. "nothing to prune"): the home screen reports that
+	// rather than "done".
+	unchanged func(note string)
 	// stdinTTY and stdoutTTY replace isTerminal for standard input
 	// (interactive git mode) and standard output (colors); tests only.
 	stdinTTY  func(io.Reader) bool
 	stdoutTTY func(io.Writer) bool
+}
+
+// reportUnchanged tells d.unchanged, if set, that the command changed
+// nothing, and why.
+func (d Deps) reportUnchanged(note string) {
+	if d.unchanged != nil {
+		d.unchanged(note)
+	}
 }
 
 func (d Deps) getenv(k string) string {
@@ -92,6 +106,10 @@ type interruptCtl struct {
 	mu      sync.Mutex
 	release func() // restores the terminal of the running TUI program, if any
 	notify  func(int)
+	notes   []string // see during
+	// registered, if set, is called with each note registered by during
+	// (tests only).
+	registered func(note string)
 }
 
 // setNotify registers f, called with the number of interruptions so far on
@@ -156,6 +174,46 @@ func (c *interruptCtl) interrupt() {
 	}
 }
 
+// Advice of the emergency stop about the operations it may interrupt (see
+// interruptCtl.during).
+const (
+	noteAdopt = "An adopt may have been interrupted mid-move: rerun `sheaf adopt <dir>`, and if <dir> is missing\n" +
+		"look for the clone in a .sheaf-adopt-* folder of the bundle and move it back first."
+	noteClone       = "An interrupted add may leave a partial clone directory: delete it before adding again."
+	noteFastForward = "A fast-forward killed by update may leave .git/index.lock and a half-updated work tree: check `git status` there."
+)
+
+// during registers note, which the emergency stop prints until the
+// returned function is called: the advice about the operation running in
+// the meantime. The same note may be registered several times.
+func (c *interruptCtl) during(note string) (done func()) {
+	c.mu.Lock()
+	c.notes = append(c.notes, note)
+	registered := c.registered
+	c.mu.Unlock()
+	if registered != nil {
+		registered(note)
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			if i := slices.Index(c.notes, note); i >= 0 {
+				c.notes = slices.Delete(c.notes, i, i+1)
+			}
+		})
+	}
+}
+
+// emergencyNote is interruptCtl.during on the controller of d, if any.
+func (d Deps) emergencyNote(note string) (done func()) {
+	if d.ctl == nil {
+		return func() {}
+	}
+	return d.ctl.during(note)
+}
+
 func (c *interruptCtl) emergencyStop() {
 	close(c.force)
 	c.mu.Lock()
@@ -164,11 +222,15 @@ func (c *interruptCtl) emergencyStop() {
 	if release != nil {
 		release()
 	}
-	fmt.Fprintln(c.errw, "sheaf: interrupted again, killing git processes and exiting without cleanup.\n"+
-		"An adopt may have been interrupted mid-move: rerun `sheaf adopt <dir>`, and if <dir> is missing\n"+
-		"look for the clone in a .sheaf-adopt-* folder of the bundle and move it back first.\n"+
-		"An interrupted add may leave a partial clone directory: delete it before adding again.\n"+
-		"A fast-forward killed by update may leave .git/index.lock and a half-updated work tree: check `git status` there.")
+	c.mu.Lock()
+	var notes []string
+	for _, n := range c.notes {
+		if !slices.Contains(notes, n) {
+			notes = append(notes, n)
+		}
+	}
+	c.mu.Unlock()
+	fmt.Fprintln(c.errw, strings.Join(append([]string{"sheaf: interrupted again, killing git processes and exiting without cleanup."}, notes...), "\n"))
 	c.killAll()
 	c.exit(130)
 }

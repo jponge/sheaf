@@ -45,7 +45,7 @@ func TestProposalItems(t *testing.T) {
 	want := []tui.Item{
 		{Key: "new:o/b", Label: "b", Detail: "o/b: bee", Tags: []string{"new", "fork"}},
 		{Key: "new:o/c", Label: "c", Detail: "o/c: directory c already used", Tags: []string{"new"}},
-		{Key: "gone:o/d", Label: "d", Detail: "o/d", Tags: []string{"gone", "mass removal: refused"}},
+		{Key: "gone:o/d", Label: "d", Detail: "o/d", Tags: []string{"gone", "mass removal: refused"}, Disabled: true},
 		{Key: "moved:o/e", Label: "e", Detail: "o/e, now p/e2", Tags: []string{"moved"}, Disabled: true},
 		{Key: "archived:o/f", Label: "f", Detail: "o/f", Tags: []string{"archived"}, Disabled: true},
 	}
@@ -85,6 +85,8 @@ func TestEventRow(t *testing.T) {
 			"", tui.RowUpdate{Key: "a/main", Label: "a/main", State: tui.RowDone, Message: "fast-forwarded"}},
 		{"skipped", ops.Event{Repo: "a", Phase: ops.PhaseUpdate, Kind: ops.KindSkipped, Message: "dirty"},
 			"", tui.RowUpdate{Key: "a", Label: "a", State: tui.RowSkipped, Message: "dirty"}},
+		{"declined", ops.Event{Repo: "a", Phase: ops.PhaseRemove, Kind: ops.KindSkipped, Message: "cancelled", Err: ops.ErrNotConfirmed},
+			"", tui.RowUpdate{Key: "a", Label: "a", State: tui.RowCancelled, Message: "cancelled"}},
 		{"failed first line", ops.Event{Repo: "a", Phase: ops.PhaseClone, Kind: ops.KindFailed, Err: errors.New("boom\ndetails")},
 			"", tui.RowUpdate{Key: "a", Label: "a", State: tui.RowFailed, Message: "boom"}},
 		{"not started", ops.Event{Repo: "a", Phase: ops.PhaseClone, Kind: ops.KindFailed, Message: "not started", Err: context.Canceled},

@@ -12,7 +12,7 @@ import (
 )
 
 // A prune candidate line as cli.pruneCandidateLines produces it.
-const longPruneLine = "would remove worktree alpha/feat-cli-rework-ergonomics [feat/cli/rework-ergonomics] at /home/someone/bundles/work/alpha/feat-cli-rework-ergonomics: origin/feat/cli/rework-ergonomics is gone"
+const longPruneLine = "will remove worktree alpha/feat-cli-rework-ergonomics [feat/cli/rework-ergonomics] at /home/someone/bundles/work/alpha/feat-cli-rework-ergonomics: origin/feat/cli/rework-ergonomics is gone"
 
 // words returns the whitespace-separated words of s, with the wrapped
 // pieces of a word split by hard wrapping glued back by the caller.

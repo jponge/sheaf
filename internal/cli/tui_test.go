@@ -286,4 +286,10 @@ func TestTUIAddOrgPresentOnlyTracksSource(t *testing.T) {
 	if exists(filepath.Join(e.cwd, "b")) {
 		t.Fatal("b cloned although not selected")
 	}
+	// a is not counted as selected by the user, and the tracking is told.
+	for _, want := range []string{"0/1 selected · 1 present", "now tracking o: sync will propose its new repositories"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("stdout lacks %q:\n%s", want, out.String())
+		}
+	}
 }

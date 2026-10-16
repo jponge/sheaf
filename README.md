@@ -207,7 +207,7 @@ when it opens. Checkouts that cannot be inspected are shown as problem rows.
 | enter | change directory to the current checkout and exit (see below) |
 | u | update the selected rows (or the current row) |
 | f | fetch the repositories of the selected rows (or the current row) |
-| w | add a worktree (branch or tag) to the current row's repository |
+| w | add a worktree to the current row's repository: a prompt asks for a branch (an existing local or remote one, else a new branch from the default branch, as `wt add`), tab switches to a tag |
 | r | remove the selected worktrees (or the current one); not the primary |
 | p, d, s | `prune`, `doctor`, `sync` on the whole bundle |
 | q, esc | quit with status 0 (esc first clears an applied filter) |
@@ -215,8 +215,10 @@ when it opens. Checkouts that cannot be inspected are shown as problem rows.
 
 Actions run with the TUI of the corresponding command (progress view,
 confirmation dialogs, menus) and return to the overview, which shows the
-outcome. An action that fails prints its error and is reported in the
-overview; quitting afterwards still exits with 0.
+outcome (e.g. `prune: nothing to prune` when nothing changed). An action
+that fails prints its error and is reported in the overview; quitting
+afterwards still exits with 0. The selection is kept, except after an
+update, fetch or removal of the selected rows that succeeded.
 
 Enter writes the checkout's path to the file named by `SHEAF_CD_FILE`, which
 the `sheaf` shell function defined by `sheaf shell-init` creates and then
@@ -254,7 +256,8 @@ directory).
 **`sheaf init [dir]`**: create `sheaf.yaml` in an existing directory and list
 the checkouts found in its subdirectories: plain clones, and repositories
 with a single checkout `<dir>/<child>/`. `--adopt-all` adopts them; in TUI
-mode a menu lets you pick.
+mode a menu lets you pick, and the checkouts left out are listed with the
+`sheaf adopt` command to adopt them later.
 
 **`sheaf doctor`**: check git (2.36 or later), gh installation and
 authentication for github.com, `sheaf.yaml`, and for each repository its
@@ -271,9 +274,12 @@ check fails. `--json`.
 **`sheaf add <owner/repo>...`** / **`sheaf add --org <org> (--all | --repo <name>...)`**:
 clone into `<bundle>/<repo>/<default-branch>/` and record in `sheaf.yaml`.
 Repositories already in the bundle are skipped. With `--org`, the
-organization (or user) becomes a tracked source for `sync`; archived
-repositories need `--include-archived`; without `--all`/`--repo`, TUI mode
-shows a selection menu and plain mode lists the candidates and fails.
+organization (or user) becomes a tracked source for `sync` (sheaf says so
+when it starts tracking it, even when every chosen repository was already
+present); archived repositories need `--include-archived`; without
+`--all`/`--repo`, TUI mode shows a selection menu (repositories already in
+the bundle are shown, not selectable, and counted apart) and plain mode
+lists the candidates and fails.
 `--as <dir>` names the directory (single repository). `--no-fork` disables
 fork detection.
 
@@ -299,8 +305,9 @@ order: `--exclude [org/]name` records declined repositories in `sheaf.yaml`,
 `--add-new` clones the remaining new ones, `--remove-gone --yes` removes the
 gone ones with the checks of `sheaf remove` (`--force`,
 `--allow-mass-removal`). In TUI mode without action flags, a menu offers the
-new and gone repositories (nothing preselected), then asks to confirm
-removals; the TUI never applies `--force` or `--allow-mass-removal`. New
+new and gone repositories (nothing preselected; gone ones refused as a mass
+removal are shown but not selectable), then asks to confirm removals; the
+TUI never applies `--force` or `--allow-mass-removal`. New
 repositories left unselected are not excluded: the next sync proposes them
 again (decline them for good with `--exclude`). `--json` prints the
 proposals without changing anything. Exit status 1 when gone candidates could not be looked up.
@@ -365,7 +372,8 @@ reported and make the exit status 1.
 **`sheaf wt rm [<repo>] [<branch-or-dir>]`** (alias `remove`): remove a linked
 worktree, named by branch, tag or directory (`--branch`/`--dir` when a name
 is both). `-d` also deletes the local branch if merged, `-D` even if
-unmerged. Requires `--yes` in plain mode; TUI mode asks in a dialog.
+unmerged; the plan says whether the branch is deleted or kept. Requires
+`--yes` in plain mode; TUI mode asks in a dialog.
 `--force`, `--offline`. The primary checkout cannot be removed (use
 `sheaf remove`).
 
@@ -391,7 +399,9 @@ is deleted. Without `--yes` it only lists the candidates (dry run); with
 the branches of removed worktrees when merged (like `-d`, never `-D`);
 `--include-branches` also deletes gone or merged local branches without a
 worktree. `--repo`, `--json`. In TUI mode the candidates are shown in a
-confirmation dialog.
+confirmation dialog, which states what will be removed and whether each
+worktree's branch is kept or, with `--delete-branches`, deleted (a branch
+is deleted only if merged, as `git branch -d`).
 
 ### Shell
 
@@ -546,10 +556,11 @@ the other commands with `-j 1`. In TUI mode git never gets the terminal.
   one.
 - A second Ctrl-C is an emergency stop: the process groups of running git
   commands and `run` commands are killed and sheaf exits with 130 at once,
-  without cleanup. A partial clone directory, an `.sheaf-adopt-*` folder
-  from an interrupted adopt, or a `.git/index.lock` and half-updated work
-  tree from a killed fast-forward may remain; the message says what to
-  check.
+  without cleanup. A partial clone directory (`add`, `sync`), an
+  `.sheaf-adopt-*` folder from an interrupted adopt, or a `.git/index.lock`
+  and half-updated work tree from a killed fast-forward (`update`) may
+  remain; the message says what to check for the operations that were
+  running.
 - `run`: Ctrl-C sends SIGTERM to the running commands and their children,
   then SIGKILL after 5 seconds.
 

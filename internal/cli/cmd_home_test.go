@@ -268,9 +268,16 @@ func TestHomeAddWorktreeForBranchAndTag(t *testing.T) {
 	e, alpha, _, _, o := homeBundle(t)
 	testutil.TagOrigin(t, o, "v1", "main", false)
 	var out syncBuffer
+	// Each prompt shows the hint of its mode (waited for on the emulated
+	// screen: after tab, the renderer may rewrite only part of the line).
+	hinted := func(hint string, ks ...string) []key {
+		k := keys(ks...)
+		k[0].wait = waitScreen(t, &out, hint)
+		return k
+	}
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "w"), keys("t", "o", "p", "i", "c", "/", "y", "\r"),
-		ovKeys(t, &out, "add: done", 1, "w"), keys("v", "1", "\t", "\r"),
+		ovKeys(t, &out, "STATE", 1, "w"), hinted("an existing local or remote branch, else a new branch from the default branch", "t", "o", "p", "i", "c", "/", "y", "\r"),
+		ovKeys(t, &out, "add: done", 1, "w"), append(keys("v", "1", "\t"), hinted("a tag: a detached worktree pinned at it", "\r")...),
 		ovKeys(t, &out, "add: done", 2, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
@@ -462,5 +469,83 @@ func TestHomeJobsValidatedInTUIMode(t *testing.T) {
 	errs, code := runHomeWith(t, e.deps(), newScript(t, false, keys("q")), &out, "-j", "0")
 	if code != 1 || !strings.Contains(errs, "invalid --jobs 0") {
 		t.Fatalf("exit %d, stderr %q", code, errs)
+	}
+}
+
+// An action that changed nothing is reported as such, not as done.
+func TestHomeReportsActionsThatChangedNothing(t *testing.T) {
+	t.Parallel()
+	e, _ := syncBundle(t) // a tracked; b and c proposed by sync
+	var out syncBuffer
+	in := newScript(t, false,
+		ovKeys(t, &out, "STATE", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}},
+		ovKeys(t, &out, "prune: ", 1, "s"), keys("\r"),
+		ovKeys(t, &out, "sync: ", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	o := out.String()
+	for _, want := range []string{"prune: nothing to prune", "sync: nothing selected; nothing changed"} {
+		if !strings.Contains(o, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, o)
+		}
+	}
+	for _, unwanted := range []string{"prune: done", "sync: done"} {
+		if strings.Contains(o, unwanted) {
+			t.Errorf("stdout has %q:\n%s", unwanted, o)
+		}
+	}
+}
+
+// A declined removal keeps the selection in the next overview (each
+// worktree is still confirmed on its own); a completed one clears it.
+func TestHomeKeepsSelectionAfterCancelledRemoval(t *testing.T) {
+	e, _, feat, _, _ := homeBundle(t)
+	if err := os.Remove(filepath.Join(feat, "new.txt")); err != nil {
+		t.Fatal(err)
+	}
+	var out syncBuffer
+	in := newScript(t, false,
+		ovKeys(t, &out, "STATE", 1, "j", " ", "r"), []key{{keys: "n", wait: waitOutput(t, &out, "[y/N]")}},
+		ovKeys(t, &out, "remove: cancelled", 1, "r"), ovKeys(t, &out, "[y/N]", 2, "y"),
+		ovKeys(t, &out, "remove: done", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 || exists(feat) {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	o := out.String()
+	cancelled := strings.Index(o, "remove: cancelled")
+	if frame := o[strings.LastIndex(o[:cancelled], "STATE"):cancelled]; !strings.Contains(frame, "1/3 selected") {
+		t.Errorf("selection lost after the cancelled removal:\n%s", o)
+	}
+	afterDone := o[strings.LastIndex(o, "STATE"):]
+	if !strings.Contains(afterDone, "0/2 selected") {
+		t.Errorf("selection kept after the removal:\n%s", afterDone)
+	}
+}
+
+// A fetch of the selected rows that succeeded clears the selection; the
+// note of an earlier action that changed nothing is not carried over.
+func TestHomeClearsSelectionAfterSuccessAndForgetsEarlierNotes(t *testing.T) {
+	t.Parallel()
+	e, _, _, _, _ := homeBundle(t) // nothing to prune
+	var out syncBuffer
+	in := newScript(t, false,
+		ovKeys(t, &out, "STATE", 1, "a", "f"), keys(),
+		ovKeys(t, &out, "fetch: done", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}},
+		ovKeys(t, &out, "prune: nothing to prune", 1, "f"), keys(),
+		ovKeys(t, &out, "fetch: done", 2, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	o := out.String()
+	fetched := strings.Index(o, "fetch: done")
+	if frame := o[strings.LastIndex(o[:fetched], "STATE"):fetched]; !strings.Contains(frame, "0/3 selected") {
+		t.Errorf("selection kept after a successful fetch of it:\n%s", frame)
+	}
+	if strings.Count(o, "fetch: done") != 2 || strings.Contains(o, "fetch: nothing to prune") {
+		t.Errorf("the second fetch is not reported done:\n%s", o)
 	}
 }

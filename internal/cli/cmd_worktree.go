@@ -425,6 +425,8 @@ func worktreeRemovePlanLines(p ops.WorktreeRemovePlan, force bool) []string {
 		lines = append(lines, fmt.Sprintf("will delete branch %s (contained in %s)", p.Worktree.Branch, p.ContainedIn))
 	case p.Unmerged != "":
 		lines = append(lines, fmt.Sprintf("will delete unmerged branch %s: %s will be lost (-D)", p.Worktree.Branch, commitCount(p.UnmergedCommits)))
+	case p.BranchKept == "" && p.Worktree.Branch != "":
+		lines = append(lines, fmt.Sprintf("branch %s is kept", p.Worktree.Branch))
 	}
 	if p.BranchKept != "" {
 		lines = append(lines, "warning: "+p.BranchKept)

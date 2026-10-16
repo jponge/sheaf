@@ -15,8 +15,9 @@ import (
 //
 // Typed or pasted text (without control characters) is appended;
 // backspace deletes a rune, ctrl+w a word and ctrl+u everything (as the
-// filter of MultiSelect). enter confirms a value that is not blank; esc
-// and ctrl+c cancel. Update returns tea.Quit once answered; later messages
+// filter of MultiSelect). enter confirms a value that is not blank (on a
+// blank one, a line asks for a value); esc and ctrl+c cancel. A hint per
+// mode (WithHints) is displayed below the input while it is edited. Update returns tea.Quit once answered; later messages
 // are ignored. The title is displayed with control characters replaced by
 // U+FFFD.
 type Prompt struct {
@@ -25,6 +26,9 @@ type Prompt struct {
 	mode  int
 	value string
 	width int // 0 = unknown
+
+	hints []string // by mode, see WithHints
+	blank bool     // enter was pressed on a blank value
 
 	confirmed, cancelled, interrupted bool
 
@@ -51,6 +55,13 @@ func NewPrompt(title string, modes []string) Prompt {
 		Cancel:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 	}
 	return Prompt{title: title, modes: modes, keys: k, help: h, styles: st}
+}
+
+// WithHints returns a copy of m displaying hints[i] below the input in the
+// i-th mode (e.g. what a branch name means).
+func (m Prompt) WithHints(hints ...string) Prompt {
+	m.hints = slices.Clone(hints)
+	return m
 }
 
 // Init implements tea.Model.
@@ -85,7 +96,9 @@ func (m Prompt) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.SetWidth(msg.Width)
 	case tea.PasteMsg:
 		m.value += dropControl(msg.Content)
+		m.blank = false
 	case tea.KeyPressMsg:
+		m.blank = false
 		switch s := msg.String(); {
 		case s == "ctrl+c":
 			m.cancelled, m.interrupted = true, true
@@ -98,6 +111,7 @@ func (m Prompt) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.confirmed = true
 				return m, tea.Quit
 			}
+			m.blank = true
 		case key.Matches(msg, m.keys.Mode):
 			m.mode = (m.mode + 1) % len(m.modes)
 		case s == "ctrl+u":
@@ -124,6 +138,12 @@ func (m Prompt) View() tea.View {
 	}
 	lines := []string{st.Title.Render(sanitize(m.title)), input}
 	if !m.confirmed && !m.cancelled {
+		if m.mode < len(m.hints) && m.hints[m.mode] != "" {
+			lines = append(lines, st.Detail.Render(sanitize(m.hints[m.mode])))
+		}
+		if m.blank {
+			lines = append(lines, st.Question.Render("type a "+sanitize(m.Mode())+" first (esc cancels)"))
+		}
 		bindings := []key.Binding{m.keys.Confirm}
 		if len(m.modes) > 1 {
 			bindings = append(bindings, m.keys.Mode)

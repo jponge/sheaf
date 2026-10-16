@@ -120,6 +120,7 @@ func newInitCmd(d Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer d.emergencyNote(noteAdopt)()
 			s := ops.AdoptAll(c.Context(), w, paths, ops.AdoptOptions{Interactive: d.interactiveGit(c)}, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
 			return printSummary(out, s)
 		},
@@ -154,11 +155,15 @@ func newAddCmd(d Deps) *cobra.Command {
 				return tuiAdd(c, d, w, d.hosting(), req, OptionsFrom(c).Jobs)
 			}
 			req.Interactive = d.interactiveGit(c)
+			before := w.Bundle()
+			defer d.emergencyNote(noteClone)()
 			s, err := ops.Add(c.Context(), w, d.hosting(), req, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
 			if err != nil {
 				return err
 			}
-			return printSummary(c.OutOrStdout(), s)
+			err = printSummary(c.OutOrStdout(), s)
+			printNewSources(c.OutOrStdout(), before, w.Bundle())
+			return err
 		},
 	}
 	f := cmd.Flags()
@@ -208,6 +213,9 @@ func newAdoptCmd(d Deps) *cobra.Command {
 					return err
 				}
 				dirs = append(dirs, p)
+			}
+			if !opts.Recheck { // --recheck moves nothing
+				defer d.emergencyNote(noteAdopt)()
 			}
 			if d.tuiMode(c) {
 				return tuiSummary(c, d, "Adopting checkouts", func(ctx context.Context, rep ops.Reporter) ops.Summary {

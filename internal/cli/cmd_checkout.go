@@ -422,6 +422,7 @@ func newUpdateCmd(d Deps) *cobra.Command {
 			}
 			opts.Force = d.force()
 			opts.Interactive = d.interactiveGit(c)
+			defer d.emergencyNote(noteFastForward)()
 			r, err := ops.Update(c.Context(), w, opts, checkoutRenderer{plainRenderer{c.ErrOrStderr()}})
 			if err != nil {
 				return err

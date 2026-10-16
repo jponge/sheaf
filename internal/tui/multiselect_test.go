@@ -518,3 +518,35 @@ func TestMultiSelectCommandKeysAreTypedInFilterMode(t *testing.T) {
 		t.Fatalf("want filter line \"/k/j█\":\n%s", v)
 	}
 }
+
+// Disabled selected items (e.g. repositories already in the bundle) are
+// not choices of the user: the status line counts them apart, under the
+// label given to WithLockedLabel.
+func TestMultiSelectStatusCountsLockedItemsApart(t *testing.T) {
+	t.Parallel()
+	items := []Item{
+		{Key: "a", Label: "alpha", Selected: true, Disabled: true},
+		{Key: "b", Label: "bravo"},
+		{Key: "c", Label: "charlie"},
+	}
+	m := NewMultiSelect("Pick", items).WithLockedLabel("present")
+	if v := view(m); !strings.Contains(v, "0/2 selected · 1 present") {
+		t.Fatalf("status line:\n%s", v)
+	}
+	next, _ := press(m, "j", "space")
+	if v := view(next); !strings.Contains(v, "1/2 selected · 1 present") {
+		t.Fatalf("status line after selecting bravo:\n%s", v)
+	}
+	// The locked item is still among the selected keys.
+	assertKeys(t, next, "a", "b")
+	// Disabled items that are not selected are not choices either: they
+	// count in neither number.
+	withInfo := append(items, Item{Key: "d", Label: "delta", Disabled: true})
+	if v := view(NewMultiSelect("Pick", withInfo).WithLockedLabel("present")); !strings.Contains(v, "0/2 selected · 1 present") {
+		t.Fatalf("status line with a disabled unselected item:\n%s", v)
+	}
+	// Without locked items, the status line is unchanged.
+	if v := view(NewMultiSelect("Pick", abc()).WithLockedLabel("present")); !strings.Contains(v, "0/3 selected\n") {
+		t.Fatalf("status line without locked items:\n%s", v)
+	}
+}

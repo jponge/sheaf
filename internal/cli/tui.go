@@ -43,7 +43,8 @@ func orgRepoItems(avail []hosting.Repo, b *bundle.Bundle) []tui.Item {
 
 // proposalItems maps sync proposals to menu items as documented on
 // ops.Proposal: nothing preselected; new and gone proposals selectable,
-// moved and archived ones informational (disabled).
+// moved and archived ones informational (disabled), as are gone ones
+// refused as a mass removal (the TUI never allows it).
 func proposalItems(ps []ops.Proposal) []tui.Item {
 	items := make([]tui.Item, 0, len(ps))
 	for _, p := range ps {
@@ -65,7 +66,7 @@ func proposalItems(ps []ops.Proposal) []tui.Item {
 		if p.MassRemoval {
 			it.Tags = append(it.Tags, "mass removal: refused")
 		}
-		it.Disabled = p.Kind != ops.ProposalNew && p.Kind != ops.ProposalGone
+		it.Disabled = (p.Kind != ops.ProposalNew && p.Kind != ops.ProposalGone) || p.MassRemoval
 		items = append(items, it)
 	}
 	return items
@@ -103,6 +104,9 @@ func eventRow(e ops.Event, aside string) tui.RowUpdate {
 		u.State = tui.RowDone
 	case ops.KindSkipped:
 		u.State = tui.RowSkipped
+		if errors.Is(e.Err, ops.ErrNotConfirmed) {
+			u.State = tui.RowCancelled
+		}
 	case ops.KindFailed:
 		u.State = tui.RowFailed
 		switch {
@@ -190,7 +194,12 @@ func (s *tuiSession) runModel(m tea.Model) (tea.Model, error) {
 // multiSelect runs a menu and returns the selected keys; cancelling (esc,
 // q, ctrl+c) or input ending returns errCancelled.
 func (s *tuiSession) multiSelect(title string, items []tui.Item) ([]string, error) {
-	final, err := s.run(tui.NewMultiSelect(title, items))
+	return s.pick(tui.NewMultiSelect(title, items))
+}
+
+// pick is multiSelect with a menu configured by the caller.
+func (s *tuiSession) pick(menu tui.MultiSelect) ([]string, error) {
+	final, err := s.run(menu)
 	if err != nil {
 		return nil, err
 	}
@@ -220,9 +229,11 @@ type askFunc func(question string, details []string) bool
 
 // progressOpts configures progress: events of the Aside phase go to rows
 // that are not counted (see eventRow); with Single set, every event goes to
-// one row labelled Single (an operation on one repository).
+// one row labelled Single (an operation on one repository); Confirmed, if
+// set, replaces the title once a question is answered yes (e.g. "Checking
+// alpha for removal" becomes "Removing alpha").
 type progressOpts struct {
-	Aside, Single string
+	Aside, Single, Confirmed string
 }
 
 // progress runs work in a goroutine while a tui.Progress view displays the
@@ -250,6 +261,9 @@ func (s *tuiSession) progress(title string, o progressOpts, work func(ctx contex
 		q.push(tui.AskMsg{Question: question, Details: details, Reply: reply})
 		select {
 		case v := <-reply:
+			if v && o.Confirmed != "" {
+				q.push(tui.TitleMsg{Title: o.Confirmed})
+			}
 			return v
 		case <-programDone:
 			return false
@@ -292,7 +306,7 @@ func (s *tuiSession) progress(title string, o progressOpts, work func(ctx contex
 						u.Key, u.Label = o.Single, o.Single
 					}
 					p.Send(u)
-				case tui.AskMsg:
+				case tui.AskMsg, tui.TitleMsg:
 					p.Send(v)
 				}
 			}

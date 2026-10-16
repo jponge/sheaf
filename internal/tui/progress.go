@@ -22,6 +22,9 @@ const (
 	RowDone
 	RowSkipped
 	RowFailed
+	// RowCancelled means the user declined the work of the row (e.g. a
+	// removal not confirmed).
+	RowCancelled
 )
 
 // RowUpdate is a message creating or updating the row Key of a Progress.
@@ -35,6 +38,10 @@ type RowUpdate struct {
 	Message    string
 	Aside      bool
 }
+
+// TitleMsg replaces the title of a Progress (e.g. "Checking …" becomes
+// "Removing …" once the removal is confirmed).
+type TitleMsg struct{ Title string }
 
 // FinishMsg ends a Progress: it quits the program, and its final view is
 // the header only, with the elapsed time frozen (the caller prints the
@@ -64,8 +71,8 @@ type progressRow struct {
 
 // Progress is a bubbletea model displaying one row per unit of work (a
 // repository, a checkout) fed by RowUpdate messages: a spinner while
-// running, then a final marker (✓ done, - skipped, ✗ failed) and a short
-// message. The header shows the counts and the elapsed time.
+// running, then a final marker (✓ done, - skipped or cancelled, ✗ failed)
+// and a short message. The header shows the counts and the elapsed time.
 //
 // ctrl+c does not quit: each press runs the interrupt function given to
 // WithInterrupt in a command (outside the event loop), and the view tells
@@ -134,7 +141,8 @@ func (m Progress) WithStyles(st Styles) Progress {
 // Init implements tea.Model: it starts the spinner.
 func (m Progress) Init() tea.Cmd { return m.spin.Tick }
 
-// Counts returns the number of rows, aside rows excluded, in each state.
+// Counts returns the number of rows, aside rows excluded, in each state
+// but RowCancelled (which the header counts only when there are some).
 func (m Progress) Counts() (running, done, skipped, failed int) {
 	for _, r := range m.rows {
 		if r.aside {
@@ -176,6 +184,8 @@ func (m Progress) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case RowUpdate:
 		m.apply(msg)
+	case TitleMsg:
+		m.title = msg.Title
 	case AskMsg:
 		m.asks = append(slices.Clip(m.asks), msg)
 		if len(m.asks) == 1 {
@@ -290,12 +300,21 @@ func roundElapsed(d time.Duration) time.Duration {
 
 func (m Progress) header() string {
 	running, done, skipped, failed := m.Counts()
+	counts := fmt.Sprintf("%d done, %d skipped, %d failed", done, skipped, failed)
+	cancelled := 0
+	for _, r := range m.rows {
+		if !r.aside && r.state == RowCancelled {
+			cancelled++
+		}
+	}
+	if cancelled > 0 {
+		counts += fmt.Sprintf(", %d cancelled", cancelled)
+	}
 	if m.finished {
-		return m.styles.Title.Render(sanitize(m.title)) +
-			fmt.Sprintf(": %d done, %d skipped, %d failed in %v", done, skipped, failed, m.elapsed())
+		return m.styles.Title.Render(sanitize(m.title)) + fmt.Sprintf(": %s in %v", counts, m.elapsed())
 	}
 	return m.styles.Title.Render(sanitize(m.title)) + m.styles.Status.Render(
-		fmt.Sprintf(" · %d running, %d done, %d skipped, %d failed · %v", running, done, skipped, failed, m.elapsed()))
+		fmt.Sprintf(" · %d running, %s · %v", running, counts, m.elapsed()))
 }
 
 // View implements tea.Model.
@@ -402,6 +421,8 @@ func (m Progress) renderRow(r progressRow, width int) string {
 		if r.message != "" {
 			msg += ": " + r.message
 		}
+	case RowCancelled:
+		marker, msg = st.Tag.Render("-"), "cancelled"
 	default:
 		marker, msg = m.spin.View(), r.message
 	}

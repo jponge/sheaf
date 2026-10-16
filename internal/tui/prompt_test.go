@@ -56,6 +56,26 @@ func TestPromptBlankEnterIgnored(t *testing.T) {
 	if isQuit(cmd) || asPrompt(t, m).Confirmed() {
 		t.Fatal("enter with a blank value confirmed")
 	}
+	// It is not silent: the prompt asks for a value, until one is typed.
+	if !hasLine(view(m), "type a branch first (esc cancels)") {
+		t.Fatalf("no feedback on a blank enter:\n%s", view(m))
+	}
+	if m, _ = press(m, "x"); strings.Contains(view(m), "first") {
+		t.Fatalf("feedback kept after typing:\n%s", view(m))
+	}
+}
+
+// Each mode has a hint line below the input, which tab switches too.
+func TestPromptShowsTheHintOfTheMode(t *testing.T) {
+	t.Parallel()
+	m := newPrompt().WithHints("an existing or new branch", "an existing tag")
+	if v := view(m); !hasLine(v, "an existing or new branch") || strings.Contains(v, "an existing tag") {
+		t.Fatalf("view:\n%s", v)
+	}
+	next, _ := press(m, "tab")
+	if v := view(next); !hasLine(v, "an existing tag") || strings.Contains(v, "an existing or new branch") {
+		t.Fatalf("view after tab:\n%s", v)
+	}
 }
 
 func TestPromptCancelAndInterrupt(t *testing.T) {

@@ -83,6 +83,8 @@ type MultiSelect struct {
 
 	confirmed, cancelled, interrupted bool
 
+	lockedLabel string // see WithLockedLabel
+
 	keys   multiSelectKeys
 	help   help.Model
 	styles Styles
@@ -108,6 +110,15 @@ func NewMultiSelect(title string, items []Item) MultiSelect {
 func (m MultiSelect) WithStyles(st Styles) MultiSelect {
 	m.styles = st
 	m.help.Styles = st.Help
+	return m
+}
+
+// WithLockedLabel returns a copy of m whose status line counts only the
+// enabled items as the user's choices, and the disabled selected items
+// (e.g. repositories already present) apart, under label: "0/2 selected ·
+// 1 present".
+func (m MultiSelect) WithLockedLabel(label string) MultiSelect {
+	m.lockedLabel = label
 	return m
 }
 
@@ -474,7 +485,26 @@ func (m MultiSelect) renderRow(row int) string {
 }
 
 func (m MultiSelect) status() string {
-	s := fmt.Sprintf("%d/%d selected", len(m.SelectedKeys()), len(m.items))
+	selected, total, locked := len(m.SelectedKeys()), len(m.items), 0
+	if m.lockedLabel != "" {
+		// Only the enabled items are the user's choices.
+		selected, total = 0, 0
+		for _, it := range m.items {
+			switch {
+			case it.Disabled && it.Selected:
+				locked++
+			case !it.Disabled:
+				total++
+				if it.Selected {
+					selected++
+				}
+			}
+		}
+	}
+	s := fmt.Sprintf("%d/%d selected", selected, total)
+	if locked > 0 {
+		s += fmt.Sprintf(" · %d %s", locked, m.lockedLabel)
+	}
 	if m.filter != "" {
 		s += fmt.Sprintf(" · %d shown", len(m.visible))
 	}

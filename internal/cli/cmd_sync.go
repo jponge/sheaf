@@ -70,9 +70,10 @@ func newSyncCmd(d Deps) *cobra.Command {
 			"data would be lost, unless --force; a remote that no longer exists counts as data at risk).\n" +
 			"Actions run in that order.\n\n" +
 			"In TUI mode, without action flags (and without --json), a menu offers the new and gone\n" +
-			"repositories (nothing preselected), asks to confirm removals, and applies the choices as\n" +
-			"above (never with --force or --allow-mass-removal). New repositories left unselected are\n" +
-			"not excluded: the next sync proposes them again (use --exclude to decline them for good).\n\n" +
+			"repositories (nothing preselected; gone ones refused as a mass removal are shown but not\n" +
+			"selectable), asks to confirm removals, and applies the choices as above (never with\n" +
+			"--force or --allow-mass-removal). New repositories left unselected are not excluded:\n" +
+			"the next sync proposes them again (use --exclude to decline them for good).\n\n" +
 			"--json prints {version, bundle, orgs: [{org, listed, truncated, mass_removal, error?,\n" +
 			"warnings?, notes?, unconfirmed?}], proposals: [{key, kind, org, name (directory name for gone,\n" +
 			"moved and archived), slug (as recorded for gone and moved), url, default_branch?, fork?,\n" +
@@ -108,6 +109,19 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 		return err
 	}
 	ctx, interactive := c.Context(), d.interactiveGit(c)
+	menu := !(fl.addNew || fl.removeGone || len(fl.exclude) > 0) && !fl.asJSON && d.tuiMode(c)
+	if menu {
+		// The listing may take a while before the menu: say so, as add --org.
+		orgs := fl.orgs
+		if len(orgs) == 0 {
+			for _, src := range w.Bundle().Sources {
+				orgs = append(orgs, src.Org)
+			}
+		}
+		if len(orgs) > 0 {
+			fmt.Fprintf(c.ErrOrStderr(), "listing repositories of %s...\n", strings.Join(orgs, ", "))
+		}
+	}
 	rep, err := ops.Sync(ctx, w, d.hosting(), ops.SyncOptions{Orgs: fl.orgs, IncludeArchived: fl.includeArchived})
 	if err != nil {
 		return err
@@ -133,7 +147,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 		}
 		return rep.Err()
 	}
-	if !(fl.addNew || fl.removeGone || len(fl.exclude) > 0) && d.tuiMode(c) {
+	if menu {
 		return tuiSync(c, d, w, rep, fl.noFork)
 	}
 	excluded, err := syResolveExcludes(rep, fl.exclude, fl.includeArchived)
@@ -162,6 +176,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 		if len(add) == 0 {
 			fmt.Fprintln(out, "no new repository to add")
 		} else {
+			defer d.emergencyNote(noteClone)()
 			errs = append(errs, printSummary(out, ops.SyncAddNewWithOptions(ctx, w, add, ops.CloneOptions{Hosting: d.hosting(), NoFork: fl.noFork, Interactive: interactive}, OptionsFrom(c).Jobs, r)))
 		}
 	}

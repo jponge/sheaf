@@ -312,3 +312,26 @@ func TestProgressFitsHeight(t *testing.T) {
 		t.Errorf("most recent finished row hidden:\n%s", v)
 	}
 }
+
+// A row whose work the user declined is marked cancelled, not skipped, and
+// counted as such; TitleMsg replaces the title, also in the final view.
+func TestProgressCancelledRowAndTitleChange(t *testing.T) {
+	t.Parallel()
+	p, _ := newTestProgress("Checking alpha")
+	m, _ := feed(p, RowUpdate{Key: "a", Label: "alpha", State: RowRunning, Message: "checking"}, TitleMsg{Title: "Removing alpha"})
+	if v := view(m); !strings.Contains(v, "Removing alpha · 1 running, 0 done, 0 skipped, 0 failed ·") {
+		t.Fatalf("title not replaced:\n%s", v)
+	}
+	m, _ = feed(m, RowUpdate{Key: "a", State: RowCancelled})
+	v := view(m)
+	if l := strings.Split(v, "\n")[1]; !strings.HasPrefix(l, "- alpha") || !strings.Contains(l, "cancelled") || strings.Contains(l, "skipped") {
+		t.Errorf("alpha row = %q, want a cancelled row", l)
+	}
+	if !strings.Contains(v, "0 running, 0 done, 0 skipped, 0 failed, 1 cancelled ·") {
+		t.Errorf("header does not count the cancelled row:\n%s", v)
+	}
+	m, _ = feed(m, FinishMsg{})
+	if v := view(m); !strings.HasPrefix(v, "Removing alpha: 0 done, 0 skipped, 0 failed, 1 cancelled in ") {
+		t.Errorf("final view:\n%s", v)
+	}
+}

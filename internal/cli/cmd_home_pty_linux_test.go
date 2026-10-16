@@ -3,9 +3,12 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // sttyCheck ends a pty script: sheaf's exit status, whether the terminal
@@ -118,4 +121,87 @@ eval "$(sheaf shell-init zsh)"; sheaf; echo "RC=$? PWD=$PWD"'`)
 func TestHomeEnterCDsThroughShellFunctionFish(t *testing.T) {
 	fish := shellBinary(t, "fish")
 	homeCD(t, `'`+fish+`' --no-config -c 'sheaf shell-init fish | source; sheaf; echo "RC=$status PWD=$PWD"'`)
+}
+
+// The overview leaves no copy of itself in the terminal (screen and
+// scrollback, as a terminal emulator shows them) when an action runs or
+// sheaf quits: after several actions only the last overview is visible,
+// and none after quitting. The session starts low on the screen, so that
+// the outputs scroll.
+func TestHomeOnPTYLeavesNoStaleOverviews(t *testing.T) {
+	e, _, feat, _, _ := homeBundle(t)
+	if err := os.Remove(filepath.Join(feat, "new.txt")); err != nil {
+		t.Fatal(err)
+	}
+	s := startPTYShell(t, e.cwd, `B=$(stty -g); i=0; while [ $i -lt 20 ]; do echo line$i; i=$((i+1)); done; "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	waitCount := func(marker string, n int) {
+		t.Helper()
+		deadline := time.Now().Add(30 * time.Second)
+		for strings.Count(s.output(), marker) < n {
+			if time.Now().After(deadline) {
+				t.Fatalf("output never contained %q %d times:\n%q", marker, n, s.output())
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	// counts returns how many lines of each part of an overview (header,
+	// rows, status, help) the terminal shows, screen and scrollback, and
+	// checks that the scrollback holds what scrolled off (the lines printed
+	// before sheaf, the summaries of the actions so far).
+	rowLine := regexp.MustCompile(`^(> |  )\[[ x]\] `)
+	statusLine := regexp.MustCompile(`^\d+/\d+ selected`)
+	counts := func(summaries ...string) [4]int {
+		t.Helper()
+		vt := newVTScreen(24, 100)
+		vt.write(s.output())
+		if len(vt.unknown) > 0 {
+			t.Errorf("sequences not emulated: %v", vt.unknown)
+		}
+		var n [4]int
+		text := strings.Join(vt.lines(), "\n")
+		for _, l := range vt.lines() {
+			switch {
+			case strings.Contains(l, "REPO") && strings.Contains(l, "STATE"):
+				n[0]++
+			case rowLine.MatchString(l):
+				n[1]++
+			case statusLine.MatchString(l):
+				n[2]++
+			case strings.Contains(l, "esc/q quit"):
+				n[3]++
+			}
+		}
+		at := 0
+		for _, want := range append([]string{"line0\n", "line19\n"}, summaries...) {
+			i := strings.Index(text[at:], want)
+			if i < 0 {
+				t.Errorf("the terminal lacks %q after offset %d:\n%s", want, at, text)
+				break
+			}
+			at += i + len(want)
+		}
+		return n
+	}
+	summaries := []string{"Fetching: 1 done", "Updating: 1 done", "Checking worktree feat of alpha for removal: 0 done, 0 skipped, 0 failed, 1 cancelled", "Fetching: 1 done"}
+	s.write("f")
+	waitCount("fetch: done", 1)
+	s.write("u")
+	waitCount("update: done", 1)
+	s.write("j")
+	s.write("r")
+	waitCount("[y/N]", 1)
+	s.write("n")
+	waitCount("remove: cancelled", 1)
+	s.write("f")
+	waitCount("fetch: done", 2)
+	// One overview: its header, 3 rows, status and help lines.
+	if n := counts(summaries...); n != [4]int{1, 3, 1, 1} {
+		t.Errorf("after 4 actions the terminal shows %d header, %d row, %d status and %d help lines of overviews, want 1, 3, 1, 1", n[0], n[1], n[2], n[3])
+	}
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
+	if n := counts(summaries...); n != [4]int{} {
+		t.Errorf("after quitting the terminal shows %d header, %d row, %d status and %d help lines of overviews, want none", n[0], n[1], n[2], n[3])
+	}
 }

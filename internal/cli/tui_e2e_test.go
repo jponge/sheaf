@@ -182,6 +182,32 @@ func waitOutput(t *testing.T, out *syncBuffer, want string) func() {
 	}
 }
 
+// screenText returns what a terminal shows after out (screen and
+// scrollback, see vtScreen), the output of a program writing to a buffer:
+// the renderer only rewrites the changed parts of a frame, so a line of
+// the final frame may be absent from out as is.
+func screenText(out string) string {
+	vt := newVTScreen(500, 200)
+	vt.newline = true
+	vt.write(out)
+	return strings.Join(vt.lines(), "\n")
+}
+
+// waitScreen returns a wait function polling out until the terminal shows
+// want (see screenText).
+func waitScreen(t *testing.T, out *syncBuffer, want string) func() {
+	return func() {
+		deadline := time.Now().Add(20 * time.Second)
+		for !strings.Contains(screenText(out.String()), want) {
+			if time.Now().After(deadline) {
+				t.Errorf("the terminal never showed %q:\n%s", want, screenText(out.String()))
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
 // runTUI executes the CLI with the TUI forced on and in as standard input.
 func (e *env) runTUI(t *testing.T, in io.Reader, out *syncBuffer, args ...string) (stderr string, code int) {
 	t.Helper()
@@ -323,6 +349,10 @@ func TestTUISyncNothingSelectedExcludesNothing(t *testing.T) {
 	if o := out.String(); strings.Contains(o, "Exclude") || !strings.Contains(o, "nothing selected; nothing changed") {
 		t.Errorf("stdout:\n%s", o)
 	}
+	// The listing, before the menu, is announced as with add --org.
+	if !strings.Contains(errs, "listing repositories of o...\n") {
+		t.Errorf("stderr:\n%s", errs)
+	}
 	again := e.mustRun(t, "sync", "--json")
 	for _, k := range []string{`"new:o/b"`, `"new:o/c"`} {
 		if !strings.Contains(again, k) {
@@ -453,6 +483,30 @@ func TestTUIWorktreeRemoveShowsLostCommits(t *testing.T) {
 	if !strings.Contains(out.String(), "will delete unmerged branch feat: 1 commit will be lost (-D)") {
 		t.Errorf("dialog lacks the lost commits:\n%s", out.String())
 	}
+	if strings.Contains(out.String(), "is kept") {
+		t.Errorf("dialog says the deleted branch is kept:\n%s", out.String())
+	}
+}
+
+// Without -d/-D the dialog says that the branch, with its commits, stays.
+func TestTUIWorktreeRemoveSaysBranchIsKept(t *testing.T) {
+	t.Parallel()
+	e := newBundleEnv(t)
+	_, primary := e.addRepo(t, "alpha")
+	wt := filepath.Join(e.cwd, "alpha", "feat-y")
+	testutil.Git(t, primary, "worktree", "add", "-q", "-b", "feat/y", wt)
+	writeFile(t, filepath.Join(wt, "y.txt"), "y\n")
+	testutil.Git(t, wt, "add", "y.txt")
+	testutil.Git(t, wt, "commit", "-q", "-m", "local only")
+	var out syncBuffer
+	in := newScript(t, true, []key{{keys: "n", wait: waitOutput(t, &out, "[y/N]")}})
+	errs, code := e.runTUI(t, in, &out, "wt", "rm", "alpha", "feat/y")
+	if code != 1 || !exists(wt) {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	if !strings.Contains(out.String(), "branch feat/y is kept") {
+		t.Errorf("dialog does not say the branch is kept:\n%s", out.String())
+	}
 }
 
 func TestTUIPruneConfirms(t *testing.T) {
@@ -461,7 +515,7 @@ func TestTUIPruneConfirms(t *testing.T) {
 	wt := addWorktree(t, primary, "feat", "feat")
 	testutil.Git(t, o.Path, "branch", "-D", "feat") // gone upstream
 	var out syncBuffer
-	in := newScript(t, true, []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}})
+	in := newScript(t, true, []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}, {keys: "x", wait: waitScreen(t, &out, "Pruning: 1 done")}})
 	errs, code := e.runTUI(t, in, &out, "prune")
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -469,7 +523,10 @@ func TestTUIPruneConfirms(t *testing.T) {
 	if exists(wt) {
 		t.Fatalf("worktree not pruned:\n%s", out.String())
 	}
-	for _, want := range []string{"Prune 1 candidate?", "would remove worktree alpha/feat", "1 removed, 0 kept, 0 failed"} {
+	if asking := out.String()[:strings.Index(out.String(), "[y/N]")]; !strings.Contains(asking, "Checking prune candidates ·") || strings.Contains(asking, "Pruning") {
+		t.Errorf("title while asking:\n%s", asking)
+	}
+	for _, want := range []string{"Prune 1 candidate?", "will remove worktree alpha/feat", "1 removed, 0 kept, 0 failed"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out.String())
 		}
@@ -498,6 +555,10 @@ func TestTUIInitAdoptsSelectedCandidates(t *testing.T) {
 	if !exists(filepath.Join(dir, "alpha", "main", ".git")) || !exists(filepath.Join(dir, "beta", ".git")) {
 		t.Fatal("unexpected layout after adoption")
 	}
+	// The deselected checkout is not forgotten.
+	if want := "not adopted: beta; adopt later with: sheaf adopt beta\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("stdout lacks %q:\n%s", want, out.String())
+	}
 }
 
 func TestTUIUpdateProgressAndSummary(t *testing.T) {
@@ -519,5 +580,122 @@ func TestTUIUpdateProgressAndSummary(t *testing.T) {
 	}
 	if strings.Contains(errs, "started") {
 		t.Errorf("plain progress lines on stderr in TUI mode:\n%s", errs)
+	}
+}
+
+// The confirmation states what will happen, including the condition under
+// which a branch without worktree is deleted (git branch -d rules): a
+// merged branch is deleted, a gone one only if merged.
+func TestTUIPruneConfirmationStatesBranchConditions(t *testing.T) {
+	t.Parallel()
+	e := newBundleEnv(t)
+	o, primary := e.addRepo(t, "alpha", "gone", "done", "shipped")
+	testutil.Git(t, primary, "branch", "-q", "--track", "gone", "origin/gone")
+	testutil.Git(t, primary, "branch", "-q", "--track", "done", "origin/done")
+	testutil.Git(t, o.Path, "branch", "-q", "-D", "gone")
+	// done, and shipped (checked out in a worktree), are merged into main
+	// with merge commits (first-parent rule).
+	testutil.AdvanceOrigin(t, o, "done", "d.txt", "d\n", "done work")
+	testutil.AdvanceOrigin(t, o, "shipped", "s.txt", "s\n", "shipped work")
+	testutil.Git(t, primary, "fetch", "-q", "origin")
+	testutil.Git(t, primary, "branch", "-q", "-f", "done", "origin/done")
+	addWorktree(t, primary, "shipped", "shipped")
+	work := t.TempDir()
+	testutil.Git(t, work, "clone", "-q", o.URL, "w")
+	testutil.Git(t, filepath.Join(work, "w"), "merge", "-q", "--no-ff", "-m", "merge done", "origin/done")
+	testutil.Git(t, filepath.Join(work, "w"), "merge", "-q", "--no-ff", "-m", "merge shipped", "origin/shipped")
+	testutil.Git(t, filepath.Join(work, "w"), "push", "-q", "origin", "main")
+	var out syncBuffer
+	in := newScript(t, true, []key{{keys: "n", wait: waitOutput(t, &out, "[y/N]")}})
+	errs, code := e.runTUI(t, in, &out, "prune", "--include-branches", "--delete-branches")
+	if code != 1 || !strings.Contains(errs, "cancelled") {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	o2 := out.String()
+	for _, want := range []string{
+		"will delete branch alpha/done: merged into origin/main",
+		"will delete branch alpha/gone only if merged (git branch -d rules), otherwise keep it: upstream origin/gone is gone",
+		"will remove worktree alpha/shipped [shipped]",
+		"will delete branch shipped",
+	} {
+		if !strings.Contains(o2, want) {
+			t.Errorf("dialog lacks %q:\n%s", want, o2)
+		}
+	}
+	if strings.Contains(o2, "branch shipped if merged") {
+		t.Errorf("the merged worktree branch is stated as conditional:\n%s", o2)
+	}
+	if strings.Contains(o2, "would ") {
+		t.Errorf("dialog uses the conditional:\n%s", o2)
+	}
+}
+
+// Until the removal is confirmed the progress view says it is checking,
+// not removing; declined, the operation is reported cancelled, not skipped.
+func TestTUIDeletionTitlesCheckingThenRemovingOrCancelled(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name               string
+		args               []string
+		checking, removing string
+	}{
+		{"remove", []string{"remove", "alpha"}, "Checking alpha for removal", "Removing alpha"},
+		{"wt rm", []string{"wt", "rm", "alpha", "feat"}, "Checking worktree feat of alpha for removal", "Removing worktree feat of alpha"},
+	} {
+		for _, answer := range []string{"n", "y"} {
+			e := newBundleEnv(t)
+			_, primary := e.addRepo(t, "alpha")
+			testutil.Git(t, primary, "worktree", "add", "-q", "-b", "feat", filepath.Join(e.cwd, "alpha", "feat"))
+			var out syncBuffer
+			final := tc.checking + ": 0 done, 0 skipped, 0 failed, 1 cancelled in "
+			if answer == "y" {
+				final = tc.removing + ": 1 done, 0 skipped, 0 failed in "
+			}
+			// The second key keeps the input open until the final view.
+			in := newScript(t, true, []key{{keys: answer, wait: waitOutput(t, &out, "[y/N]")}, {keys: "x", wait: waitScreen(t, &out, final)}})
+			errs, code := e.runTUI(t, in, &out, tc.args...)
+			if want := map[string]int{"n": 1, "y": 0}[answer]; code != want {
+				t.Fatalf("%s %s: exit %d, want %d\nstdout:\n%s\nstderr:\n%s", tc.name, answer, code, want, out.String(), errs)
+			}
+			o := out.String()
+			asking := o[:strings.Index(o, "[y/N]")]
+			if !strings.Contains(asking, tc.checking+" · 1 running") || strings.Contains(asking, tc.removing) {
+				t.Errorf("%s %s: title while asking:\n%s", tc.name, answer, asking)
+			}
+			if !strings.Contains(screenText(o), final) {
+				t.Errorf("%s %s: final view lacks %q:\n%s", tc.name, answer, final, screenText(o))
+			}
+			if strings.Contains(o, "skipped: cancelled") || strings.Contains(o, "1 skipped") {
+				t.Errorf("%s %s: reported skipped:\n%s", tc.name, answer, o)
+			}
+		}
+	}
+}
+
+// The confirmation says what happens to the branch of each worktree: kept,
+// or with --delete-branches deleted when merged (git branch -d rules, as
+// wt rm -d), kept otherwise.
+func TestTUIPruneConfirmationStatesWorktreeBranchFate(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"prune"}, "branch feat is kept"},
+		{[]string{"prune", "--delete-branches"}, "will delete branch feat if merged (git branch -d rules), otherwise keep it"},
+	} {
+		e := newBundleEnv(t)
+		o, primary := e.addRepo(t, "alpha", "feat")
+		addWorktree(t, primary, "feat", "feat")
+		testutil.Git(t, o.Path, "branch", "-D", "feat") // gone upstream
+		var out syncBuffer
+		in := newScript(t, true, []key{{keys: "n", wait: waitOutput(t, &out, "[y/N]")}})
+		errs, code := e.runTUI(t, in, &out, tc.args...)
+		if code != 1 {
+			t.Fatalf("%v: exit %d\nstdout:\n%s\nstderr:\n%s", tc.args, code, out.String(), errs)
+		}
+		if !strings.Contains(out.String(), tc.want) {
+			t.Errorf("%v: dialog lacks %q:\n%s", tc.args, tc.want, out.String())
+		}
 	}
 }

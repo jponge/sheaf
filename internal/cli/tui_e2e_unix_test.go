@@ -80,6 +80,10 @@ func TestTUIUpdateCtrlCTwiceExits130(t *testing.T) {
 	if code != 130 || !strings.Contains(errs, "killing git processes") {
 		t.Errorf("exit %d, stderr:\n%s", code, errs)
 	}
+	// The advice is about update only.
+	if !strings.Contains(errs, "A fast-forward killed by update") || strings.Contains(errs, "adopt") || strings.Contains(errs, "partial clone") {
+		t.Errorf("emergency stop message:\n%s", errs)
+	}
 	if !strings.Contains(out.String(), "Ctrl-C again to force") {
 		t.Errorf("progress view lacks the interruption note:\n%s", out.String())
 	}

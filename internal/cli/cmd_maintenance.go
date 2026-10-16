@@ -207,7 +207,7 @@ func printPrune(out io.Writer, plan ops.PrunePlan, results []ops.PruneResult, dr
 	}
 	if dryRun {
 		for _, c := range plan.Candidates {
-			for _, l := range pruneCandidateLines(c) {
+			for _, l := range pruneCandidateLines(c, false, false) {
 				fmt.Fprintln(out, l)
 			}
 		}
@@ -228,13 +228,36 @@ func printPrune(out io.Writer, plan ops.PrunePlan, results []ops.PruneResult, dr
 	fmt.Fprintf(out, "%d removed, %d kept, %d failed\n", n[ops.PruneRemoved], n[ops.PruneKept], n[ops.PruneFailed])
 }
 
-// pruneCandidateLines describes what pruning c would do, with its notes.
-func pruneCandidateLines(c ops.PruneCandidate) []string {
-	what := "would remove worktree " + c.Repo + "/" + c.Dir + " [" + c.Branch + "] at " + c.Path
-	if !c.Worktree {
+// pruneCandidateLines describes what pruning c would do (a dry run), or
+// will do (a confirmation), with its notes. A branch without worktree, or
+// the branch of a worktree with deleteBranches (--delete-branches), is
+// only deleted when merged (git branch -d rules, see ops.ApplyPrune): the
+// confirmation states that condition, unless the branch is known to be
+// merged, and says when the branch of a worktree is kept.
+func pruneCandidateLines(c ops.PruneCandidate, confirm, deleteBranches bool) []string {
+	var what string
+	switch {
+	case c.Worktree && confirm:
+		what = "will remove worktree " + c.Repo + "/" + c.Dir + " [" + c.Branch + "] at " + c.Path
+	case c.Worktree:
+		what = "would remove worktree " + c.Repo + "/" + c.Dir + " [" + c.Branch + "] at " + c.Path
+	case !confirm:
 		what = "would delete branch " + c.Repo + "/" + c.Branch + " if merged"
+	case c.Merged:
+		what = "will delete branch " + c.Repo + "/" + c.Branch
+	default:
+		what = "will delete branch " + c.Repo + "/" + c.Branch + " only if merged (git branch -d rules), otherwise keep it"
 	}
 	lines := []string{what + ": " + c.Reason}
+	switch {
+	case !c.Worktree || !confirm:
+	case !deleteBranches:
+		lines = append(lines, "branch "+c.Branch+" is kept")
+	case c.Merged:
+		lines = append(lines, "will delete branch "+c.Branch)
+	default:
+		lines = append(lines, "will delete branch "+c.Branch+" if merged (git branch -d rules), otherwise keep it")
+	}
 	for _, n := range c.Notes {
 		lines = append(lines, "  note: "+n)
 	}
