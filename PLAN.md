@@ -180,3 +180,20 @@ What to do differently
 - fish 4.0.2 / zsh 5.9 verified in the container (Debian debs unpacked without root): scd + completion work; fixed quoting/escaping in zsh and fish scd completion, and patched cobra's generated fish script (it evaluated quoted (cmd) words on TAB). make test-shells added. Open: same quoting bug in bash scd completion; cobra zsh open-quote issue (upstream).
 - Decisions 2026-10-16 (user): keep the cobra fish-script patch (orchestrator drafts an upstream report for the user to file); fix bash scd completion quoting with a dequote routine.
 - bash scd completion: quote-aware dequote and open-quote completion (test-first, 9/10 red → green). Cobra fish issue draft left untracked at ./cobra-fish-issue.md for the user to file.
+
+## Backlog (recorded 2026-10-16, user: "All items will need to be addressed")
+
+| # | Item | Status |
+|---|---|---|
+| B1 | User documentation: README (install, concepts, layout, `sheaf.yaml` schema, commands, shell integration, safety model) | high priority, in progress |
+| B2 | Bare `sheaf` (no subcommand) opens a TUI home screen (goals.md: "runs as a bubbletea TUI and displays menus") instead of printing help | high priority, design questions to the user |
+| B3 | Merge the duplicated listings `ops.ListWorktrees` (step 6) and `ops.ListCheckouts` (step 5) | high priority, pure refactor |
+| B4 | CI (GitHub Actions): `make test`, `make test-symlinked-tmp`, `make test-shells` on Linux and macOS | later; the user pushes/enables it |
+| B5 | Windows: declare unsupported (docs + clear startup error) rather than half-support | later |
+| B6 | Cross-step end-to-end review: inconsistencies, dead code, leftovers from design changes (e.g. adopt's old switching logic) | high priority |
+| B7 | Dogfooding on the user's Mac (real bundles, GitHub error texts, ssh prompts, terminal emulator, macOS fish/zsh) | later, user-driven |
+| B8 | Release packaging (GoReleaser/Homebrew: new tool, needs approval) | later |
+| B9 | Housekeeping: goals.md, cobra-fish-issue.md (file upstream, then delete) | user |
+| B10 | Remaining bash scd completion gaps (single quote inside open single quote, `$'…'`, `!` in double quotes); cobra zsh open-quote (upstream); fish < 3.7 `-o` fallback untested | later |
+
+Order for the high-priority items: B3 → B6 (review sees the merged code) → B2 → B1 (docs describe the final behaviour).
