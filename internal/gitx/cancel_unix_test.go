@@ -125,23 +125,23 @@ func wantPromptCancel(t *testing.T, elapsed time.Duration, err error, pidfile st
 }
 
 func TestFastForwardMergeTimeoutMidCheckoutKillsWholeProcessTree(t *testing.T) {
-	setDuration(t, &mergeTimeout, 700*time.Millisecond)
+	opts := FastForwardOptions{MergeTimeout: 700 * time.Millisecond}
 	dir, pidfile := slowSmudgeClone(t)
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	// The caller's earlier cancellation does not interrupt the merge; only
-	// mergeTimeout does.
+	// the merge timeout does.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	r := FastForward(ctx, dir)
+	r := FastForwardWithOptions(ctx, dir, opts)
 	elapsed := time.Since(start)
 	if r.Outcome != PullFailed {
 		t.Errorf("outcome = %v, want failed", r.Outcome)
 	}
 	if elapsed < 700*time.Millisecond {
-		t.Errorf("returned after %v, before mergeTimeout", elapsed)
+		t.Errorf("returned after %v, before the merge timeout", elapsed)
 	}
 	wantPromptCancel(t, elapsed, r.Err, pidfile)
 	if _, err := os.Stat(filepath.Join(dir, ".git", "index.lock")); err == nil {
@@ -153,7 +153,7 @@ func TestFastForwardMergeTimeoutMidCheckoutKillsWholeProcessTree(t *testing.T) {
 	// The repository is usable afterwards: no stale lock blocks a new attempt.
 	testutil.Git(t, dir, "config", "--unset", "filter.slow.required")
 	testutil.Git(t, dir, "config", "filter.slow.smudge", "cat")
-	if r := FastForward(context.Background(), dir); r.Outcome != PullFastForwarded {
+	if r := FastForwardWithOptions(context.Background(), dir, opts); r.Outcome != PullFastForwarded {
 		t.Fatalf("retry outcome = %v (err %v), want fast-forwarded", r.Outcome, r.Err)
 	}
 }
@@ -178,7 +178,7 @@ func TestFetchCancelledKillsSSH(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	err := FetchRemote(ctx, dir, "origin")
+	err := Net{}.FetchRemote(ctx, dir, "origin")
 	wantPromptCancel(t, time.Since(start), err, pidfile)
 }
 
@@ -196,19 +196,19 @@ func hangingHookClone(t *testing.T) (dir, pidfile string) {
 }
 
 func TestFastForwardMergeTimeoutAfterHeadMovedReportsObservedHead(t *testing.T) {
-	setDuration(t, &mergeTimeout, 700*time.Millisecond)
+	opts := FastForwardOptions{MergeTimeout: 700 * time.Millisecond}
 	dir, pidfile := hangingHookClone(t)
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	old := head(t, dir)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	r := FastForward(ctx, dir)
+	r := FastForwardWithOptions(ctx, dir, opts)
 	elapsed := time.Since(start)
 	if elapsed < 700*time.Millisecond {
-		t.Errorf("returned after %v, before mergeTimeout", elapsed)
+		t.Errorf("returned after %v, before the merge timeout", elapsed)
 	}
 	wantPromptCancel(t, elapsed, r.Err, pidfile)
 	h := head(t, dir)
@@ -218,14 +218,6 @@ func TestFastForwardMergeTimeoutAfterHeadMovedReportsObservedHead(t *testing.T) 
 	if r.Outcome != PullFailed || r.Old != old || r.New != h {
 		t.Fatalf("result = %v old=%s new=%s, want failed old=%s new=%s", r.Outcome, r.Old, r.New, old, h)
 	}
-}
-
-// setDuration sets *v to d for the duration of the test.
-func setDuration(t *testing.T, v *time.Duration, d time.Duration) {
-	t.Helper()
-	old := *v
-	*v = d
-	t.Cleanup(func() { *v = old })
 }
 
 // killRecorded kills the processes recorded in pidfile at cleanup.
@@ -244,7 +236,6 @@ func killRecorded(t *testing.T, pidfile string) {
 // the pipe open after git exited 0; exec then reports ErrWaitDelay. The
 // fast-forward did happen, so it must not be reported as a failure.
 func TestFastForwardSucceedsWhenHookBackgroundsProcessHoldingStderr(t *testing.T) {
-	setDuration(t, &waitDelay, 300*time.Millisecond)
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	hooks := t.TempDir()
 	pidfile := filepath.Join(t.TempDir(), "pids")
@@ -252,11 +243,11 @@ func TestFastForwardSucceedsWhenHookBackgroundsProcessHoldingStderr(t *testing.T
 	writeScript(t, filepath.Join(hooks, "post-merge"), "sleep 5 &\necho $! >> '"+pidfile+"'\nexit 0\n")
 	testutil.Git(t, dir, "config", "core.hooksPath", hooks)
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	r := FastForward(context.Background(), dir)
+	r := FastForwardWithOptions(context.Background(), dir, FastForwardOptions{waitDelay: 300 * time.Millisecond})
 	if el := time.Since(start); el > 3*time.Second {
 		t.Errorf("returned after %v", el)
 	}
@@ -316,7 +307,7 @@ func wantCleanFastForward(t *testing.T, dir string, r PullResult) {
 // not honoured; the fast-forward completes and is reported as such.
 func TestFastForwardCompletesWhenCancelledDuringCheckout(t *testing.T) {
 	dir, marker := slowCheckoutClone(t, "1")
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -362,7 +353,7 @@ func wantForceKilled(t *testing.T, elapsed time.Duration, r PullResult, pidfile 
 // Closing Force kills the merge's process group at once.
 func TestFastForwardWithOptionsForceKillsMergeMidCheckout(t *testing.T) {
 	dir, pidfile := slowSmudgeClone(t)
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	old := head(t, dir)
@@ -379,7 +370,7 @@ func TestFastForwardWithOptionsForceKillsMergeMidCheckout(t *testing.T) {
 
 func TestFastForwardWithOptionsForceAfterHeadMovedReportsObservedHead(t *testing.T) {
 	dir, pidfile := hangingHookClone(t)
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	old := head(t, dir)
@@ -401,7 +392,7 @@ func TestFastForwardWithOptionsForceAfterHeadMovedReportsObservedHead(t *testing
 // reported as a divergence or a timeout.
 func TestFastForwardWithOptionsForceAlreadyClosed(t *testing.T) {
 	dir, pidfile := slowSmudgeClone(t)
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	force := make(chan struct{})
@@ -426,7 +417,7 @@ func TestFastForwardWithOptionsForceAlreadyClosed(t *testing.T) {
 // changes nothing; MergeTimeout overrides the default bound.
 func TestFastForwardWithOptionsForceIgnoredWhenMergeCompletes(t *testing.T) {
 	dir, _ := slowCheckoutClone(t, "0")
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	force := make(chan struct{})
@@ -437,7 +428,7 @@ func TestFastForwardWithOptionsForceIgnoredWhenMergeCompletes(t *testing.T) {
 
 func TestFastForwardWithOptionsMergeTimeoutOverridesDefault(t *testing.T) {
 	dir, pidfile := slowSmudgeClone(t)
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()

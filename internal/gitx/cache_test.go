@@ -125,7 +125,7 @@ func TestQueryCacheMutationsInvalidate(t *testing.T) {
 			t.Fatal("origin/late exists before the fetch")
 		}
 		testutil.Git(t, o.Path, "branch", "late", "main")
-		if err := FetchRemote(ctx, dir, "origin"); err != nil {
+		if err := (Net{}).FetchRemote(ctx, dir, "origin"); err != nil {
 			t.Fatal(err)
 		}
 		if !mustRef(t, ctx, dir, "refs/remotes/origin/late") {
@@ -183,7 +183,7 @@ func TestQueryCacheMutationsInvalidate(t *testing.T) {
 		o, dir := cloneOrigin(t, testutil.OriginOpts{})
 		ctx, calls := cachedCtx()
 		mustTopLevel(t, ctx, dir)
-		if err := Clone(ctx, o.URL, filepath.Join(t.TempDir(), "second"), ""); err != nil {
+		if err := (Net{}).Clone(ctx, o.URL, filepath.Join(t.TempDir(), "second"), ""); err != nil {
 			t.Fatal(err)
 		}
 		calls.Reset()

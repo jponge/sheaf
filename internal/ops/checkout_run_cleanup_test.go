@@ -131,13 +131,11 @@ func TestRunCommandSpillsLargeOutput(t *testing.T) {
 	f, _ := threeCheckouts(t)
 	var mu sync.Mutex
 	var spilled []string
-	old := spillHook
-	t.Cleanup(func() { spillHook = old })
-	spillHook = func(p string) { mu.Lock(); spilled = append(spilled, p); mu.Unlock() }
+	hook := func(p string) { mu.Lock(); spilled = append(spilled, p); mu.Unlock() }
 	const size = 5 << 20
 	sink := &sizeSink{sizes: map[string]int{}, bad: map[string]bool{}}
 	r, err := RunCommand(context.Background(), f.w, RunOptions{
-		Jobs: 3, Shell: true, Sink: sink,
+		Jobs: 3, Shell: true, Sink: sink, spillHook: hook,
 		Args: []string{"head -c 5242880 /dev/zero | tr '\\0' x"},
 	})
 	if err != nil || len(r.Results) != 3 {
@@ -194,9 +192,7 @@ func TestRunCommandSpillFilesNeverVisible(t *testing.T) {
 	var mu sync.Mutex
 	var visible []string
 	spills := 0
-	old := spillHook
-	t.Cleanup(func() { spillHook = old })
-	spillHook = func(p string) {
+	hook := func(p string) {
 		mu.Lock()
 		defer mu.Unlock()
 		spills++
@@ -209,7 +205,7 @@ func TestRunCommandSpillFilesNeverVisible(t *testing.T) {
 	}
 	sink := &sizeSink{sizes: map[string]int{}, bad: map[string]bool{}}
 	r, err := RunCommand(context.Background(), f.w, RunOptions{
-		Jobs: 3, Shell: true, Sink: sink, Args: []string{"head -c 3145728 /dev/zero | tr '\\0' x"},
+		Jobs: 3, Shell: true, Sink: sink, spillHook: hook, Args: []string{"head -c 3145728 /dev/zero | tr '\\0' x"},
 	})
 	if err != nil || len(r.Results) != 3 || spills != 3 {
 		t.Fatalf("%v %+v, %d spills", err, r.Results, spills)

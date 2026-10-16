@@ -52,11 +52,11 @@ func TestInteractiveFetchStaysInCallerSession(t *testing.T) {
 	dir := sshFakeClone(t, recordSessionScript(rec)+"exit 1\n")
 	self := sessionOf(t, "self")
 
-	_ = FetchRemote(context.Background(), dir, "origin")
+	_ = Net{}.FetchRemote(context.Background(), dir, "origin")
 	if got := readTrimmed(t, rec); got == self {
 		t.Fatalf("non-interactive fetch: ssh in caller session %s, want a new session", got)
 	}
-	_ = FetchRemote(WithInteractive(context.Background()), dir, "origin")
+	_ = Net{Interactive: true}.FetchRemote(context.Background(), dir, "origin")
 	if got := readTrimmed(t, rec); got != self {
 		t.Fatalf("interactive fetch: ssh in session %s, want the caller's session %s", got, self)
 	}
@@ -66,21 +66,21 @@ func TestInteractiveFetchAllAndCloneStayInCallerSession(t *testing.T) {
 	rec := filepath.Join(t.TempDir(), "sid")
 	dir := sshFakeClone(t, recordSessionScript(rec)+"exit 1\n")
 	self := sessionOf(t, "self")
-	ctx := WithInteractive(context.Background())
+	ctx, net := context.Background(), Net{Interactive: true}
 
-	_ = FetchAll(ctx, dir)
+	_ = net.FetchAll(ctx, dir)
 	if got := readTrimmed(t, rec); got != self {
 		t.Errorf("interactive FetchAll: ssh in session %s, want %s", got, self)
 	}
 	os.Remove(rec)
-	_ = Clone(ctx, "ssh://sheaf-test.invalid/repo.git", filepath.Join(t.TempDir(), "c"), "")
+	_ = net.Clone(ctx, "ssh://sheaf-test.invalid/repo.git", filepath.Join(t.TempDir(), "c"), "")
 	if got := readTrimmed(t, rec); got != self {
 		t.Errorf("interactive Clone: ssh in session %s, want %s", got, self)
 	}
 }
 
 // Only network operations are interactive: a merge (and its hooks) keeps its
-// own session even under an interactive context, so that a terminal Ctrl-C
+// own session even after an interactive fetch, so that a terminal Ctrl-C
 // never reaches an in-progress fast-forward (it must run to completion).
 func TestInteractiveDoesNotApplyToMerge(t *testing.T) {
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
@@ -89,28 +89,27 @@ func TestInteractiveDoesNotApplyToMerge(t *testing.T) {
 	writeScript(t, filepath.Join(hooks, "post-merge"), recordSessionScript(rec))
 	testutil.Git(t, dir, "config", "core.hooksPath", hooks)
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
-	ctx := WithInteractive(context.Background())
-	if err := FetchRemote(ctx, dir, "origin"); err != nil {
+	ctx := context.Background()
+	if err := (Net{Interactive: true}).FetchRemote(ctx, dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	if r := FastForward(ctx, dir); r.Outcome != PullFastForwarded {
 		t.Fatalf("outcome %v (%v)", r.Outcome, r.Err)
 	}
 	if got := readTrimmed(t, rec); got == sessionOf(t, "self") {
-		t.Fatal("merge hook ran in the caller's session under an interactive context")
+		t.Fatal("merge hook ran in the caller's session after an interactive fetch")
 	}
 }
 
 // An interactive fetch is still cancellable: git itself receives SIGTERM.
 func TestInteractiveFetchCancelReturnsPromptly(t *testing.T) {
-	setDuration(t, &waitDelay, time.Second)
 	pidfile := filepath.Join(t.TempDir(), "pids")
 	dir := sshFakeClone(t, hangingScript(pidfile))
 	killRecorded(t, pidfile)
-	ctx, cancel := context.WithTimeout(WithInteractive(context.Background()), 700*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	err := FetchRemote(ctx, dir, "origin")
+	err := Net{Interactive: true, waitDelay: time.Second}.FetchRemote(ctx, dir, "origin")
 	if el := time.Since(start); el > 4*time.Second {
 		t.Errorf("returned after %v", el)
 	}
@@ -121,12 +120,13 @@ func TestInteractiveFetchCancelReturnsPromptly(t *testing.T) {
 
 func TestKillAllKillsInteractiveFetch(t *testing.T) {
 	t.Cleanup(resetKillAll)
-	setDuration(t, &waitDelay, time.Second)
 	pidfile := filepath.Join(t.TempDir(), "pids")
 	dir := sshFakeClone(t, hangingScript(pidfile))
 	killRecorded(t, pidfile)
 	done := make(chan error, 1)
-	go func() { done <- FetchRemote(WithInteractive(context.Background()), dir, "origin") }()
+	go func() {
+		done <- Net{Interactive: true, waitDelay: time.Second}.FetchRemote(context.Background(), dir, "origin")
+	}()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		b, _ := os.ReadFile(pidfile)
@@ -158,7 +158,7 @@ func TestInteractiveTTYHelperProcess(t *testing.T) {
 	if dir == "" {
 		return
 	}
-	_ = FetchRemote(WithInteractive(context.Background()), dir, "origin") // the fake ssh fails
+	_ = Net{Interactive: true}.FetchRemote(context.Background(), dir, "origin") // the fake ssh fails
 }
 
 // The point of interactive mode: ssh can open the controlling terminal (to
@@ -200,12 +200,13 @@ func slowUploadPackClone(t *testing.T) (dir, pidfile string) {
 // Cancelling an interactive fetch also stops git's descendants (here an
 // upload-pack and its child, both ignoring SIGTERM), not just git.
 func TestInteractiveFetchCancelStopsDescendants(t *testing.T) {
-	setDuration(t, &waitDelay, 500*time.Millisecond)
 	dir, pidfile := slowUploadPackClone(t)
-	ctx, cancel := context.WithCancel(WithInteractive(context.Background()))
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- FetchRemote(ctx, dir, "origin") }()
+	go func() {
+		done <- Net{Interactive: true, waitDelay: 500 * time.Millisecond}.FetchRemote(ctx, dir, "origin")
+	}()
 	waitPIDCount(t, pidfile, 2)
 	cancel()
 	select {
@@ -220,7 +221,7 @@ func TestKillAllStopsInteractiveFetchDescendants(t *testing.T) {
 	t.Cleanup(resetKillAll)
 	dir, pidfile := slowUploadPackClone(t)
 	done := make(chan error, 1)
-	go func() { done <- FetchRemote(WithInteractive(context.Background()), dir, "origin") }()
+	go func() { done <- Net{Interactive: true}.FetchRemote(context.Background(), dir, "origin") }()
 	waitPIDCount(t, pidfile, 2)
 	KillAll()
 	select {

@@ -6,7 +6,7 @@ import "syscall"
 
 // procID is unused outside Linux: descendants of an interactive git
 // invocation cannot be enumerated portably, so only git itself is signalled
-// (see WithInteractive).
+// (see Net.Interactive).
 type procID struct{}
 
 func descendants(int) []procID { return nil }

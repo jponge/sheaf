@@ -31,12 +31,12 @@ func TestSingleRepoCommandsInteractiveGitModeIgnoreJobs(t *testing.T) {
 			testutil.Git(t, primary, "config", "remote.origin.url", "ssh://sheaf-test.invalid/o/a.git")
 			testutil.Git(t, primary, "config", "ssh.variant", "ssh")
 			rec := fakeSSH(t)
-			setSeam(t, &stdinIsTerminal, func(io.Reader) bool { return true })
+			e.stdinTTY = func(io.Reader) bool { return true }
 			e.run(t, args...) // the fake ssh fails the fetch
 			wantSelfSession(t, name, rec)
 			// Still not interactive when stdin is not a terminal.
 			os.Remove(rec)
-			setSeam(t, &stdinIsTerminal, func(io.Reader) bool { return false })
+			e.stdinTTY = func(io.Reader) bool { return false }
 			e.run(t, args...)
 			b, err := os.ReadFile(rec)
 			if err != nil {

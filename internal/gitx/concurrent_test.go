@@ -64,7 +64,7 @@ func TestFetchOnceThenParallelFastForwardOnSiblingWorktrees(t *testing.T) {
 
 	for round := 1; round <= 5; round++ {
 		advance(round)
-		if err := FetchRemote(ctx, primary, "origin"); err != nil {
+		if err := (Net{}).FetchRemote(ctx, primary, "origin"); err != nil {
 			t.Fatal(err)
 		}
 		results := make([]PullResult, len(checkouts))

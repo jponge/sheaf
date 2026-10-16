@@ -18,8 +18,7 @@ func runHomeWith(t *testing.T, d Deps, in io.Reader, out *syncBuffer, args ...st
 	t.Helper()
 	var errb syncBuffer
 	d.UseTUI = func(io.Reader, io.Writer, bool) bool { return true }
-	cmd := NewRootCmdWithDeps(Streams{In: in, Out: out, Err: &errb}, d)
-	code = execute(cmd, args)
+	code = executeDeps(Streams{In: in, Out: out, Err: &errb}, d, args)
 	return errb.String(), code
 }
 
@@ -66,9 +65,11 @@ func homeBundle(t *testing.T) (e *env, alpha, feat, beta string, o testutil.Orig
 func helpOf(t *testing.T, e *env) string {
 	t.Helper()
 	var out bytes.Buffer
-	root := NewRootCmdWithDeps(Streams{In: strings.NewReader(""), Out: &out, Err: &out}, e.deps())
+	d := e.deps()
+	d.ctl = newInterruptCtl()
+	root := NewRootCmdWithDeps(Streams{In: strings.NewReader(""), Out: &out, Err: &out}, d)
 	root.RunE = nil
-	if code := execute(root, nil); code != 0 {
+	if code := execute(root, d.ctl, nil); code != 0 {
 		t.Fatalf("help: exit %d\n%s", code, out.String())
 	}
 	return out.String()
@@ -86,11 +87,12 @@ func TestBareSheafPlainBehavesAsANonRunnableRoot(t *testing.T) {
 		{"nosuch"}, {"__complete", ""}, {"__complete", "--"}, {"__complete", "st"}, {"--no-tui", "status", "--help"},
 	} {
 		var out1, err1, out2, err2 bytes.Buffer
-		home := NewRootCmdWithDeps(Streams{In: strings.NewReader(""), Out: &out1, Err: &err1}, e.deps())
-		code1 := execute(home, args)
-		ref := NewRootCmdWithDeps(Streams{In: strings.NewReader(""), Out: &out2, Err: &err2}, e.deps())
+		code1 := executeDeps(Streams{In: strings.NewReader(""), Out: &out1, Err: &err1}, e.deps(), args)
+		d := e.deps()
+		d.ctl = newInterruptCtl()
+		ref := NewRootCmdWithDeps(Streams{In: strings.NewReader(""), Out: &out2, Err: &err2}, d)
 		ref.RunE, ref.Run = nil, nil
-		code2 := execute(ref, args)
+		code2 := execute(ref, d.ctl, args)
 		if code1 != code2 || out1.String() != out2.String() || err1.String() != err2.String() {
 			t.Errorf("sheaf %q: exit %d, want %d\nstdout:\n%s\nwant:\n%s\nstderr:\n%s\nwant:\n%s",
 				args, code1, code2, out1.String(), out2.String(), err1.String(), err2.String())

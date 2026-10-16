@@ -55,14 +55,14 @@ func (r Remotes) String() string { return strings.Join(r.All(), " and ") }
 // branches thus push to origin by default (git's default remote) while the
 // default branch follows the reference repository. On a failure after the
 // clone, dest is left in place: callers remove it.
-func CloneFork(ctx context.Context, upstreamURL, forkURL, dest, branch string) error {
-	if err := clone(ctx, upstreamURL, dest, branch, ForkRemotes.Reference); err != nil {
+func (n Net) CloneFork(ctx context.Context, upstreamURL, forkURL, dest, branch string) error {
+	if err := n.clone(ctx, upstreamURL, dest, branch, ForkRemotes.Reference); err != nil {
 		return err
 	}
 	if _, err := Run(ctx, dest, "remote", "add", "--", ForkRemotes.Fork, forkURL); err != nil {
 		return fmt.Errorf("adding the fork remote %s: %w", ForkRemotes.Fork, err)
 	}
-	if err := FetchRemote(ctx, dest, ForkRemotes.Fork); err != nil {
+	if err := n.FetchRemote(ctx, dest, ForkRemotes.Fork); err != nil {
 		return fmt.Errorf("fetching the fork %s: %w", forkURL, err)
 	}
 	return nil
@@ -79,10 +79,10 @@ func CloneFork(ctx context.Context, upstreamURL, forkURL, dest, branch string) e
 // CommonDir) and fetch once per repository, then call FastForward on each
 // worktree, which may run in parallel. FetchRemote is cancellable at any
 // point through ctx; a fetch killed with SIGKILL may leave a ref lock behind
-// (see StaleLockPath). Under a context made by WithInteractive, git keeps
-// the caller's controlling terminal.
-func FetchRemote(ctx context.Context, dir, remote string) error {
-	_, err := run(ctx, netOpts(ctx), dir, "fetch", "--quiet", "--prune", remote)
+// (see StaleLockPath). With n.Interactive, git keeps the caller's
+// controlling terminal.
+func (n Net) FetchRemote(ctx context.Context, dir, remote string) error {
+	_, err := run(ctx, n.opts(), dir, "fetch", "--quiet", "--prune", remote)
 	return err
 }
 
@@ -90,8 +90,8 @@ func FetchRemote(ctx context.Context, dir, remote string) error {
 // (e.g. "main"). It reads the local refs/remotes/<remote>/HEAD symbolic ref
 // and, when that is missing, asks the remote with `git ls-remote --symref
 // <remote> HEAD` (network access; nothing is written locally).
-func DefaultBranchOf(ctx context.Context, dir, remote string) (string, error) {
-	return defaultBranchOf(ctx, dir, remote)
+func (n Net) DefaultBranchOf(ctx context.Context, dir, remote string) (string, error) {
+	return n.defaultBranchOf(ctx, dir, remote)
 }
 
 // FetchTagsFrom runs `git fetch --no-prune --tags <remote>`: the remote's
@@ -105,8 +105,8 @@ func DefaultBranchOf(ctx context.Context, dir, remote string) (string, error) {
 // fetch and exits with status 1. FetchTagsFrom returns the names of such kept
 // local tags (sorted) and no error when these refusals are the only
 // failures; any other failure is an error.
-func FetchTagsFrom(ctx context.Context, dir, remote string) ([]string, error) {
-	return fetchTags(ctx, dir, remote)
+func (n Net) FetchTagsFrom(ctx context.Context, dir, remote string) ([]string, error) {
+	return n.fetchTags(ctx, dir, remote)
 }
 
 // remoteBranchRef returns the first remote of remotes (default origin) that

@@ -63,8 +63,8 @@ func (d forkDistrust) note() string {
 // returns gone=true when the fork appears to be gone (see
 // remoteRepoGoneFor), the fetch error for any other failure, and ctx's
 // error when cancelled.
-func fetchForkRemote(ctx context.Context, dir, fork string) (gone bool, err error) {
-	err = gitx.FetchRemote(ctx, dir, fork)
+func fetchForkRemote(ctx context.Context, net gitx.Net, dir, fork string) (gone bool, err error) {
+	err = net.FetchRemote(ctx, dir, fork)
 	if err == nil {
 		return false, nil
 	}

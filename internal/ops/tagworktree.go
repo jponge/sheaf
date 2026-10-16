@@ -62,7 +62,7 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 	ref := RemotesOf(r).Reference
 	if !opts.NoFetch {
 		report(PhaseFetch, "fetching "+ref+" and its tags")
-		kept, err := gitx.FetchTagsFrom(ctx, primary, ref)
+		kept, err := gitx.Net{Interactive: opts.Interactive}.FetchTagsFrom(ctx, primary, ref)
 		if err != nil {
 			if ctx.Err() != nil {
 				return WorktreeAddResult{}, ctx.Err()

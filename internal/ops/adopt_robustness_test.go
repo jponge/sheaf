@@ -155,10 +155,7 @@ func TestAdoptAllRecoversPanicAndRestores(t *testing.T) {
 	dir := filepath.Join(f.w.Root, "x")
 	plainClone(t, o, dir)
 	testutil.Git(t, dir, "checkout", "-q", "feat")
-	old := adoptAfterMove
-	adoptAfterMove = func() error { panic("boom") }
-	t.Cleanup(func() { adoptAfterMove = old })
-	s := AdoptAll(context.Background(), f.w, []string{dir}, AdoptOptions{}, 1, Discard)
+	s := AdoptAll(context.Background(), f.w, []string{dir}, AdoptOptions{afterMove: func() error { panic("boom") }}, 1, Discard)
 	if len(s.Results) != 1 || s.Results[0].Status != StatusFailed || !strings.Contains(fmt.Sprint(s.Results[0].Err), "boom") {
 		t.Fatalf("results = %+v, want failure mentioning the panic", s.Results)
 	}
@@ -186,22 +183,22 @@ func TestMoveIntoSubdirFailuresRestore(t *testing.T) {
 			dir := filepath.Join(root, "x")
 			plainClone(t, testutil.NewOrigin(t, testutil.OriginOpts{}), dir)
 			calls := 0
-			oldR, oldM := osRename, osMkdir
-			t.Cleanup(func() { osRename, osMkdir = oldR, oldM })
-			osRename = func(a, b string) error {
-				calls++
-				if calls == c.failRename {
-					return boom
-				}
-				return os.Rename(a, b)
+			fsys := moveFS{
+				rename: func(a, b string) error {
+					calls++
+					if calls == c.failRename {
+						return boom
+					}
+					return os.Rename(a, b)
+				},
+				mkdir: func(p string, m os.FileMode) error {
+					if c.failMkdirCall {
+						return boom
+					}
+					return os.Mkdir(p, m)
+				},
 			}
-			osMkdir = func(p string, m os.FileMode) error {
-				if c.failMkdirCall {
-					return boom
-				}
-				return os.Mkdir(p, m)
-			}
-			if _, err := moveIntoSubdir(root, dir, "main"); !errors.Is(err, boom) {
+			if _, err := moveIntoSubdir(fsys, root, dir, "main"); !errors.Is(err, boom) {
 				t.Fatalf("err = %v, want injected", err)
 			}
 			if fi, err := os.Lstat(filepath.Join(dir, ".git")); err != nil || !fi.IsDir() {
@@ -227,10 +224,7 @@ func TestAdoptLaidOutRenameRollbackWithSibling(t *testing.T) {
 	testutil.Git(t, dev, "worktree", "add", "-q", "../feat", "feat")
 	writeFile(t, filepath.Join(f.w.Root, "p", "feat", "wip.txt"), "wip\n")
 	boom := errors.New("injected")
-	old := adoptAfterMove
-	adoptAfterMove = func() error { return boom }
-	t.Cleanup(func() { adoptAfterMove = old })
-	if _, err := adopt(t, f, filepath.Join(f.w.Root, "p"), AdoptOptions{}); !errors.Is(err, boom) {
+	if _, err := adopt(t, f, filepath.Join(f.w.Root, "p"), AdoptOptions{afterMove: func() error { return boom }}); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want injected", err)
 	}
 	if b := branchOf(t, dev); b != "dev" {
@@ -242,7 +236,6 @@ func TestAdoptLaidOutRenameRollbackWithSibling(t *testing.T) {
 	if b := branchOf(t, filepath.Join(f.w.Root, "p", "feat")); b != "feat" {
 		t.Fatalf("sibling worktree broken: %s", b)
 	}
-	adoptAfterMove = old
 	if _, err := adopt(t, f, filepath.Join(f.w.Root, "p"), AdoptOptions{}); err != nil {
 		t.Fatal(err)
 	}

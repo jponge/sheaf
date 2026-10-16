@@ -154,14 +154,14 @@ type tuiSession struct {
 	out, errw io.Writer
 }
 
-func newTUISession(c *cobra.Command) *tuiSession {
+func newTUISession(c *cobra.Command, d Deps) *tuiSession {
 	ctx := c.Context()
-	ctl := interruptFrom(ctx)
+	ctl := d.ctl
 	if ctl == nil { // not run through execute (no signal handling)
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
-		ctl = newInterruptCtl(cancel, c.ErrOrStderr())
-		ctx = context.WithValue(ctx, ctlKey{}, ctl)
+		ctl = newInterruptCtl()
+		ctl.bind(cancel, c.ErrOrStderr())
 	}
 	out := c.OutOrStdout()
 	if p, ok := out.(*pipeWatch); ok {

@@ -51,15 +51,12 @@ func TestIsTerminal(t *testing.T) {
 	}
 }
 
-// stubEmergency replaces the emergency-stop seams; it returns channels
-// receiving the killAll calls and the exit codes.
-func stubEmergency(t *testing.T) (killed chan struct{}, exited chan int) {
-	t.Helper()
+// stubEmergency replaces the end of the emergency stop of ctl; it returns
+// channels receiving the killAll calls and the exit codes.
+func stubEmergency(ctl *interruptCtl) (killed chan struct{}, exited chan int) {
 	killed, exited = make(chan struct{}, 4), make(chan int, 4)
-	oldKill, oldExit := killAll, exit
-	t.Cleanup(func() { killAll, exit = oldKill, oldExit })
-	killAll = func() int { killed <- struct{}{}; return 0 }
-	exit = func(code int) { exited <- code }
+	ctl.killAll = func() int { killed <- struct{}{}; return 0 }
+	ctl.exit = func(code int) { exited <- code }
 	return killed, exited
 }
 
@@ -68,14 +65,16 @@ func stubEmergency(t *testing.T) (killed chan struct{}, exited chan int) {
 // terminal, closes the force channel, kills the git process groups and
 // exits with 130.
 func TestInterruptControllerKeyPath(t *testing.T) {
-	killed, exited := stubEmergency(t)
+	t.Parallel()
+	d := Deps{ctl: newInterruptCtl()}
+	killed, exited := stubEmergency(d.ctl)
 	var errb bytes.Buffer
-	root := NewRootCmd(Streams{Out: &bytes.Buffer{}, Err: &errb})
+	root := NewRootCmdWithDeps(Streams{Out: &bytes.Buffer{}, Err: &errb}, d)
 	root.AddCommand(&cobra.Command{Use: "probe", RunE: func(c *cobra.Command, _ []string) error {
 		ctx := c.Context()
-		ctl := interruptFrom(ctx)
-		if ctl == nil {
-			return errors.New("no interrupt controller in the command context")
+		ctl := newTUISession(c, d).ctl
+		if ctl != d.ctl {
+			return errors.New("the command's TUI session does not use the interrupt controller of execute")
 		}
 		var order []string
 		ctl.setRelease(func() { order = append(order, "release") })
@@ -86,7 +85,7 @@ func TestInterruptControllerKeyPath(t *testing.T) {
 			return errors.New("first interrupt did not cancel the context")
 		}
 		select {
-		case <-forceFrom(ctx):
+		case <-d.force():
 			return errors.New("force channel closed by the first interrupt")
 		default:
 		}
@@ -108,7 +107,7 @@ func TestInterruptControllerKeyPath(t *testing.T) {
 			return errors.New("git process groups not killed")
 		}
 		select {
-		case <-forceFrom(ctx):
+		case <-d.force():
 		default:
 			return errors.New("force channel not closed")
 		}
@@ -121,7 +120,7 @@ func TestInterruptControllerKeyPath(t *testing.T) {
 		}
 		return nil
 	}})
-	if code := execute(root, []string{"probe"}); code != 0 {
+	if code := execute(root, d.ctl, []string{"probe"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 	if !strings.Contains(errb.String(), "killing git processes") {
@@ -132,10 +131,12 @@ func TestInterruptControllerKeyPath(t *testing.T) {
 // The controller tells the progress view about every interruption, signals
 // included, with the running count.
 func TestInterruptControllerNotifies(t *testing.T) {
-	stubEmergency(t)
+	t.Parallel()
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ctl := newInterruptCtl(cancel, &syncBuffer{})
+	ctl := newInterruptCtl()
+	ctl.bind(cancel, &syncBuffer{})
+	stubEmergency(ctl)
 	var got []int
 	ctl.setNotify(func(n int) { got = append(got, n) })
 	ctl.interrupt()

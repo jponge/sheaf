@@ -31,6 +31,9 @@ type PruneOptions struct {
 	Jobs int
 	// WorkingDir is the caller's working directory; empty means os.Getwd.
 	WorkingDir string
+	// Interactive runs git's network operations in interactive git mode
+	// (see gitx.Net).
+	Interactive bool
 }
 
 // PruneCandidate is a worktree, or a local branch without worktree, whose
@@ -155,7 +158,7 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 	rs := RemotesOf(r)
 	if !opts.Offline {
 		report(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindStart})
-		if err := fetchRepo(ctx, primary, rs); err != nil {
+		if err := fetchRepo(ctx, gitx.Net{Interactive: opts.Interactive}, primary, rs, nil); err != nil {
 			var rf *remoteFetchError
 			if ctx.Err() != nil || !onlyForkFetchFailed(err, rs) || !errors.As(err, &rf) || !forkGoneError(rf.Err, rs.Fork) {
 				report(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindFailed, Err: err})
@@ -398,7 +401,7 @@ func ApplyPrune(ctx context.Context, w *Workspace, plan PrunePlan, opts PruneOpt
 func pruneWorktree(ctx context.Context, w *Workspace, c PruneCandidate, opts PruneOptions, fetched bool, distrust forkDistrust, wd string, report func(Event)) PruneResult {
 	res := PruneResult{PruneCandidate: c}
 	changed := ""
-	ro := WorktreeRemoveOptions{DeleteBranch: opts.DeleteBranches, Offline: opts.Offline, WorkingDir: wd, originFetched: fetched, forkDistrust: distrust,
+	ro := WorktreeRemoveOptions{DeleteBranch: opts.DeleteBranches, Offline: opts.Offline, WorkingDir: wd, Interactive: opts.Interactive, originFetched: fetched, forkDistrust: distrust,
 		Confirm: func(p WorktreeRemovePlan) bool {
 			res.Notes = riskNotes(p.Risks)
 			switch {

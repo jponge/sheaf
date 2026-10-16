@@ -38,6 +38,8 @@ type RemoveOptions struct {
 	// it (typically a token that cannot see the repository) and is a
 	// refusal that only Force overrides.
 	ExpectedGone string
+	// Interactive fetches in interactive git mode (see gitx.Net).
+	Interactive bool
 }
 
 // RemoveItem is one path of a repository directory being removed, with what
@@ -161,6 +163,7 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 	// published: the recorded heads of pull request branches (see
 	// publishedPullHeads), set by fetch.
 	var published []string
+	net := gitx.Net{Interactive: opts.Interactive}
 	fetch := func(primary string) (string, error) {
 		if fetched {
 			return fetchMsg, nil
@@ -169,11 +172,11 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 		if opts.Offline {
 			emit(Event{Phase: PhaseFetch, Message: "offline: not fetching the repository nor its nested repositories; the remote state may be stale (commits whose remote branch was deleted are not detected)"})
 			var err error
-			published, err = publishedPullHeads(ctx, primary, rs.Reference, false, emit)
+			published, err = publishedPullHeads(ctx, net, primary, rs.Reference, false, emit)
 			return "", err
 		}
 		emit(Event{Phase: PhaseFetch, Message: "fetching " + rs.Reference})
-		if err := gitx.FetchRemote(ctx, primary, rs.Reference); err != nil {
+		if err := net.FetchRemote(ctx, primary, rs.Reference); err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
@@ -183,7 +186,7 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 				fetchMsg, fetchForceable = goneRemoteProblem, true
 			}
 		} else {
-			if published, err = publishedPullHeads(ctx, primary, rs.Reference, true, emit); err != nil {
+			if published, err = publishedPullHeads(ctx, net, primary, rs.Reference, true, emit); err != nil {
 				return "", err
 			}
 			if opts.ExpectedGone != "" {
@@ -193,7 +196,7 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 		if !rs.Forked() {
 			return fetchMsg, nil
 		}
-		msg, forceable, err := fetchFork(ctx, primary, rs.Fork, emit)
+		msg, forceable, err := fetchFork(ctx, net, primary, rs.Fork, emit)
 		if err != nil {
 			return "", err
 		}
@@ -218,7 +221,7 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 				return err
 			}
 			emit(Event{Phase: PhaseFetch, Message: "fetching nested repository " + dir})
-			err := gitx.FetchAll(ctx, dir)
+			err := net.FetchAll(ctx, dir)
 			if ctx.Err() == nil {
 				fetchedNested[dir] = err
 			}
@@ -463,7 +466,7 @@ func planRemoval(ctx context.Context, w *Workspace, name, wd string, fetch func(
 // recorded (made before sheaf recorded heads) gets none: its commits count
 // as unpushed until remove fetches online or `sheaf wt pr` refreshes it.
 // Only a cancellation of ctx is returned as an error.
-func publishedPullHeads(ctx context.Context, primary, remote string, fetch bool, emit func(Event)) ([]string, error) {
+func publishedPullHeads(ctx context.Context, net gitx.Net, primary, remote string, fetch bool, emit func(Event)) ([]string, error) {
 	ns, err := gitx.PullRequestBranches(ctx, primary, remote)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -484,7 +487,7 @@ func publishedPullHeads(ctx context.Context, primary, remote string, fetch bool,
 		return refs, nil
 	}
 	emit(Event{Phase: PhaseFetch, Message: "fetching the pull request heads of " + strings.Join(refs, ", ")})
-	if err := gitx.FetchRefspecs(ctx, primary, remote, specs...); err != nil {
+	if err := net.FetchRefspecs(ctx, primary, remote, specs...); err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -584,9 +587,9 @@ func remoteRepoGoneFor(stderr, remote string) bool {
 //     repository or reported as unpushed;
 //   - any other failure: the remote state is unknown (not forceable), as
 //     for the reference repository.
-func fetchFork(ctx context.Context, primary, fork string, emit func(Event)) (string, bool, error) {
+func fetchFork(ctx context.Context, net gitx.Net, primary, fork string, emit func(Event)) (string, bool, error) {
 	emit(Event{Phase: PhaseFetch, Message: "fetching " + fork + " (your fork)"})
-	gone, err := fetchForkRemote(ctx, primary, fork)
+	gone, err := fetchForkRemote(ctx, net, primary, fork)
 	switch {
 	case ctx.Err() != nil:
 		return "", false, ctx.Err()

@@ -186,7 +186,7 @@ func TestDeletionRisksFetchedTagOnlyCommitIsInformational(t *testing.T) {
 	testutil.Git(t, w, "tag", "v1.0")
 	testutil.Git(t, w, "push", "-q", "origin", "v1.0")
 	dir := filepath.Join(t.TempDir(), "c")
-	if err := Clone(context.Background(), o.URL, dir, ""); err != nil {
+	if err := (Net{}).Clone(context.Background(), o.URL, dir, ""); err != nil {
 		t.Fatal(err)
 	}
 	r := mustRisks(t, dir)

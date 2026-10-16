@@ -54,12 +54,12 @@ func pidsIn(pidfile string) []int {
 // A process forked while the group SIGKILL of Force is being delivered may
 // miss it: Linux makes fork atomic with respect to process-group signals,
 // other kernels may not (suspected on macOS, where the merge returned only
-// after waitDelay). Simulated here: the first group SIGKILL spares the
+// after the wait delay). Simulated here: the first group SIGKILL spares the
 // background child of the smudge filter, which holds git's stderr open. Force
 // must still kill the whole group promptly.
 func TestForceKillCatchesGroupMemberThatMissedTheFirstSignal(t *testing.T) {
 	dir, pidfile := slowSmudgeClone(t)
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	force := make(chan struct{})

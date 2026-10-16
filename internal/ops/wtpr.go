@@ -22,6 +22,18 @@ const PhasePR = "pr"
 // refs/pull/<n>/head: "pr/<n>" (worktree directory "pr-<n>").
 func PRBranch(n int) string { return "pr/" + strconv.Itoa(n) }
 
+// PRWorktreeOptions configures AddPRWorktree.
+type PRWorktreeOptions struct {
+	// Interactive fetches in interactive git mode (see gitx.Net).
+	Interactive bool
+
+	// fetchHook, when set by a test, runs in fetchPullHead right before the
+	// fetch, with the directory it fetches into.
+	fetchHook func(dir string)
+}
+
+func (o PRWorktreeOptions) net() gitx.Net { return gitx.Net{Interactive: o.Interactive} }
+
 // PRWorktreeResult is the outcome of AddPRWorktree.
 type PRWorktreeResult struct {
 	Repo   string
@@ -62,7 +74,7 @@ type PRWorktreeResult struct {
 // fast-forwarded to the fetched head (a force-pushed pull request is
 // refused). `sheaf update` skips such branches (git sees no upstream branch)
 // and points to this command.
-func AddPRWorktree(ctx context.Context, w *Workspace, h hosting.Hosting, repo string, number int, emit func(Event)) (PRWorktreeResult, error) {
+func AddPRWorktree(ctx context.Context, w *Workspace, h hosting.Hosting, repo string, number int, opts PRWorktreeOptions, emit func(Event)) (PRWorktreeResult, error) {
 	b := w.Bundle()
 	r, err := repoNamed(b, repo)
 	if err != nil {
@@ -92,7 +104,7 @@ func AddPRWorktree(ctx context.Context, w *Workspace, h hosting.Hosting, repo st
 		return PRWorktreeResult{}, prob
 	}
 	report("fetching " + RemotesOf(r).String())
-	if err := fetchRepo(ctx, primary, RemotesOf(r)); err != nil {
+	if err := fetchRepo(ctx, opts.net(), primary, RemotesOf(r), nil); err != nil {
 		if ctx.Err() != nil {
 			return PRWorktreeResult{}, ctx.Err()
 		}
@@ -114,15 +126,15 @@ func AddPRWorktree(ctx context.Context, w *Workspace, h hosting.Hosting, repo st
 			return PRWorktreeResult{}, err
 		}
 		if ok {
-			return sameRepoPR(ctx, w, r, pr.HeadBranch, headRemote, res, emit)
+			return sameRepoPR(ctx, w, r, pr.HeadBranch, headRemote, res, opts, emit)
 		}
 		res.Warnings = append(res.Warnings, fmt.Sprintf("head branch %s of pull request #%d no longer exists on %s; using refs/pull/%d/head", pr.HeadBranch, number, headRemote, number))
 		report("warning: " + res.Warnings[len(res.Warnings)-1])
 	}
-	return pullRefPR(ctx, w, r, primary, res, emit)
+	return pullRefPR(ctx, w, r, primary, res, opts, emit)
 }
 
-func sameRepoPR(ctx context.Context, w *Workspace, r bundle.Repository, head, headRemote string, res PRWorktreeResult, emit func(Event)) (PRWorktreeResult, error) {
+func sameRepoPR(ctx context.Context, w *Workspace, r bundle.Repository, head, headRemote string, res PRWorktreeResult, opts PRWorktreeOptions, emit func(Event)) (PRWorktreeResult, error) {
 	res.Branch = head
 	infos, primary, err := listRepo(ctx, w.Root, r)
 	if err != nil {
@@ -194,7 +206,7 @@ func sameRepoPR(ctx context.Context, w *Workspace, r bundle.Repository, head, he
 		// Released before AddWorktree, which takes the lock itself.
 		unlock()
 	}
-	add, err := AddWorktree(ctx, w, r.Name, head, WorktreeAddOptions{NoFetch: true, remotes: []string{headRemote}}, emit)
+	add, err := AddWorktree(ctx, w, r.Name, head, WorktreeAddOptions{NoFetch: true, Interactive: opts.Interactive, remotes: []string{headRemote}}, emit)
 	if err != nil {
 		return PRWorktreeResult{}, err
 	}
@@ -236,7 +248,7 @@ func revParse(ctx context.Context, dir, ref string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-func pullRefPR(ctx context.Context, w *Workspace, r bundle.Repository, primary string, res PRWorktreeResult, emit func(Event)) (PRWorktreeResult, error) {
+func pullRefPR(ctx context.Context, w *Workspace, r bundle.Repository, primary string, res PRWorktreeResult, opts PRWorktreeOptions, emit func(Event)) (PRWorktreeResult, error) {
 	n := res.Number
 	remote := RemotesOf(r).Reference // pull refs live on the repository
 	branch, pullRef := PRBranch(n), fmt.Sprintf("refs/pull/%d/head", n)
@@ -260,7 +272,7 @@ func pullRefPR(ctx context.Context, w *Workspace, r bundle.Repository, primary s
 				return PRWorktreeResult{}, err
 			}
 			res.Dir, res.Path = in.Dir, in.Path
-			return refreshPR(ctx, r, in.Path, pullRef, res, emit)
+			return refreshPR(ctx, r, in.Path, pullRef, res, opts, emit)
 		}
 	}
 	note := ""
@@ -268,13 +280,13 @@ func pullRefPR(ctx context.Context, w *Workspace, r bundle.Repository, primary s
 		emit(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindProgress, Message: "fetching " + pullRef + " into " + branch})
 		// The head is also recorded (see gitx.PullHeadRef): remove counts
 		// its commits as published.
-		if err := gitx.FetchRefspecs(ctx, primary, remote, pullRef+":refs/heads/"+branch, "+"+pullRef+":"+gitx.PullHeadRef(n)); err != nil {
+		if err := opts.net().FetchRefspecs(ctx, primary, remote, pullRef+":refs/heads/"+branch, "+"+pullRef+":"+gitx.PullHeadRef(n)); err != nil {
 			if ctx.Err() != nil {
 				return PRWorktreeResult{}, ctx.Err()
 			}
 			return PRWorktreeResult{}, fmt.Errorf("fetching %s of %s into %s failed: %w", pullRef, remote, branch, err)
 		}
-	} else if note, err = updatePRBranch(ctx, w.Root, r, primary, branch, pullRef, n, emit); err != nil {
+	} else if note, err = updatePRBranch(ctx, w.Root, r, primary, branch, pullRef, n, opts, emit); err != nil {
 		return PRWorktreeResult{}, err
 	}
 	oid, err := revParse(ctx, primary, "refs/heads/"+branch)
@@ -289,7 +301,7 @@ func pullRefPR(ctx context.Context, w *Workspace, r bundle.Repository, primary s
 			}
 		}
 	}
-	add, err := AddWorktree(ctx, w, r.Name, branch, WorktreeAddOptions{NoFetch: true}, emit)
+	add, err := AddWorktree(ctx, w, r.Name, branch, WorktreeAddOptions{NoFetch: true, Interactive: opts.Interactive}, emit)
 	if err != nil {
 		if !exists {
 			// Leave nothing behind: the branch was created above.
@@ -308,7 +320,7 @@ func pullRefPR(ctx context.Context, w *Workspace, r bundle.Repository, primary s
 // created: fast-forwarded (compare-and-swap) when behind, left alone when
 // ahead (the returned note says so), refused when diverged, in use, or
 // changed by someone else during the fetch.
-func updatePRBranch(ctx context.Context, root string, r bundle.Repository, primary, branch, pullRef string, n int, emit func(Event)) (string, error) {
+func updatePRBranch(ctx context.Context, root string, r bundle.Repository, primary, branch, pullRef string, n int, opts PRWorktreeOptions, emit func(Event)) (string, error) {
 	// The fetch runs before the bundle lock is taken: it may prompt for
 	// credentials, which must not block the other sheaf processes. pr/<n>
 	// is read before it, so that a change made meanwhile (e.g. by a
@@ -318,7 +330,7 @@ func updatePRBranch(ctx context.Context, root string, r bundle.Repository, prima
 		return "", err
 	}
 	emit(Event{Repo: r.Name, Phase: PhaseFetch, Kind: KindProgress, Message: "fetching " + pullRef})
-	head, err := fetchPullHead(ctx, primary, RemotesOf(r).Reference, pullRef, n)
+	head, err := fetchPullHead(ctx, opts, primary, RemotesOf(r).Reference, pullRef, n)
 	if err != nil {
 		return "", err
 	}
@@ -381,7 +393,7 @@ func updatePRBranch(ctx context.Context, root string, r bundle.Repository, prima
 // returns the commit. FETCH_HEAD is not used: another fetch in the same work
 // tree could overwrite it in between. The head is also recorded as
 // gitx.PullHeadRef(n) (not read back: a concurrent fetch may move it).
-func fetchPullHead(ctx context.Context, dir, remote, pullRef string, n int) (string, error) {
+func fetchPullHead(ctx context.Context, opts PRWorktreeOptions, dir, remote, pullRef string, n int) (string, error) {
 	var rnd [6]byte
 	if _, err := rand.Read(rnd[:]); err != nil {
 		return "", err
@@ -393,10 +405,10 @@ func fetchPullHead(ctx context.Context, dir, remote, pullRef string, n int) (str
 		defer cancel()
 		_, _ = gitx.Run(dctx, dir, "update-ref", "-d", tmp)
 	}()
-	if prFetchHook != nil {
-		prFetchHook(dir)
+	if opts.fetchHook != nil {
+		opts.fetchHook(dir)
 	}
-	if err := gitx.FetchRefspecs(ctx, dir, remote, "+"+pullRef+":"+tmp, "+"+pullRef+":"+gitx.PullHeadRef(n)); err != nil {
+	if err := opts.net().FetchRefspecs(ctx, dir, remote, "+"+pullRef+":"+tmp, "+"+pullRef+":"+gitx.PullHeadRef(n)); err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
@@ -404,10 +416,6 @@ func fetchPullHead(ctx context.Context, dir, remote, pullRef string, n int) (str
 	}
 	return revParse(ctx, dir, tmp)
 }
-
-// prFetchHook, when set by a test, runs in fetchPullHead right before the
-// fetch.
-var prFetchHook func(dir string)
 
 func isAre(n int) string {
 	if n == 1 {
@@ -418,7 +426,7 @@ func isAre(n int) string {
 
 // refreshPR fast-forwards the worktree at path, on the branch of a pull
 // request, to the current refs/pull/<n>/head of origin.
-func refreshPR(ctx context.Context, r bundle.Repository, path, pullRef string, res PRWorktreeResult, emit func(Event)) (PRWorktreeResult, error) {
+func refreshPR(ctx context.Context, r bundle.Repository, path, pullRef string, res PRWorktreeResult, opts PRWorktreeOptions, emit func(Event)) (PRWorktreeResult, error) {
 	st, err := gitx.Status(ctx, path)
 	if err != nil {
 		return PRWorktreeResult{}, err
@@ -427,7 +435,7 @@ func refreshPR(ctx context.Context, r bundle.Repository, path, pullRef string, r
 		return PRWorktreeResult{}, fmt.Errorf("%s has uncommitted changes: commit or stash them, then run `sheaf wt pr %s %d` again", path, r.Name, res.Number)
 	}
 	emit(Event{Repo: r.Name, Worktree: res.Dir, Phase: PhaseFetch, Kind: KindProgress, Message: "fetching " + pullRef})
-	head, err := fetchPullHead(ctx, path, RemotesOf(r).Reference, pullRef, res.Number)
+	head, err := fetchPullHead(ctx, opts, path, RemotesOf(r).Reference, pullRef, res.Number)
 	if err != nil {
 		return PRWorktreeResult{}, err
 	}

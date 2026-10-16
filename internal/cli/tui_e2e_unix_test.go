@@ -20,7 +20,8 @@ import (
 // says so), the second one is the emergency stop (force channel, kill,
 // exit 130), as with signals in CLI mode.
 func TestTUIUpdateCtrlCTwiceExits130(t *testing.T) {
-	killed, exited := stubEmergency(t)
+	ctl := newInterruptCtl()
+	killed, exited := stubEmergency(ctl)
 	e := newBundleEnv(t)
 	o, primary := e.addRepo(t, "alpha")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
@@ -56,7 +57,7 @@ func TestTUIUpdateCtrlCTwiceExits130(t *testing.T) {
 	var code int
 	go func() {
 		defer close(done)
-		errs, code = e.runTUI(t, in, &out, "update", "-j", "1")
+		errs, code = e.runTUIWith(t, ctl, in, &out, "update", "-j", "1")
 	}()
 	select {
 	case c := <-exited:
@@ -111,7 +112,8 @@ func TestTUIProgressShowsSignalInterruption(t *testing.T) {
 	net := make(chan os.Signal, 1)
 	signal.Notify(net, syscall.SIGTERM)
 	defer signal.Stop(net)
-	_, exited := stubEmergency(t)
+	ctl := newInterruptCtl()
+	_, exited := stubEmergency(ctl)
 	e := newBundleEnv(t)
 	o, primary := e.addRepo(t, "alpha")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
@@ -138,9 +140,9 @@ func TestTUIProgressShowsSignalInterruption(t *testing.T) {
 		{wait: waitStarted},
 		{keys: "\x03", wait: waitOutput(t, &out, "Interrupted: no new work is started")},
 	})
-	errs, code := e.runTUI(t, in, &out, "update", "-j", "1")
+	errs, code := e.runTUIWith(t, ctl, in, &out, "update", "-j", "1")
 	// The emergency stop runs in its own goroutine: wait for its (stubbed)
-	// exit before the seams are restored.
+	// exit.
 	select {
 	case <-exited:
 	case <-time.After(20 * time.Second):

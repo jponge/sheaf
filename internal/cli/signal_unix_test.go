@@ -42,7 +42,7 @@ func TestExecuteCancelsCommandContextOnSignals(t *testing.T) {
 					return errors.New("command context not cancelled by " + sig.String())
 				}
 			}})
-			if code := execute(root, []string{"probe"}); code != 0 {
+			if code := execute(root, nil, []string{"probe"}); code != 0 {
 				t.Fatalf("exit code %d: %s", code, errb.String())
 			}
 		})
@@ -64,7 +64,7 @@ func TestInterruptedCommandExits130(t *testing.T) {
 			return errors.New("not cancelled")
 		}
 	}})
-	if code := execute(root, []string{"probe"}); code != 130 || !strings.Contains(errb.String(), "interrupted") {
+	if code := execute(root, nil, []string{"probe"}); code != 130 || !strings.Contains(errb.String(), "interrupted") {
 		t.Fatalf("exit %d, stderr %q; want 130 and \"interrupted\"", code, errb.String())
 	}
 }
@@ -76,12 +76,11 @@ func TestSecondSignalKillsGitAndExits(t *testing.T) {
 	defer signal.Stop(net)
 	killed := make(chan struct{}, 1)
 	exited := make(chan int, 1)
-	oldKill, oldExit := killAll, exit
-	t.Cleanup(func() { killAll, exit = oldKill, oldExit })
-	killAll = func() int { killed <- struct{}{}; return 0 }
-	exit = func(code int) { exited <- code }
+	ctl := newInterruptCtl()
+	ctl.killAll = func() int { killed <- struct{}{}; return 0 }
+	ctl.exit = func(code int) { exited <- code }
 
-	root := NewRootCmd(Streams{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}})
+	root := NewRootCmdWithDeps(Streams{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}, Deps{ctl: ctl})
 	root.AddCommand(&cobra.Command{Use: "probe", RunE: func(c *cobra.Command, _ []string) error {
 		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
 		<-c.Context().Done()
@@ -105,7 +104,7 @@ func TestSecondSignalKillsGitAndExits(t *testing.T) {
 	root.SetErr(&errb)
 	// The probe checks exit(130) and killAll itself and returns nil (the
 	// stubbed exit returns, unlike os.Exit).
-	if code := execute(root, []string{"probe"}); code != 0 {
+	if code := execute(root, ctl, []string{"probe"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 	for _, want := range []string{"sheaf adopt", ".sheaf-adopt-"} {
@@ -121,8 +120,9 @@ func TestSignalThenKeyIsEmergencyStop(t *testing.T) {
 	net := make(chan os.Signal, 1)
 	signal.Notify(net, syscall.SIGTERM)
 	defer signal.Stop(net)
-	killed, exited := stubEmergency(t)
-	root := NewRootCmd(Streams{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}})
+	d := Deps{ctl: newInterruptCtl()}
+	killed, exited := stubEmergency(d.ctl)
+	root := NewRootCmdWithDeps(Streams{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}, d)
 	root.AddCommand(&cobra.Command{Use: "probe", RunE: func(c *cobra.Command, _ []string) error {
 		_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
 		select {
@@ -130,8 +130,8 @@ func TestSignalThenKeyIsEmergencyStop(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			return errors.New("signal did not cancel")
 		}
-		ctl := interruptFrom(c.Context())
-		if ctl == nil {
+		ctl := newTUISession(c, d).ctl
+		if ctl != d.ctl {
 			return errors.New("no interrupt controller")
 		}
 		ctl.interrupt()
@@ -150,7 +150,7 @@ func TestSignalThenKeyIsEmergencyStop(t *testing.T) {
 	}})
 	var errb bytes.Buffer
 	root.SetErr(&errb)
-	if code := execute(root, []string{"probe"}); code != 0 {
+	if code := execute(root, d.ctl, []string{"probe"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 }

@@ -71,7 +71,7 @@ func runHome(c *cobra.Command, d Deps) error {
 	if o.Jobs < 1 {
 		return fmt.Errorf("invalid --jobs %d: must be at least 1", o.Jobs)
 	}
-	h := &home{c: c, d: d, s: newTUISession(c), root: root, jobs: o.Jobs}
+	h := &home{c: c, d: d, s: newTUISession(c, d), root: root, jobs: o.Jobs}
 	return h.loop()
 }
 
@@ -262,7 +262,7 @@ func (h *home) act(name string, targets []string) string {
 		w, err := ops.OpenWorkspace(h.root)
 		if err == nil {
 			opts := ops.UpdateOptions{Filter: ops.CheckoutFilter{Repos: repos, Paths: paths}, Jobs: h.jobs}
-			err = tuiUpdate(h.c, w, opts, false)
+			err = tuiUpdate(h.c, h.d, w, opts, false)
 		}
 		return h.outcome(name, []error{err})
 	case "fetch":
@@ -309,7 +309,9 @@ func (h *home) add(repo string) string {
 // the home screen) as a command line would, TUI included, in this process
 // and with its context, so that interruptions are handled as usual.
 func (h *home) command(args ...string) error {
-	root := NewRootCmdWithDeps(Streams{In: h.c.InOrStdin(), Out: h.c.OutOrStdout(), Err: h.c.ErrOrStderr()}, h.d)
+	d := h.d
+	d.ctl = h.s.ctl // the home screen's controller, with its context
+	root := NewRootCmdWithDeps(Streams{In: h.c.InOrStdin(), Out: h.c.OutOrStdout(), Err: h.c.ErrOrStderr()}, d)
 	root.SetArgs(append([]string{"--bundle=" + h.root, "--jobs=" + strconv.Itoa(h.jobs)}, args...))
 	return root.ExecuteContext(h.s.ctx)
 }

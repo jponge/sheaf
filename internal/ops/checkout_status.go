@@ -21,6 +21,12 @@ type StatusOptions struct {
 	// repository); otherwise status never accesses the network.
 	Fetch bool
 	Jobs  int
+	// Interactive fetches in interactive git mode (see gitx.Net).
+	Interactive bool
+
+	// fetchHook, when set by a test, runs while a repository fetch holds
+	// its per-repository lock (see fetchRepo).
+	fetchHook func(commonDir string)
 }
 
 // CheckoutStatus is the status of one checkout.
@@ -65,7 +71,7 @@ func serialize(rep Reporter) func(Event) {
 
 // fetchSets fetches each repository of sets once (up to jobs in parallel),
 // reporting fetch events, and returns the problems of failed fetches.
-func fetchSets(ctx context.Context, sets []*repoCheckouts, jobs int, report func(Event)) []Problem {
+func fetchSets(ctx context.Context, net gitx.Net, sets []*repoCheckouts, jobs int, report func(Event), hook func(commonDir string)) []Problem {
 	probs := make([]*Problem, len(sets))
 	forEach(jobs, len(sets), func(i int) {
 		s := sets[i]
@@ -74,7 +80,7 @@ func fetchSets(ctx context.Context, sets []*repoCheckouts, jobs int, report func
 			return
 		}
 		report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindStart})
-		if err := fetchRepo(ctx, s.primary, s.remotes); err != nil {
+		if err := fetchRepo(ctx, net, s.primary, s.remotes, hook); err != nil {
 			probs[i] = &Problem{Repo: s.name, Path: s.primary, Err: fmt.Errorf("fetch failed: %w", err)}
 			report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindFailed, Err: err})
 			return
@@ -108,7 +114,7 @@ func CollectStatus(ctx context.Context, w *Workspace, opts StatusOptions, rep Re
 		return StatusReport{}, err
 	}
 	if opts.Fetch {
-		probs = append(probs, fetchSets(ctx, sets, opts.Jobs, serialize(rep))...)
+		probs = append(probs, fetchSets(ctx, gitx.Net{Interactive: opts.Interactive}, sets, opts.Jobs, serialize(rep), opts.fetchHook)...)
 	}
 	var cs []CheckoutStatus
 	for _, s := range sets {

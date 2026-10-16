@@ -19,7 +19,7 @@ func TestWorktreeAddTagDetachedAndListedWithItsTag(t *testing.T) {
 	testutil.TagOrigin(t, o, "v1", "main", true)       // annotated
 	testutil.TagOrigin(t, o, "light", "feat", false)   // lightweight
 	testutil.TagOrigin(t, o, "v1-alias", "main", true) // same commit as v1
-	if _, err := FetchTagsFrom(ctx, primary, "origin"); err != nil {
+	if _, err := (Net{}).FetchTagsFrom(ctx, primary, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	mainOID := testutil.Git(t, primary, "rev-parse", "origin/main")
@@ -122,7 +122,7 @@ func TestFetchTagsKeepsLocalTags(t *testing.T) {
 	testutil.Git(t, primary, "config", "fetch.prune", "true")
 	testutil.Git(t, primary, "config", "fetch.pruneTags", "true")
 	testutil.TagOrigin(t, o, "remote-new", "main", true)
-	if _, err := FetchTagsFrom(context.Background(), primary, "origin"); err != nil {
+	if _, err := (Net{}).FetchTagsFrom(context.Background(), primary, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	tags := testutil.Git(t, primary, "tag", "--list")
@@ -137,7 +137,7 @@ func TestFetchTagsFetchesTagsOutsideBranches(t *testing.T) {
 	t.Parallel()
 	o, _, primary := layout(t, testutil.OriginOpts{})
 	oid := testutil.TagOriginDangling(t, o, "hotfix-1", "main")
-	if _, err := FetchTagsFrom(context.Background(), primary, "origin"); err != nil {
+	if _, err := (Net{}).FetchTagsFrom(context.Background(), primary, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := TagCommit(context.Background(), primary, "hotfix-1"); err != nil || got != oid {
@@ -154,7 +154,7 @@ func TestFetchTagsReportsKeptLocalTags(t *testing.T) {
 	o, _, primary := layout(t, testutil.OriginOpts{Branches: []string{"feat"}})
 	testutil.TagOrigin(t, o, "v1", "main", true)
 	testutil.TagOrigin(t, o, "release/2.0", "main", false)
-	if _, err := FetchTagsFrom(context.Background(), primary, "origin"); err != nil {
+	if _, err := (Net{}).FetchTagsFrom(context.Background(), primary, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	localV1 := testutil.Git(t, primary, "rev-parse", "v1")
@@ -166,7 +166,7 @@ func TestFetchTagsReportsKeptLocalTags(t *testing.T) {
 	testutil.TagOrigin(t, o, "v2", "main", true)
 	testutil.Git(t, primary, "config", "fetch.output", "compact")
 
-	kept, err := FetchTagsFrom(context.Background(), primary, "origin")
+	kept, err := Net{}.FetchTagsFrom(context.Background(), primary, "origin")
 	if err != nil {
 		t.Fatalf("FetchTags: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestFetchTagsFailure(t *testing.T) {
 	t.Parallel()
 	_, _, primary := layout(t, testutil.OriginOpts{})
 	testutil.Git(t, primary, "remote", "set-url", "origin", "file://"+filepath.Join(t.TempDir(), "missing.git"))
-	if kept, err := FetchTagsFrom(context.Background(), primary, "origin"); err == nil || len(kept) != 0 {
+	if kept, err := (Net{}).FetchTagsFrom(context.Background(), primary, "origin"); err == nil || len(kept) != 0 {
 		t.Fatalf("FetchTags from a missing origin = %v, %v; want an error", kept, err)
 	}
 }
@@ -217,7 +217,7 @@ func TestFetchTagsClobberAndOtherFailure(t *testing.T) {
 	t.Parallel()
 	o, _, primary := layout(t, testutil.OriginOpts{})
 	testutil.TagOrigin(t, o, "v1", "main", true)
-	if _, err := FetchTagsFrom(context.Background(), primary, "origin"); err != nil {
+	if _, err := (Net{}).FetchTagsFrom(context.Background(), primary, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	testutil.Git(t, o.Path, "tag", "-f", "v1", "main~0^{tree}")
@@ -232,7 +232,7 @@ func TestFetchTagsClobberAndOtherFailure(t *testing.T) {
 	if err := os.WriteFile(lock, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if kept, err := FetchTagsFrom(context.Background(), primary, "origin"); err == nil {
+	if kept, err := (Net{}).FetchTagsFrom(context.Background(), primary, "origin"); err == nil {
 		t.Fatalf("FetchTags with a locked ref = %v, nil; want an error", kept)
 	}
 	// The parser alone: an error line besides the refusals.

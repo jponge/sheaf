@@ -65,12 +65,11 @@ func TestPRHeadNotFromSharedFetchHead(t *testing.T) {
 // holding .sheaf.lock (a credential prompt must not block other sheaf
 // processes), and the head is still recorded as refs/sheaf/pull/7.
 func TestPRFetchOutsideBundleLock(t *testing.T) {
+	t.Parallel()
 	f, primary, o, head := forkPR7(t, false)
 	next := pushPullRef(t, o, 7, head, "fork2.txt")
 	fetches, held := 0, 0
-	old := prFetchHook
-	t.Cleanup(func() { prFetchHook = old })
-	prFetchHook = func(string) {
+	hook := func(string) {
 		fetches++
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // a single, non-blocking attempt
@@ -81,7 +80,7 @@ func TestPRFetchOutsideBundleLock(t *testing.T) {
 		}
 		unlock()
 	}
-	res, err := f.addPRWorktree(t, "a", 7)
+	res, err := f.addPRWorktreeWith(t, "a", 7, PRWorktreeOptions{fetchHook: hook})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,16 +100,15 @@ func TestPRFetchOutsideBundleLock(t *testing.T) {
 // no worktree is created, and the message says what happened instead of
 // comparing pr/7 with a fetch result that may be stale.
 func TestPRBranchChangedDuringFetch(t *testing.T) {
+	t.Parallel()
 	f, primary, o, head := forkPR7(t, false)
 	pushPullRef(t, o, 7, head, "fork2.txt")
 	tree := testutil.Git(t, primary, "rev-parse", head+"^{tree}")
 	moved := testutil.Git(t, primary, "commit-tree", tree, "-p", head, "-m", "concurrent")
-	old := prFetchHook
-	t.Cleanup(func() { prFetchHook = old })
-	prFetchHook = func(dir string) {
+	hook := func(dir string) {
 		testutil.Git(t, dir, "update-ref", "refs/heads/pr/7", moved)
 	}
-	_, err := f.addPRWorktree(t, "a", 7)
+	_, err := f.addPRWorktreeWith(t, "a", 7, PRWorktreeOptions{fetchHook: hook})
 	if err == nil || !strings.Contains(err.Error(), "pr/7 changed while") || !strings.Contains(err.Error(), "run this command again") {
 		t.Fatalf("err = %v", err)
 	}

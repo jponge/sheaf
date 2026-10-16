@@ -49,13 +49,6 @@ func writeFile(t *testing.T, p, content string) {
 	}
 }
 
-func setSeam[T any](t *testing.T, v *T, val T) {
-	t.Helper()
-	old := *v
-	*v = val
-	t.Cleanup(func() { *v = old })
-}
-
 func TestGitInteractiveDecision(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -146,7 +139,7 @@ func TestStatusTable(t *testing.T) {
 func TestStatusColor(t *testing.T) {
 	e := newBundleEnv(t)
 	e.addRepo(t, "alpha")
-	setSeam(t, &stdoutIsTerminal, func(io.Writer) bool { return true })
+	e.stdoutTTY = func(io.Writer) bool { return true }
 	t.Setenv("NO_COLOR", "")
 	if out := e.mustRun(t, "status"); !ansiEscape.MatchString(out) {
 		t.Errorf("no color on a terminal:\n%q", out)

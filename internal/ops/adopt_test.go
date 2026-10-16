@@ -198,11 +198,9 @@ func TestAdoptRestoresOnFailureAfterMove(t *testing.T) {
 	testutil.Git(t, dir, "worktree", "add", "-q", wt, "feat")
 
 	boom := errors.New("injected")
-	old := adoptAfterMove
-	adoptAfterMove = func() error { return boom }
-	t.Cleanup(func() { adoptAfterMove = old })
+	opts := AdoptOptions{afterMove: func() error { return boom }}
 
-	if _, err := Adopt(context.Background(), f.w, dir, AdoptOptions{}, noEmit); !errors.Is(err, boom) {
+	if _, err := Adopt(context.Background(), f.w, dir, opts, noEmit); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want injected", err)
 	}
 	if got := readFile(t, filepath.Join(dir, "untracked.txt")); got != "keep me\n" {

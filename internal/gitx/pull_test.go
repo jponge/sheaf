@@ -31,7 +31,7 @@ func TestFetchUpdatesAndPrunes(t *testing.T) {
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	testutil.Git(t, o.Path, "branch", "-D", "doomed")
 
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := testutil.Git(t, dir, "rev-parse", "origin/main"), testutil.Git(t, o.Path, "rev-parse", "main"); got != want {
@@ -72,7 +72,7 @@ func TestFastForwardUsesLastFetchOnly(t *testing.T) {
 	if r.Old != old || r.New != old {
 		t.Fatalf("old/new = %s/%s, want %s", r.Old, r.New, old)
 	}
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	r = FastForward(context.Background(), dir)
@@ -129,7 +129,7 @@ func TestFastForwardIgnoresNoFFConfig(t *testing.T) {
 	}
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	noFF()
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	r := FastForward(context.Background(), dir)
@@ -146,7 +146,7 @@ func TestFastForwardIgnoresNoFFConfig(t *testing.T) {
 	testutil.CommitFile(t, dir, "l.txt", "l\n", "local")
 	testutil.AdvanceOrigin(t, o, "main", "r2.txt", "r\n", "remote 2")
 	noFF()
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	before := head(t, dir)
@@ -162,7 +162,7 @@ func TestFastForwardRefusesToOverwriteUntrackedFile(t *testing.T) {
 	t.Parallel()
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "from remote\n", "remote")
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	before := head(t, dir)
@@ -184,7 +184,7 @@ func TestFetchFetchesOriginWhenUpstreamIsLocal(t *testing.T) {
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.Git(t, dir, "checkout", "-q", "-b", "topic", "--track", "main")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := testutil.Git(t, dir, "rev-parse", "origin/main"), testutil.Git(t, o.Path, "rev-parse", "main"); got != want {
@@ -198,14 +198,12 @@ func TestFetchFetchesOriginWhenUpstreamIsLocal(t *testing.T) {
 func TestFastForwardIgnoresCancellationAfterMerge(t *testing.T) {
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	afterMergeHook = cancel
-	t.Cleanup(func() { afterMergeHook = nil })
-	r := FastForward(ctx, dir)
+	r := FastForwardWithOptions(ctx, dir, FastForwardOptions{afterMerge: cancel})
 	wantOutcome(t, r, PullFastForwarded)
 	if h := head(t, dir); r.New != h {
 		t.Fatalf("New = %s, HEAD = %s", r.New, h)

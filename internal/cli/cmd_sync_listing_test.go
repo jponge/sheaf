@@ -20,8 +20,7 @@ func (e *env) runWith(t *testing.T, h hosting.Hosting, args ...string) (stdout, 
 	d := e.deps()
 	d.Hosting = func() hosting.Hosting { return h }
 	var out, errb strings.Builder
-	cmd := NewRootCmdWithDeps(Streams{In: strings.NewReader(""), Out: &out, Err: &errb}, d)
-	code = execute(cmd, args)
+	code = executeDeps(Streams{In: strings.NewReader(""), Out: &out, Err: &errb}, d, args)
 	return out.String(), errb.String(), code
 }
 

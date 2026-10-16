@@ -136,9 +136,10 @@ func newPruneCmd(d Deps) *cobra.Command {
 			}
 			opts.Jobs = OptionsFrom(c).Jobs
 			if !dryRun && !asJSON && d.tuiMode(c) {
-				return tuiPrune(c, w, opts, yes)
+				return tuiPrune(c, d, w, opts, yes)
 			}
-			ctx := checkoutContext(c)
+			ctx := c.Context()
+			opts.Interactive = d.interactiveGit(c)
 			rep := plainRenderer{c.ErrOrStderr()}
 			plan, err := ops.PlanPrune(ctx, w, opts, rep)
 			if err != nil {

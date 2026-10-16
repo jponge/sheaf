@@ -195,8 +195,7 @@ func TestSyncTruncatedAndFailedListings(t *testing.T) {
 	d := e.deps()
 	d.Hosting = func() hosting.Hosting { return truncatedHosting{e.fake} }
 	var out, errb strings.Builder
-	cmd := NewRootCmdWithDeps(Streams{In: strings.NewReader(""), Out: &out, Err: &errb}, d)
-	if code := execute(cmd, []string{"sync", "--remove-gone", "--yes"}); code != 0 {
+	if code := executeDeps(Streams{In: strings.NewReader(""), Out: &out, Err: &errb}, d, []string{"sync", "--remove-gone", "--yes"}); code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out.String(), errb.String())
 	}
 	if strings.Contains(out.String(), "gone     ") || !strings.Contains(out.String(), "no gone repository to remove") || !strings.Contains(out.String(), "new      o/c") || !strings.Contains(errb.String(), "truncated") {

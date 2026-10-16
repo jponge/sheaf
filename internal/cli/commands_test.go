@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,6 +19,9 @@ import (
 type env struct {
 	fake *hostingtest.Fake
 	cwd  string
+	// stdinTTY and stdoutTTY become Deps.stdinTTY and Deps.stdoutTTY.
+	stdinTTY  func(io.Reader) bool
+	stdoutTTY func(io.Writer) bool
 }
 
 func newEnv(t *testing.T) *env {
@@ -28,17 +32,27 @@ func newEnv(t *testing.T) *env {
 
 func (e *env) deps() Deps {
 	return Deps{
-		Hosting: func() hosting.Hosting { return e.fake },
-		Getwd:   func() (string, error) { return e.cwd, nil },
+		Hosting:   func() hosting.Hosting { return e.fake },
+		Getwd:     func() (string, error) { return e.cwd, nil },
+		stdinTTY:  e.stdinTTY,
+		stdoutTTY: e.stdoutTTY,
 	}
+}
+
+// executeDeps runs the root command built with s and d like Execute does
+// (execute, with a controller in d) and returns the exit code.
+func executeDeps(s Streams, d Deps, args []string) int {
+	if d.ctl == nil {
+		d.ctl = newInterruptCtl()
+	}
+	return execute(NewRootCmdWithDeps(s, d), d.ctl, args)
 }
 
 // run executes the CLI like Execute does and returns the exit code.
 func (e *env) run(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	var out, errb bytes.Buffer
-	cmd := NewRootCmdWithDeps(Streams{In: strings.NewReader(""), Out: &out, Err: &errb}, e.deps())
-	code = execute(cmd, args)
+	code = executeDeps(Streams{In: strings.NewReader(""), Out: &out, Err: &errb}, e.deps(), args)
 	return out.String(), errb.String(), code
 }
 

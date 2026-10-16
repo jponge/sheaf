@@ -172,14 +172,13 @@ func TestFetchSerializedPerCommonDir(t *testing.T) {
 // Fetches from two work trees of one repository (its primary checkout and a
 // linked worktree) are serialized: they share the remote-tracking refs.
 func TestFetchSerializedPerCommonDirWorktrees(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	_, alpha := addRepoWith(t, f, "alpha", "feat")
 	feat := addWorktree(t, alpha, "feat", "feat", true)
 	var mu sync.Mutex
 	active, maxActive := 0, 0
-	old := fetchHook
-	t.Cleanup(func() { fetchHook = old })
-	fetchHook = func(string) {
+	hook := func(string) {
 		mu.Lock()
 		active++
 		maxActive = max(maxActive, active)
@@ -191,7 +190,7 @@ func TestFetchSerializedPerCommonDirWorktrees(t *testing.T) {
 	}
 	errs := make(chan error, 2)
 	for _, dir := range []string{alpha, feat} {
-		go func() { errs <- fetchRepo(context.Background(), dir, gitx.OriginRemotes) }()
+		go func() { errs <- fetchRepo(context.Background(), gitx.Net{}, dir, gitx.OriginRemotes, hook) }()
 	}
 	for range 2 {
 		if err := <-errs; err != nil {

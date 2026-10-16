@@ -52,7 +52,7 @@ func TestDeletionRisksBeforeNestedHookSeesFreshRemoteState(t *testing.T) {
 	var seen []string
 	hook := func(ctx context.Context, d string) error {
 		seen = append(seen, d)
-		return FetchAll(ctx, d)
+		return Net{}.FetchAll(ctx, d)
 	}
 	r := risksWith(t, dir, DeletionRisksOptions{BeforeNested: hook})
 	wantBlockingNested(t, r, filepath.Join("vendor", "lib"))
@@ -87,7 +87,7 @@ func TestFetchAllPrunesEveryRemote(t *testing.T) {
 	o2 := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"other"}})
 	testutil.Git(t, dir, "remote", "add", "second", o2.URL)
 	testutil.Git(t, o.Path, "branch", "-q", "-D", "gone")
-	if err := FetchAll(context.Background(), dir); err != nil {
+	if err := (Net{}).FetchAll(context.Background(), dir); err != nil {
 		t.Fatal(err)
 	}
 	refs := testutil.Git(t, dir, "for-each-ref", "--format=%(refname)", "refs/remotes")

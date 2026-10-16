@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jponge/sheaf/internal/bundle"
+	"github.com/jponge/sheaf/internal/gitx"
 
 	"github.com/jponge/sheaf/internal/hosting"
 )
@@ -447,7 +448,7 @@ func SyncAddNewWithOptions(ctx context.Context, w *Workspace, props []Proposal, 
 		forks = detectForks(ctx, opts.Hosting, clonable(w.Bundle(), specs), rep)
 	}
 	for _, c := range clones {
-		tasks = append(tasks, planClones(w, []lookup{c.spec}, "", bundle.OriginOrgPrefix+c.owner, "", forks)...)
+		tasks = append(tasks, planClones(w, gitx.Net{Interactive: opts.Interactive}, []lookup{c.spec}, "", bundle.OriginOrgPrefix+c.owner, "", forks)...)
 	}
 	return Execute(ctx, jobs, tasks, rep)
 }
@@ -518,4 +519,6 @@ type CloneOptions struct {
 	Hosting hosting.Hosting
 	// NoFork disables fork detection (see AddRequest.NoFork).
 	NoFork bool
+	// Interactive clones in interactive git mode (see gitx.Net).
+	Interactive bool
 }

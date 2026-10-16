@@ -13,12 +13,12 @@ import (
 // branch; otherwise branch is checked out. Missing parent directories of dest
 // are created; dest itself must not exist or must be empty (git's rule). A
 // relative dest is resolved against the process working directory.
-func Clone(ctx context.Context, url, dest, branch string) error {
-	return clone(ctx, url, dest, branch, "")
+func (n Net) Clone(ctx context.Context, url, dest, branch string) error {
+	return n.clone(ctx, url, dest, branch, "")
 }
 
 // clone is Clone with the name of the remote (empty: git's default, origin).
-func clone(ctx context.Context, url, dest, branch, remote string) error {
+func (n Net) clone(ctx context.Context, url, dest, branch, remote string) error {
 	abs, err := filepath.Abs(dest)
 	if err != nil {
 		return fmt.Errorf("gitx: clone destination %q: %w", dest, err)
@@ -35,7 +35,7 @@ func clone(ctx context.Context, url, dest, branch, remote string) error {
 		args = append(args, "--origin", remote)
 	}
 	args = append(args, "--", url, abs)
-	_, err = run(ctx, netOpts(ctx), parent, args...)
+	_, err = run(ctx, n.opts(), parent, args...)
 	return err
 }
 
@@ -46,11 +46,11 @@ var ErrDetachedHead = errors.New("gitx: HEAD is detached")
 // refs/remotes/<remote>/HEAD nor the remote itself names a default branch.
 var ErrNoDefaultBranch = errors.New("gitx: cannot determine the default branch of origin")
 
-func defaultBranchOf(ctx context.Context, repoDir, remote string) (string, error) {
+func (n Net) defaultBranchOf(ctx context.Context, repoDir, remote string) (string, error) {
 	if b, err := localDefaultBranchOf(ctx, repoDir, remote); err == nil {
 		return b, nil
 	}
-	out, err := run(ctx, netOpts(ctx), repoDir, "ls-remote", "--symref", "--", remote, "HEAD")
+	out, err := run(ctx, n.opts(), repoDir, "ls-remote", "--symref", "--", remote, "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrNoDefaultBranch, err)
 	}

@@ -36,6 +36,16 @@ type Deps struct {
 	// default: os.Getenv. Execute answers SHEAF_CD_FILE with the value read
 	// at startup, as it removes the variable from the environment.
 	Getenv func(string) string
+
+	// ctl is the interrupt controller of the execution (see execute),
+	// shared by the TUI sessions of the commands and the force channel of
+	// update; nil when the commands do not run through execute (a TUI
+	// session then makes its own, see newTUISession).
+	ctl *interruptCtl
+	// stdinTTY and stdoutTTY replace isTerminal for standard input
+	// (interactive git mode) and standard output (colors); tests only.
+	stdinTTY  func(io.Reader) bool
+	stdoutTTY func(io.Writer) bool
 }
 
 func (d Deps) getenv(k string) string {
@@ -59,19 +69,13 @@ func (d Deps) getwd() (string, error) {
 	return os.Getwd()
 }
 
-// Seams for the second-signal emergency stop.
-var (
-	killGit      = gitx.KillAll
-	killCommands = ops.KillCommands
-	killAll      = defaultKillAll
-	exit         = os.Exit
-)
-
-// defaultKillAll kills the process groups of the running git invocations
-// and of the commands of `sheaf run`.
-func defaultKillAll() int { return killGit() + killCommands() }
-
-type ctlKey struct{}
+// killAllOf returns the kill function of the emergency stop: it kills the
+// process groups of the running git invocations (killGit, gitx.KillAll) and
+// of the commands of `sheaf run` (killCommands, ops.KillCommands), and
+// returns how many were signalled.
+func killAllOf(killGit, killCommands func() int) func() int {
+	return func() int { return killGit() + killCommands() }
+}
 
 // interruptCtl implements the two-stage interruption shared by the signal
 // handler of execute and the ctrl+c key of the TUI (bubbletea's raw mode
@@ -81,6 +85,9 @@ type interruptCtl struct {
 	force  chan struct{}
 	errw   io.Writer
 	count  atomic.Int32
+	// killAll and exit end the emergency stop (tests replace them).
+	killAll func() int
+	exit    func(int)
 
 	mu      sync.Mutex
 	release func() // restores the terminal of the running TUI program, if any
@@ -96,24 +103,25 @@ func (c *interruptCtl) setNotify(f func(int)) {
 	c.mu.Unlock()
 }
 
-func newInterruptCtl(cancel context.CancelFunc, errw io.Writer) *interruptCtl {
-	return &interruptCtl{cancel: cancel, force: make(chan struct{}), errw: errw}
+// newInterruptCtl returns a controller that is not bound yet: bind must
+// be called before the first interruption.
+func newInterruptCtl() *interruptCtl {
+	return &interruptCtl{force: make(chan struct{}), killAll: killAllOf(gitx.KillAll, ops.KillCommands), exit: os.Exit}
 }
 
-// interruptFrom returns the controller installed by execute, nil outside
+// bind sets the function cancelling the context of the commands (first
+// interruption) and the writer of the emergency stop's message.
+func (c *interruptCtl) bind(cancel context.CancelFunc, errw io.Writer) {
+	c.cancel, c.errw = cancel, errw
+}
+
+// force returns the channel that the emergency stop closes right before
+// killing processes; commands pass it to operations that otherwise ignore
+// cancellation (the fast-forward merges of update). It is nil outside
 // execute.
-func interruptFrom(ctx context.Context) *interruptCtl {
-	c, _ := ctx.Value(ctlKey{}).(*interruptCtl)
-	return c
-}
-
-// forceFrom returns the channel that the emergency stop closes right
-// before killing processes; commands pass it to operations that otherwise
-// ignore cancellation (the fast-forward merges of update). It is nil
-// outside execute.
-func forceFrom(ctx context.Context) <-chan struct{} {
-	if c := interruptFrom(ctx); c != nil {
-		return c.force
+func (d Deps) force() <-chan struct{} {
+	if d.ctl != nil {
+		return d.ctl.force
 	}
 	return nil
 }
@@ -161,8 +169,8 @@ func (c *interruptCtl) emergencyStop() {
 		"look for the clone in a .sheaf-adopt-* folder of the bundle and move it back first.\n"+
 		"An interrupted add may leave a partial clone directory: delete it before adding again.\n"+
 		"A fast-forward killed by update may leave .git/index.lock and a half-updated work tree: check `git status` there.")
-	killAll()
-	exit(130)
+	c.killAll()
+	c.exit(130)
 }
 
 // cancelSignals cancel the context of the running command. git runs in its
@@ -177,9 +185,13 @@ var cancelSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
 // the process groups of the running git commands receive SIGKILL (git then
 // leaves its lock files behind, see gitx.StaleLockPath) and sheaf exits with
 // 130 immediately, without cleanups (partial clones may remain); before that,
-// the channel returned by forceFrom is closed and the terminal of a running
+// the channel returned by Deps.force is closed and the terminal of a running
 // TUI program restored.
-func execute(cmd *cobra.Command, args []string) int {
+//
+// ctl is the controller of the Deps cmd was built with (it binds it), so
+// that the TUI sessions of the commands share it; nil gives execute a
+// controller of its own, which only the signals reach.
+func execute(cmd *cobra.Command, ctl *interruptCtl, args []string) int {
 	sigs := make(chan os.Signal, 2)
 	signal.Notify(sigs, cancelSignals...)
 	defer signal.Stop(sigs)
@@ -191,8 +203,10 @@ func execute(cmd *cobra.Command, args []string) int {
 	defer signal.Stop(pipes)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ctl := newInterruptCtl(cancel, cmd.ErrOrStderr())
-	ctx = context.WithValue(ctx, ctlKey{}, ctl)
+	if ctl == nil {
+		ctl = newInterruptCtl()
+	}
+	ctl.bind(cancel, cmd.ErrOrStderr())
 	out := &pipeWatch{w: cmd.OutOrStdout(), cancel: cancel}
 	cmd.SetOut(out)
 	done := make(chan struct{})

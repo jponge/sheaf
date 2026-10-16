@@ -30,7 +30,8 @@ func TestSecondSignalClosesForceBeforeKilling(t *testing.T) {
 	var force <-chan struct{}
 	forcedAtKill := make(chan bool, 1)
 	exited := make(chan int, 1)
-	setSeam(t, &killAll, func() int {
+	d := Deps{ctl: newInterruptCtl()}
+	d.ctl.killAll = func() int {
 		mu.Lock()
 		f := force
 		mu.Unlock()
@@ -41,16 +42,16 @@ func TestSecondSignalClosesForceBeforeKilling(t *testing.T) {
 			forcedAtKill <- false
 		}
 		return 0
-	})
-	setSeam(t, &exit, func(code int) { exited <- code })
+	}
+	d.ctl.exit = func(code int) { exited <- code }
 
-	root := NewRootCmd(Streams{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}})
+	root := NewRootCmdWithDeps(Streams{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}, d)
 	root.AddCommand(&cobra.Command{Use: "probe", RunE: func(c *cobra.Command, _ []string) error {
 		mu.Lock()
-		force = forceFrom(c.Context())
+		force = d.force()
 		mu.Unlock()
 		if force == nil {
-			return errors.New("no force channel in the command context")
+			return errors.New("no force channel in the command's Deps")
 		}
 		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
 		<-c.Context().Done()
@@ -72,18 +73,18 @@ func TestSecondSignalClosesForceBeforeKilling(t *testing.T) {
 	}})
 	var errb bytes.Buffer
 	root.SetErr(&errb)
-	if code := execute(root, []string{"probe"}); code != 0 {
+	if code := execute(root, d.ctl, []string{"probe"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 }
 
 // The emergency stop kills git and the commands of `sheaf run`.
 func TestKillAllKillsGitAndRunCommands(t *testing.T) {
+	t.Parallel()
 	var calls []string
-	setSeam(t, &killGit, func() int { calls = append(calls, "git"); return 2 })
-	setSeam(t, &killCommands, func() int { calls = append(calls, "commands"); return 1 })
-	if n := defaultKillAll(); n != 3 || strings.Join(calls, ",") != "git,commands" {
-		t.Fatalf("defaultKillAll = %d, calls %v", n, calls)
+	killAll := killAllOf(func() int { calls = append(calls, "git"); return 2 }, func() int { calls = append(calls, "commands"); return 1 })
+	if n := killAll(); n != 3 || strings.Join(calls, ",") != "git,commands" {
+		t.Fatalf("killAll = %d, calls %v", n, calls)
 	}
 }
 
@@ -142,9 +143,10 @@ func TestUpdateFirstInterruptWaitsForFastForward(t *testing.T) {
 		onMatch: func() { _ = os.WriteFile(release, nil, 0o644) },
 	}
 	var out bytes.Buffer
-	cmd := NewRootCmdWithDeps(Streams{In: strings.NewReader(""), Out: &out, Err: errw}, e.deps())
 	done := make(chan int, 1)
-	go func() { done <- execute(cmd, []string{"update", "-j", "1"}) }()
+	go func() {
+		done <- executeDeps(Streams{In: strings.NewReader(""), Out: &out, Err: errw}, e.deps(), []string{"update", "-j", "1"})
+	}()
 	var code int
 	select {
 	case code = <-done:

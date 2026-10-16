@@ -23,6 +23,13 @@ type UpdateOptions struct {
 	Force <-chan struct{}
 	// MergeTimeout bounds each merge (zero: gitx.DefaultMergeTimeout).
 	MergeTimeout time.Duration
+	// Interactive fetches in interactive git mode (see gitx.Net); the
+	// fast-forward merges never are.
+	Interactive bool
+
+	// fetchHook, when set by a test, runs while a repository fetch holds
+	// its per-repository lock (see fetchRepo).
+	fetchHook func(commonDir string)
 }
 
 // CheckoutUpdate is the outcome of Update for one checkout.
@@ -185,7 +192,7 @@ func updateRepo(ctx context.Context, s *repoCheckouts, opts UpdateOptions, repor
 		return out, nil
 	}
 	report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindStart})
-	fetchErr := fetchRepo(ctx, s.primary, s.remotes)
+	fetchErr := fetchRepo(ctx, gitx.Net{Interactive: opts.Interactive}, s.primary, s.remotes, opts.fetchHook)
 	// Only the fork could not be fetched: the checkouts tracking it fail,
 	// the others are updated from the reference as usual.
 	forkFailed := fetchErr != nil && ctx.Err() == nil && onlyForkFetchFailed(fetchErr, s.remotes)

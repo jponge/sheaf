@@ -16,7 +16,7 @@ func cloneOrigin(t *testing.T, opts testutil.OriginOpts) (testutil.Origin, strin
 	t.Helper()
 	o := testutil.NewOrigin(t, opts)
 	dir := filepath.Join(t.TempDir(), "clone")
-	if err := Clone(context.Background(), o.URL, dir, ""); err != nil {
+	if err := (Net{}).Clone(context.Background(), o.URL, dir, ""); err != nil {
 		t.Fatal(err)
 	}
 	return o, dir
@@ -37,7 +37,7 @@ func TestCloneExplicitBranchIntoMissingParents(t *testing.T) {
 	t.Parallel()
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat/x"}})
 	dir := filepath.Join(t.TempDir(), "a", "b", "clone")
-	if err := Clone(context.Background(), o.URL, dir, "feat/x"); err != nil {
+	if err := (Net{}).Clone(context.Background(), o.URL, dir, "feat/x"); err != nil {
 		t.Fatal(err)
 	}
 	if got := testutil.Git(t, dir, "symbolic-ref", "--short", "HEAD"); got != "feat/x" {
@@ -49,7 +49,7 @@ func TestCloneFailureIsGitError(t *testing.T) {
 	t.Parallel()
 	testutil.IsolateGit(t)
 	missing := "file://" + filepath.Join(t.TempDir(), "nope.git")
-	err := Clone(context.Background(), missing, filepath.Join(t.TempDir(), "c"), "")
+	err := Net{}.Clone(context.Background(), missing, filepath.Join(t.TempDir(), "c"), "")
 	var ge *GitError
 	if !errors.As(err, &ge) {
 		t.Fatalf("err = %v, want *GitError", err)
@@ -63,7 +63,7 @@ func TestDefaultBranchFromOriginHEAD(t *testing.T) {
 			_, dir := cloneOrigin(t, testutil.OriginOpts{DefaultBranch: b, Branches: []string{"other"}})
 			// Check out another branch so HEAD cannot be mistaken for the default.
 			testutil.Git(t, dir, "checkout", "-q", "other")
-			got, err := DefaultBranchOf(context.Background(), dir, "origin")
+			got, err := Net{}.DefaultBranchOf(context.Background(), dir, "origin")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -81,7 +81,7 @@ func TestDefaultBranchFallsBackToLsRemote(t *testing.T) {
 			_, dir := cloneOrigin(t, testutil.OriginOpts{DefaultBranch: b, Branches: []string{"other"}})
 			testutil.Git(t, dir, "checkout", "-q", "other")
 			testutil.Git(t, dir, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
-			got, err := DefaultBranchOf(context.Background(), dir, "origin")
+			got, err := Net{}.DefaultBranchOf(context.Background(), dir, "origin")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,7 +97,7 @@ func TestDefaultBranchNoOrigin(t *testing.T) {
 	testutil.IsolateGit(t)
 	dir := t.TempDir()
 	testutil.Git(t, dir, "init", "-q")
-	if _, err := DefaultBranchOf(context.Background(), dir, "origin"); err == nil {
+	if _, err := (Net{}).DefaultBranchOf(context.Background(), dir, "origin"); err == nil {
 		t.Fatal("expected an error without origin")
 	}
 }

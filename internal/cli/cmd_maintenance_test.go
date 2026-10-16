@@ -219,8 +219,7 @@ func TestWorktreePR(t *testing.T) {
 func runDeps(t *testing.T, d Deps, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	var out, errb bytes.Buffer
-	cmd := NewRootCmdWithDeps(Streams{In: strings.NewReader(""), Out: &out, Err: &errb}, d)
-	code = execute(cmd, args)
+	code = executeDeps(Streams{In: strings.NewReader(""), Out: &out, Err: &errb}, d, args)
 	return out.String(), errb.String(), code
 }
 

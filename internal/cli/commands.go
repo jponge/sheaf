@@ -104,7 +104,7 @@ func newInitCmd(d Deps) *cobra.Command {
 				return nil
 			}
 			if d.tuiMode(c) {
-				return tuiInitAdopt(c, root, cands, adoptAll, OptionsFrom(c).Jobs)
+				return tuiInitAdopt(c, d, root, cands, adoptAll, OptionsFrom(c).Jobs)
 			}
 			var names, paths []string
 			for _, cand := range cands {
@@ -120,7 +120,7 @@ func newInitCmd(d Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			s := ops.AdoptAll(checkoutContext(c), w, paths, ops.AdoptOptions{}, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
+			s := ops.AdoptAll(c.Context(), w, paths, ops.AdoptOptions{Interactive: d.interactiveGit(c)}, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
 			return printSummary(out, s)
 		},
 	}
@@ -151,9 +151,10 @@ func newAddCmd(d Deps) *cobra.Command {
 				return err
 			}
 			if d.tuiMode(c) {
-				return tuiAdd(c, w, d.hosting(), req, OptionsFrom(c).Jobs)
+				return tuiAdd(c, d, w, d.hosting(), req, OptionsFrom(c).Jobs)
 			}
-			s, err := ops.Add(checkoutContext(c), w, d.hosting(), req, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
+			req.Interactive = d.interactiveGit(c)
+			s, err := ops.Add(c.Context(), w, d.hosting(), req, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
 			if err != nil {
 				return err
 			}
@@ -209,11 +210,12 @@ func newAdoptCmd(d Deps) *cobra.Command {
 				dirs = append(dirs, p)
 			}
 			if d.tuiMode(c) {
-				return tuiSummary(c, "Adopting checkouts", func(ctx context.Context, rep ops.Reporter) ops.Summary {
+				return tuiSummary(c, d, "Adopting checkouts", func(ctx context.Context, rep ops.Reporter) ops.Summary {
 					return ops.AdoptAll(ctx, w, dirs, opts, OptionsFrom(c).Jobs, rep)
 				})
 			}
-			s := ops.AdoptAll(checkoutContext(c), w, dirs, opts, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
+			opts.Interactive = d.interactiveGit(c)
+			s := ops.AdoptAll(c.Context(), w, dirs, opts, OptionsFrom(c).Jobs, plainRenderer{c.ErrOrStderr()})
 			return printSummary(c.OutOrStdout(), s)
 		},
 	}
@@ -254,7 +256,7 @@ func newRemoveCmd(d Deps) *cobra.Command {
 				return err
 			}
 			if d.tuiMode(c) {
-				return tuiRemove(c, w, name, ops.RemoveOptions{Force: force, Offline: offline, WorkingDir: wd}, yes)
+				return tuiRemove(c, d, w, name, ops.RemoveOptions{Force: force, Offline: offline, WorkingDir: wd}, yes)
 			}
 			r := plainRenderer{c.ErrOrStderr()}
 			emit := func(e ops.Event) {
@@ -275,7 +277,7 @@ func newRemoveCmd(d Deps) *cobra.Command {
 				}
 				return yes
 			}
-			msg, err := ops.Remove(singleRepoContext(c), w, name, ops.RemoveOptions{Force: force, Offline: offline, Confirm: confirm, WorkingDir: wd}, emit)
+			msg, err := ops.Remove(c.Context(), w, name, ops.RemoveOptions{Force: force, Offline: offline, Confirm: confirm, WorkingDir: wd, Interactive: d.singleRepoInteractiveGit(c)}, emit)
 			if errors.Is(err, ops.ErrNotConfirmed) {
 				return fmt.Errorf("removing %s needs confirmation: pass --yes (sheaf never prompts in CLI mode)", name)
 			}

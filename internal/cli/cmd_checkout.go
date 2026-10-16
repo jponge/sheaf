@@ -16,35 +16,41 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Terminal detection seams (tests replace them).
-var (
-	stdinIsTerminal  = func(r io.Reader) bool { return isTerminal(r) }
-	stdoutIsTerminal = func(w io.Writer) bool { return isTerminal(w) }
-)
+func (d Deps) stdinIsTerminal(r io.Reader) bool {
+	if d.stdinTTY != nil {
+		return d.stdinTTY(r)
+	}
+	return isTerminal(r)
+}
 
-// gitInteractive decides interactive git mode (see gitx.WithInteractive):
-// only in plain CLI mode (tui false), with a single job (prompts of parallel
-// invocations would interleave), and with standard input on a terminal
-// (someone can answer).
+func (d Deps) stdoutIsTerminal(w io.Writer) bool {
+	if d.stdoutTTY != nil {
+		return d.stdoutTTY(w)
+	}
+	return isTerminal(w)
+}
+
+// gitInteractive decides interactive git mode (see gitx.Net): only in plain
+// CLI mode (tui false), with a single job (prompts of parallel invocations
+// would interleave), and with standard input on a terminal (someone can
+// answer).
 func gitInteractive(tui bool, jobs int, stdinTTY bool) bool { return !tui && jobs == 1 && stdinTTY }
 
-// checkoutContext returns the command's context, marked for interactive git
-// mode when gitInteractive says so. It is only used in plain CLI mode: the
-// TUI variants (cmd_tui.go) use the unmarked context, git never gets the
-// terminal while a bubbletea program owns it.
-func checkoutContext(c *cobra.Command) context.Context {
-	ctx := c.Context()
-	if gitInteractive(false, OptionsFrom(c).Jobs, stdinIsTerminal(c.InOrStdin())) {
-		ctx = gitx.WithInteractive(ctx)
-	}
-	return ctx
+// interactiveGit tells whether the plain CLI variant of c runs git's network
+// operations in interactive git mode, as gitInteractive says (the Interactive
+// field of the ops options). The TUI variants (cmd_tui.go) never do: git
+// never gets the terminal while a bubbletea program owns it.
+func (d Deps) interactiveGit(c *cobra.Command) bool {
+	return gitInteractive(false, OptionsFrom(c).Jobs, d.stdinIsTerminal(c.InOrStdin()))
 }
 
 // useColor reports whether output may use ANSI colors: only on a terminal,
 // and not when NO_COLOR is set to a non-empty value (https://no-color.org).
 func useColor(tty bool, noColor string) bool { return tty && noColor == "" }
 
-func colorFor(w io.Writer) bool { return useColor(stdoutIsTerminal(w), os.Getenv("NO_COLOR")) }
+func (d Deps) colorFor(w io.Writer) bool {
+	return useColor(d.stdoutIsTerminal(w), os.Getenv("NO_COLOR"))
+}
 
 const (
 	ansiReset  = "\x1b[0m"
@@ -180,7 +186,8 @@ func newStatusCmd(d Deps) *cobra.Command {
 				return err
 			}
 			opts.Jobs = OptionsFrom(c).Jobs
-			r, err := ops.CollectStatus(checkoutContext(c), w, opts, checkoutRenderer{plainRenderer{c.ErrOrStderr()}})
+			opts.Interactive = d.interactiveGit(c)
+			r, err := ops.CollectStatus(c.Context(), w, opts, checkoutRenderer{plainRenderer{c.ErrOrStderr()}})
 			if err != nil {
 				return err
 			}
@@ -190,7 +197,7 @@ func newStatusCmd(d Deps) *cobra.Command {
 					return err
 				}
 			} else {
-				writeStatusTable(out, r, colorFor(out))
+				writeStatusTable(out, r, d.colorFor(out))
 			}
 			n := len(r.Problems)
 			for _, s := range r.Checkouts {
@@ -360,7 +367,7 @@ func newFetchCmd(d Deps) *cobra.Command {
 			opts.Jobs = OptionsFrom(c).Jobs
 			if d.tuiMode(c) {
 				var ferr error
-				err := tuiSummary(c, "Fetching", func(ctx context.Context, rep ops.Reporter) ops.Summary {
+				err := tuiSummary(c, d, "Fetching", func(ctx context.Context, rep ops.Reporter) ops.Summary {
 					var s ops.Summary
 					s, ferr = ops.FetchRepos(ctx, w, opts, rep)
 					return s
@@ -370,7 +377,8 @@ func newFetchCmd(d Deps) *cobra.Command {
 				}
 				return err
 			}
-			s, err := ops.FetchRepos(checkoutContext(c), w, opts, checkoutRenderer{plainRenderer{c.ErrOrStderr()}})
+			opts.Interactive = d.interactiveGit(c)
+			s, err := ops.FetchRepos(c.Context(), w, opts, checkoutRenderer{plainRenderer{c.ErrOrStderr()}})
 			if err != nil {
 				return err
 			}
@@ -410,10 +418,11 @@ func newUpdateCmd(d Deps) *cobra.Command {
 			}
 			opts.Jobs = OptionsFrom(c).Jobs
 			if d.tuiMode(c) {
-				return tuiUpdate(c, w, opts, strict)
+				return tuiUpdate(c, d, w, opts, strict)
 			}
-			opts.Force = forceFrom(c.Context())
-			r, err := ops.Update(checkoutContext(c), w, opts, checkoutRenderer{plainRenderer{c.ErrOrStderr()}})
+			opts.Force = d.force()
+			opts.Interactive = d.interactiveGit(c)
+			r, err := ops.Update(c.Context(), w, opts, checkoutRenderer{plainRenderer{c.ErrOrStderr()}})
 			if err != nil {
 				return err
 			}

@@ -1,24 +1,19 @@
 package gitx
 
 import (
-	"context"
 	"slices"
 	"testing"
 )
 
-func TestWithInteractiveMarksContext(t *testing.T) {
+// The zero Net runs git like Run; Interactive selects interactive git mode
+// (replaces the context mark of WithInteractive, removed).
+func TestNetInteractiveSelectsInteractiveRuns(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
-	if IsInteractive(ctx) {
-		t.Fatal("background context reported interactive")
+	if (Net{}).opts().interactive {
+		t.Fatal("zero Net reported interactive")
 	}
-	if !IsInteractive(WithInteractive(ctx)) {
-		t.Fatal("WithInteractive context not reported interactive")
-	}
-	c, cancel := context.WithCancel(WithInteractive(ctx))
-	defer cancel()
-	if !IsInteractive(c) {
-		t.Fatal("derived context lost the interactive mark")
+	if !(Net{Interactive: true}).opts().interactive {
+		t.Fatal("Net{Interactive: true} not reported interactive")
 	}
 }
 

@@ -380,10 +380,6 @@ var fetchLocks = struct {
 	m map[string]*sync.Mutex
 }{m: map[string]*sync.Mutex{}}
 
-// fetchHook, when set by a test, runs while a repository fetch holds its
-// per-repository lock.
-var fetchHook func(commonDir string)
-
 // RemotesOf returns the remotes of a repository of the bundle: origin
 // alone, or upstream (the repository) and origin (the user's fork) when a
 // fork is recorded. In the documentation of this package, "origin" stands
@@ -401,12 +397,12 @@ func RemotesOf(r bundle.Repository) gitx.Remotes {
 // fetchRemotes fetches each remote of rs into the repository of dir
 // (reference first), stopping at the first failure. Callers serialize it
 // per repository (see fetchRepo).
-func fetchRemotes(ctx context.Context, dir string, rs gitx.Remotes) error {
+func fetchRemotes(ctx context.Context, net gitx.Net, dir string, rs gitx.Remotes) error {
 	if !rs.Forked() {
-		return gitx.FetchRemote(ctx, dir, rs.Reference)
+		return net.FetchRemote(ctx, dir, rs.Reference)
 	}
 	for _, remote := range rs.All() {
-		if err := gitx.FetchRemote(ctx, dir, remote); err != nil {
+		if err := net.FetchRemote(ctx, dir, remote); err != nil {
 			return &remoteFetchError{Remote: remote, Err: err}
 		}
 	}
@@ -432,9 +428,9 @@ func onlyForkFetchFailed(err error, rs gitx.Remotes) bool {
 
 // fetchRepo fetches the remotes rs into the repository of dir (see
 // fetchRemotes), serialized with the other fetches into the same
-// repository. Under a context made by gitx.WithInteractive, git keeps the
-// terminal.
-func fetchRepo(ctx context.Context, dir string, rs gitx.Remotes) error {
+// repository. net is git's network mode (see gitx.Net). hook, when set by
+// a test, runs while the fetch holds its per-repository lock.
+func fetchRepo(ctx context.Context, net gitx.Net, dir string, rs gitx.Remotes, hook func(commonDir string)) error {
 	cd, err := gitx.CommonDir(ctx, dir)
 	if err != nil {
 		return err
@@ -451,16 +447,18 @@ func fetchRepo(ctx context.Context, dir string, rs gitx.Remotes) error {
 	fetchLocks.Unlock()
 	l.Lock()
 	defer l.Unlock()
-	if fetchHook != nil {
-		fetchHook(cd)
+	if hook != nil {
+		hook(cd)
 	}
-	return fetchRemotes(ctx, dir, rs)
+	return fetchRemotes(ctx, net, dir, rs)
 }
 
 // FetchOptions configures FetchRepos.
 type FetchOptions struct {
 	Repos []string // see CheckoutFilter.Repos
 	Jobs  int
+	// Interactive fetches in interactive git mode (see gitx.Net).
+	Interactive bool
 }
 
 // FetchRepos runs one `git fetch --prune origin` per selected repository (in
@@ -484,7 +482,7 @@ func FetchRepos(ctx context.Context, w *Workspace, opts FetchOptions, rep Report
 			if prob != nil {
 				return "", fmt.Errorf("%s: %w", prob.Path, prob.Err)
 			}
-			if err := fetchRepo(ctx, primary, RemotesOf(r)); err != nil {
+			if err := fetchRepo(ctx, gitx.Net{Interactive: opts.Interactive}, primary, RemotesOf(r), nil); err != nil {
 				return "", err
 			}
 			return "fetched " + RemotesOf(r).String(), nil

@@ -107,7 +107,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 	if err != nil {
 		return err
 	}
-	ctx := checkoutContext(c)
+	ctx, interactive := c.Context(), d.interactiveGit(c)
 	rep, err := ops.Sync(ctx, w, d.hosting(), ops.SyncOptions{Orgs: fl.orgs, IncludeArchived: fl.includeArchived})
 	if err != nil {
 		return err
@@ -162,7 +162,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 		if len(add) == 0 {
 			fmt.Fprintln(out, "no new repository to add")
 		} else {
-			errs = append(errs, printSummary(out, ops.SyncAddNewWithOptions(ctx, w, add, ops.CloneOptions{Hosting: d.hosting(), NoFork: fl.noFork}, OptionsFrom(c).Jobs, r)))
+			errs = append(errs, printSummary(out, ops.SyncAddNewWithOptions(ctx, w, add, ops.CloneOptions{Hosting: d.hosting(), NoFork: fl.noFork, Interactive: interactive}, OptionsFrom(c).Jobs, r)))
 		}
 	}
 	if fl.removeGone {
@@ -177,7 +177,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 			// --yes is required (validate), so every removal that passes the
 			// checks is confirmed.
 			opts := ops.SyncRemoveOptions{
-				Remove:           ops.RemoveOptions{Force: fl.force, WorkingDir: wd, Confirm: func(ops.RemovePlan) bool { return true }},
+				Remove:           ops.RemoveOptions{Force: fl.force, WorkingDir: wd, Confirm: func(ops.RemovePlan) bool { return true }, Interactive: interactive},
 				AllowMassRemoval: fl.allowMass,
 			}
 			errs = append(errs, printSummary(out, ops.SyncRemoveGone(ctx, w, gone, opts, OptionsFrom(c).Jobs, r)))

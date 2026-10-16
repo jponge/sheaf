@@ -19,8 +19,8 @@ import (
 
 // tuiAdd: `add --org <org>` without --all/--repo offers a menu of the
 // organization's repositories, then clones with a progress view.
-func tuiAdd(c *cobra.Command, w *ops.Workspace, h hosting.Hosting, req ops.AddRequest, jobs int) error {
-	s := newTUISession(c)
+func tuiAdd(c *cobra.Command, d Deps, w *ops.Workspace, h hosting.Hosting, req ops.AddRequest, jobs int) error {
+	s := newTUISession(c, d)
 	out := c.OutOrStdout()
 	if req.Org != "" && !req.All && len(req.Repos) == 0 {
 		fmt.Fprintf(c.ErrOrStderr(), "listing repositories of %s...\n", req.Org)
@@ -57,8 +57,8 @@ func tuiAdd(c *cobra.Command, w *ops.Workspace, h hosting.Hosting, req ops.AddRe
 
 // tuiSummary runs an operation returning a Summary in a progress view and
 // prints the summary.
-func tuiSummary(c *cobra.Command, title string, run func(ctx context.Context, rep ops.Reporter) ops.Summary) error {
-	s := newTUISession(c)
+func tuiSummary(c *cobra.Command, d Deps, title string, run func(ctx context.Context, rep ops.Reporter) ops.Summary) error {
+	s := newTUISession(c, d)
 	var sum ops.Summary
 	s.progress(title, progressOpts{}, func(ctx context.Context, rep ops.Reporter, _ askFunc) { sum = run(ctx, rep) })
 	printFailureDetails(c.ErrOrStderr(), sum)
@@ -66,8 +66,8 @@ func tuiSummary(c *cobra.Command, title string, run func(ctx context.Context, re
 }
 
 // tuiUpdate runs update in a progress view and prints its summary.
-func tuiUpdate(c *cobra.Command, w *ops.Workspace, opts ops.UpdateOptions, strict bool) error {
-	s := newTUISession(c)
+func tuiUpdate(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.UpdateOptions, strict bool) error {
+	s := newTUISession(c, d)
 	opts.Force = s.ctl.force
 	var r ops.UpdateReport
 	var uerr error
@@ -83,8 +83,8 @@ func tuiUpdate(c *cobra.Command, w *ops.Workspace, opts ops.UpdateOptions, stric
 // tuiInitAdopt offers the checkouts found by init (all preselected) and
 // adopts the chosen ones. Declining leaves the new bundle empty and prints
 // how to adopt later (init itself succeeded).
-func tuiInitAdopt(c *cobra.Command, root string, cands []ops.Candidate, adoptAll bool, jobs int) error {
-	s := newTUISession(c)
+func tuiInitAdopt(c *cobra.Command, d Deps, root string, cands []ops.Candidate, adoptAll bool, jobs int) error {
+	s := newTUISession(c, d)
 	out := c.OutOrStdout()
 	var paths, names []string
 	for _, cand := range cands {
@@ -116,8 +116,8 @@ func tuiInitAdopt(c *cobra.Command, root string, cands []ops.Candidate, adoptAll
 
 // tuiRemove removes a repository with a progress view; without --yes the
 // removal plan is confirmed in a dialog (default no).
-func tuiRemove(c *cobra.Command, w *ops.Workspace, name string, opts ops.RemoveOptions, yes bool) error {
-	s := newTUISession(c)
+func tuiRemove(c *cobra.Command, d Deps, w *ops.Workspace, name string, opts ops.RemoveOptions, yes bool) error {
+	s := newTUISession(c, d)
 	var msg string
 	var rerr error
 	s.progress("Removing "+name, progressOpts{Single: name}, func(ctx context.Context, rep ops.Reporter, ask askFunc) {
@@ -172,8 +172,8 @@ func finalEvent(emit func(ops.Event), msg string, err error) {
 // tuiWorktreeRemove removes a worktree with a progress view; without --yes
 // the plan (risks, branch deletion, commits lost with -D) is confirmed in
 // a dialog (default no).
-func tuiWorktreeRemove(c *cobra.Command, w *ops.Workspace, repo string, target ops.WorktreeTarget, opts ops.WorktreeRemoveOptions, yes bool) error {
-	s := newTUISession(c)
+func tuiWorktreeRemove(c *cobra.Command, d Deps, w *ops.Workspace, repo string, target ops.WorktreeTarget, opts ops.WorktreeRemoveOptions, yes bool) error {
+	s := newTUISession(c, d)
 	var msg string
 	var rerr error
 	s.progress("Removing worktree "+target.Name+" of "+repo, progressOpts{Single: repo + "/" + target.Name}, func(ctx context.Context, rep ops.Reporter, ask askFunc) {
@@ -214,8 +214,8 @@ func tuiWorktreeRemove(c *cobra.Command, w *ops.Workspace, repo string, target o
 
 // tuiPrune plans and, after confirmation (or with --yes), applies a prune
 // in one progress view.
-func tuiPrune(c *cobra.Command, w *ops.Workspace, opts ops.PruneOptions, yes bool) error {
-	s := newTUISession(c)
+func tuiPrune(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.PruneOptions, yes bool) error {
+	s := newTUISession(c, d)
 	var plan ops.PrunePlan
 	var results []ops.PruneResult
 	var perr error
@@ -253,7 +253,7 @@ func tuiPrune(c *cobra.Command, w *ops.Workspace, opts ops.PruneOptions, yes boo
 // like --exclude, --add-new and --remove-gone --yes (never --force nor
 // --allow-mass-removal: such refusals are displayed as failures).
 func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noFork bool) error {
-	s := newTUISession(c)
+	s := newTUISession(c, d)
 	out := c.OutOrStdout()
 	if len(rep.Proposals) == 0 {
 		syWriteProposals(out, rep, false)

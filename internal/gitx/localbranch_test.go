@@ -44,13 +44,13 @@ func TestLocalBranches(t *testing.T) {
 	testutil.Git(t, dir, "branch", "--track", "on-main", "main")
 	// A pull request branch: its merge ref is not mapped by origin's refspec.
 	testutil.Git(t, o.Path, "update-ref", "refs/pull/5/head", "refs/heads/keep")
-	if err := FetchRefspecs(context.Background(), dir, "origin", "refs/pull/5/head:refs/heads/pr/5"); err != nil {
+	if err := (Net{}).FetchRefspecs(context.Background(), dir, "origin", "refs/pull/5/head:refs/heads/pr/5"); err != nil {
 		t.Fatal(err)
 	}
 	testutil.Git(t, dir, "config", "branch.pr/5.remote", "origin")
 	testutil.Git(t, dir, "config", "branch.pr/5.merge", "refs/pull/5/head")
 	testutil.Git(t, o.Path, "branch", "-D", "feat/gone")
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -95,13 +95,13 @@ func TestFetchRefspecsDoesNotForce(t *testing.T) {
 	o, dir := cloneOrigin(t, testutil.OriginOpts{Branches: []string{"a", "b"}})
 	testutil.Git(t, o.Path, "update-ref", "refs/pull/1/head", "refs/heads/a")
 	ctx := context.Background()
-	if err := FetchRefspecs(ctx, dir, "origin", "refs/pull/1/head:refs/heads/pr/1"); err != nil {
+	if err := (Net{}).FetchRefspecs(ctx, dir, "origin", "refs/pull/1/head:refs/heads/pr/1"); err != nil {
 		t.Fatal(err)
 	}
 	// The PR head is force-pushed to an unrelated commit: a non-forced
 	// refspec refuses to rewrite the local branch.
 	testutil.Git(t, o.Path, "update-ref", "refs/pull/1/head", "refs/heads/b")
-	if err := FetchRefspecs(ctx, dir, "origin", "refs/pull/1/head:refs/heads/pr/1"); err == nil {
+	if err := (Net{}).FetchRefspecs(ctx, dir, "origin", "refs/pull/1/head:refs/heads/pr/1"); err == nil {
 		t.Fatal("non-fast-forward fetch into a local branch succeeded")
 	}
 	if got, want := testutil.Git(t, dir, "rev-parse", "pr/1"), testutil.Git(t, o.Path, "rev-parse", "a"); got != want {

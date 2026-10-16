@@ -15,7 +15,7 @@ func forkedClone(t *testing.T, opts testutil.OriginOpts) (testutil.ForkedOrigin,
 	t.Helper()
 	f := testutil.NewForkedOrigin(t, opts)
 	dest := filepath.Join(t.TempDir(), "repo", "main")
-	if err := CloneFork(context.Background(), f.Upstream.URL, f.Fork.URL, dest, "main"); err != nil {
+	if err := (Net{}).CloneFork(context.Background(), f.Upstream.URL, f.Fork.URL, dest, "main"); err != nil {
 		t.Fatal(err)
 	}
 	return f, dest
@@ -53,8 +53,8 @@ func TestCloneForkLayout(t *testing.T) {
 			t.Fatalf("%s missing (%v)", ref, err)
 		}
 	}
-	if def, err := DefaultBranchOf(ctx, dir, "upstream"); err != nil || def != "main" {
-		t.Fatalf("DefaultBranchOf(upstream) = %q, %v", def, err)
+	if def, err := (Net{}).DefaultBranchOf(ctx, dir, "upstream"); err != nil || def != "main" {
+		t.Fatalf("Net{}.DefaultBranchOf(upstream) = %q, %v", def, err)
 	}
 }
 
@@ -62,7 +62,7 @@ func TestCloneForkFailsOnUnreachableFork(t *testing.T) {
 	t.Parallel()
 	f := testutil.NewForkedOrigin(t, testutil.OriginOpts{})
 	dest := filepath.Join(t.TempDir(), "repo", "main")
-	if err := CloneFork(context.Background(), f.Upstream.URL, "file:///nonexistent/fork.git", dest, "main"); err == nil {
+	if err := (Net{}).CloneFork(context.Background(), f.Upstream.URL, "file:///nonexistent/fork.git", dest, "main"); err == nil {
 		t.Fatal("clone with an unreachable fork succeeded")
 	}
 }
@@ -73,7 +73,7 @@ func TestFetchRemoteFetchesOnlyThatRemote(t *testing.T) {
 	ctx := context.Background()
 	testutil.AdvanceOrigin(t, f.Upstream, "main", "u.txt", "u\n", "upstream commit")
 	testutil.AdvanceOrigin(t, f.Fork, "main", "f.txt", "f\n", "fork commit")
-	if err := FetchRemote(ctx, dir, "upstream"); err != nil {
+	if err := (Net{}).FetchRemote(ctx, dir, "upstream"); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := testutil.Git(t, dir, "rev-parse", "refs/remotes/upstream/main"), testutil.Git(t, f.Upstream.Path, "rev-parse", "main"); got != want {
@@ -84,11 +84,11 @@ func TestFetchRemoteFetchesOnlyThatRemote(t *testing.T) {
 	}
 	// Prunes: a branch deleted on the remote disappears.
 	testutil.Git(t, f.Upstream.Path, "branch", "x", "main")
-	if err := FetchRemote(ctx, dir, "upstream"); err != nil {
+	if err := (Net{}).FetchRemote(ctx, dir, "upstream"); err != nil {
 		t.Fatal(err)
 	}
 	testutil.Git(t, f.Upstream.Path, "branch", "-D", "x")
-	if err := FetchRemote(ctx, dir, "upstream"); err != nil {
+	if err := (Net{}).FetchRemote(ctx, dir, "upstream"); err != nil {
 		t.Fatal(err)
 	}
 	if ok, _ := refExists(ctx, dir, "refs/remotes/upstream/x"); ok {
@@ -100,10 +100,10 @@ func TestDefaultBranchOfAsksTheRemote(t *testing.T) {
 	t.Parallel()
 	_, dir := forkedClone(t, testutil.OriginOpts{DefaultBranch: "main"})
 	testutil.Git(t, dir, "symbolic-ref", "--delete", "refs/remotes/upstream/HEAD")
-	if def, err := DefaultBranchOf(context.Background(), dir, "upstream"); err != nil || def != "main" {
+	if def, err := (Net{}).DefaultBranchOf(context.Background(), dir, "upstream"); err != nil || def != "main" {
 		t.Fatalf("DefaultBranchOf = %q, %v", def, err)
 	}
-	if _, err := DefaultBranchOf(context.Background(), dir, "nosuch"); !errors.Is(err, ErrNoDefaultBranch) {
+	if _, err := (Net{}).DefaultBranchOf(context.Background(), dir, "nosuch"); !errors.Is(err, ErrNoDefaultBranch) {
 		t.Fatalf("unknown remote: err = %v", err)
 	}
 }
@@ -116,7 +116,7 @@ func TestWorktreeAddSearchesRemotesInOrder(t *testing.T) {
 	testutil.Git(t, f.Fork.Path, "branch", "on-fork", "main")
 	testutil.Git(t, f.Upstream.Path, "branch", "on-upstream", "main")
 	for _, r := range []string{"origin", "upstream"} {
-		if err := FetchRemote(ctx, dir, r); err != nil {
+		if err := (Net{}).FetchRemote(ctx, dir, r); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -141,7 +141,7 @@ func TestFetchTagsFrom(t *testing.T) {
 	t.Parallel()
 	f, dir := forkedClone(t, testutil.OriginOpts{})
 	oid := testutil.TagOriginDangling(t, f.Upstream, "v1", "main")
-	kept, err := FetchTagsFrom(context.Background(), dir, "upstream")
+	kept, err := Net{}.FetchTagsFrom(context.Background(), dir, "upstream")
 	if err != nil || kept != nil {
 		t.Fatalf("FetchTagsFrom = %v, %v", kept, err)
 	}

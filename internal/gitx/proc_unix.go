@@ -14,7 +14,7 @@ import (
 // procGroup tracks the process group of one git invocation (see Run).
 type procGroup struct {
 	cmd   *exec.Cmd
-	delay time.Duration // waitDelay at start
+	delay time.Duration // wait delay of the invocation (see Run)
 	// single: git runs in the caller's process group; only its own process
 	// is signalled.
 	single bool
@@ -30,7 +30,7 @@ type procGroup struct {
 // its Cancel function so that cancellation signals the whole process group.
 // delay is the grace period between SIGTERM and SIGKILL (see finish).
 //
-// Without ownSession (interactive mode, see WithInteractive), git stays in
+// Without ownSession (interactive mode, see Net.Interactive), git stays in
 // the caller's session and process group: cancellation sends SIGTERM to the
 // git process only (exec's WaitDelay then sends it SIGKILL), kill signals
 // only that process, and finish has nothing to do.
@@ -96,10 +96,10 @@ func (pg *procGroup) kill() bool {
 // closed, or pg.delay has elapsed. A process forked while the first SIGKILL
 // was being delivered may have missed it: Linux makes fork atomic with
 // respect to process-group signals, other kernels may not (this is the
-// suspected cause of force-killed merges returning only after waitDelay on
-// macOS, the straggler holding git's stderr open). The id cannot be reused
-// while the group has members; the only (theoretical) window is between the
-// group emptying and the next probe, as in finish.
+// suspected cause of force-killed merges returning only after the wait
+// delay on macOS, the straggler holding git's stderr open). The id cannot be
+// reused while the group has members; the only (theoretical) window is
+// between the group emptying and the next probe, as in finish.
 func (pg *procGroup) killStragglers(stop <-chan struct{}) {
 	if pg.single {
 		return

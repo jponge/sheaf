@@ -134,7 +134,8 @@ func executeOn(goos string, args []string, s Streams) int {
 		}
 		return os.Getenv(k)
 	}
-	return execute(NewRootCmdWithDeps(s, Deps{Getenv: getenv}), args)
+	d := Deps{Getenv: getenv, ctl: newInterruptCtl()}
+	return execute(NewRootCmdWithDeps(s, d), d.ctl, args)
 }
 
 // versionString returns the version to print: stamped (Version) when set at

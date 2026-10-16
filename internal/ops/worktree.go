@@ -381,6 +381,8 @@ type WorktreeAddOptions struct {
 	// NoFetch skips the fetch of origin (of upstream and origin for a
 	// repository with a fork).
 	NoFetch bool
+	// Interactive fetches in interactive git mode (see gitx.Net).
+	Interactive bool
 	// remotes (ops-internal) overrides the remotes searched for an
 	// existing remote branch (default: RemotesOf(r).BranchSearch()).
 	remotes []string
@@ -459,8 +461,9 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 		search = rs.BranchSearch()
 	}
 	if !opts.NoFetch {
+		net := gitx.Net{Interactive: opts.Interactive}
 		report(PhaseFetch, "fetching "+rs.String())
-		if err := fetchRemotes(ctx, primary, rs); err != nil {
+		if err := fetchRemotes(ctx, net, primary, rs); err != nil {
 			if ctx.Err() != nil {
 				return WorktreeAddResult{}, ctx.Err()
 			}
@@ -474,7 +477,7 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 			return WorktreeAddResult{}, err
 		} else if newBranch {
 			report(PhaseFetch, "fetching "+rs.Reference+"'s tags")
-			if _, err := gitx.FetchTagsFrom(ctx, primary, rs.Reference); err != nil {
+			if _, err := net.FetchTagsFrom(ctx, primary, rs.Reference); err != nil {
 				if ctx.Err() != nil {
 					return WorktreeAddResult{}, ctx.Err()
 				}
@@ -696,6 +699,8 @@ type WorktreeRemoveOptions struct {
 	Offline bool
 	// WorkingDir is the caller's working directory; empty means os.Getwd.
 	WorkingDir string
+	// Interactive fetches in interactive git mode (see gitx.Net).
+	Interactive bool
 	// originFetched (ops-internal) skips the fetch of origin, already done
 	// by the caller (prune); nested repositories are still fetched.
 	originFetched bool
@@ -857,6 +862,7 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 	}
 	fetchMsg := ""
 	rs := RemotesOf(r)
+	net := gitx.Net{Interactive: opts.Interactive}
 	var distrust forkDistrust
 	var fetchNested func(context.Context, string) error
 	if opts.Offline {
@@ -867,13 +873,13 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 	} else {
 		if !opts.originFetched {
 			ev(PhaseFetch, "fetching "+rs.String())
-			if err := gitx.FetchRemote(ctx, primary, rs.Reference); err != nil {
+			if err := net.FetchRemote(ctx, primary, rs.Reference); err != nil {
 				if ctx.Err() != nil {
 					return "", ctx.Err()
 				}
 				fetchMsg = fetchProblem(err)
 			} else if rs.Forked() {
-				gone, err := fetchForkRemote(ctx, primary, rs.Fork)
+				gone, err := fetchForkRemote(ctx, net, primary, rs.Fork)
 				switch {
 				case ctx.Err() != nil:
 					return "", ctx.Err()
@@ -893,7 +899,7 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 				return err
 			}
 			ev(PhaseFetch, "fetching nested repository "+dir)
-			err := gitx.FetchAll(ctx, dir)
+			err := net.FetchAll(ctx, dir)
 			if ctx.Err() == nil {
 				fetched[dir] = err
 			}

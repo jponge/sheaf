@@ -149,15 +149,15 @@ func branchConfig(ctx context.Context, dir string) (map[string]branchCfg, error)
 // FetchRefspecs runs `git fetch --quiet <remote> <refspecs...>` in dir, for
 // fetches of explicit refs (e.g. refs/pull/<n>/head). It does not prune, and
 // a refspec without a leading '+' never rewrites its destination other than
-// by a fast-forward. Like FetchRemote, it keeps the caller's terminal under
-// WithInteractive and must be serialized with other fetches into the same
+// by a fast-forward. Like FetchRemote, it keeps the caller's terminal with
+// n.Interactive and must be serialized with other fetches into the same
 // repository when it updates refs; a refspec without destination only writes
 // FETCH_HEAD, which is per worktree.
-func FetchRefspecs(ctx context.Context, dir, remote string, refspecs ...string) error {
+func (n Net) FetchRefspecs(ctx context.Context, dir, remote string, refspecs ...string) error {
 	if len(refspecs) == 0 {
 		return errors.New("gitx: fetch: no refspec")
 	}
-	_, err := run(ctx, netOpts(ctx), dir, append([]string{"fetch", "--quiet", "--no-tags", "--end-of-options", remote}, refspecs...)...)
+	_, err := run(ctx, n.opts(), dir, append([]string{"fetch", "--quiet", "--no-tags", "--end-of-options", remote}, refspecs...)...)
 	return err
 }
 

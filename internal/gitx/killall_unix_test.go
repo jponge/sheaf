@@ -17,7 +17,7 @@ func TestKillAllKillsRunningGitProcessGroups(t *testing.T) {
 	pidfile := filepath.Join(t.TempDir(), "pids")
 	dir := sshFakeClone(t, hangingScript(pidfile))
 	done := make(chan error, 1)
-	go func() { done <- FetchRemote(context.Background(), dir, "origin") }()
+	go func() { done <- Net{}.FetchRemote(context.Background(), dir, "origin") }()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		b, _ := os.ReadFile(pidfile)

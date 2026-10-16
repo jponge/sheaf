@@ -111,11 +111,17 @@ func waitOutput(t *testing.T, out *syncBuffer, want string) func() {
 // runTUI executes the CLI with the TUI forced on and in as standard input.
 func (e *env) runTUI(t *testing.T, in io.Reader, out *syncBuffer, args ...string) (stderr string, code int) {
 	t.Helper()
+	return e.runTUIWith(t, nil, in, out, args...)
+}
+
+// runTUIWith is runTUI with the interrupt controller ctl (nil: a new one).
+func (e *env) runTUIWith(t *testing.T, ctl *interruptCtl, in io.Reader, out *syncBuffer, args ...string) (stderr string, code int) {
+	t.Helper()
 	var errb syncBuffer
 	d := e.deps()
+	d.ctl = ctl
 	d.UseTUI = func(io.Reader, io.Writer, bool) bool { return true }
-	cmd := NewRootCmdWithDeps(Streams{In: in, Out: out, Err: &errb}, d)
-	code = execute(cmd, args)
+	code = executeDeps(Streams{In: in, Out: out, Err: &errb}, d, args)
 	return errb.String(), code
 }
 

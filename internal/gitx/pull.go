@@ -84,6 +84,12 @@ type FastForwardOptions struct {
 	// passed and the work tree is about to be updated; it is not called when
 	// FastForward returns without merging.
 	OnMergeStart func()
+
+	// Test hooks: afterPreCheck runs right after the pre-checks passed,
+	// afterMerge right after a successful merge, before HEAD is re-read;
+	// waitDelay replaces defaultWaitDelay for the merge when positive.
+	afterPreCheck, afterMerge func()
+	waitDelay                 time.Duration
 }
 
 // DefaultMergeTimeout is the bound on the merge of FastForward.
@@ -144,8 +150,8 @@ func FastForwardWithOptions(ctx context.Context, dir string, opts FastForwardOpt
 	if !ok {
 		return r
 	}
-	if afterPreCheckHook != nil {
-		afterPreCheckHook()
+	if opts.afterPreCheck != nil {
+		opts.afterPreCheck()
 	}
 	old := r.Old
 	if err := ctx.Err(); err != nil {
@@ -154,14 +160,14 @@ func FastForwardWithOptions(ctx context.Context, dir string, opts FastForwardOpt
 	}
 	timeout := opts.MergeTimeout
 	if timeout <= 0 {
-		timeout = mergeTimeout
+		timeout = DefaultMergeTimeout
 	}
 	mctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	if opts.OnMergeStart != nil {
 		opts.OnMergeStart()
 	}
-	_, mergeErr := run(mctx, runOpts{force: opts.Force}, dir, "merge", "--quiet", "--ff-only", "--no-autostash", "@{upstream}")
+	_, mergeErr := run(mctx, runOpts{force: opts.Force, waitDelay: opts.waitDelay}, dir, "merge", "--quiet", "--ff-only", "--no-autostash", "@{upstream}")
 	// From here on, ctx's cancellation is ignored (see above).
 	rctx, rcancel := context.WithTimeout(context.WithoutCancel(ctx), rereadTimeout)
 	defer rcancel()
@@ -175,8 +181,8 @@ func FastForwardWithOptions(ctx context.Context, dir string, opts FastForwardOpt
 		}
 		return PullResult{Outcome: PullFailed, Old: old, New: after.Head, Err: mergeErr}
 	}
-	if afterMergeHook != nil {
-		afterMergeHook()
+	if opts.afterMerge != nil {
+		opts.afterMerge()
 	}
 
 	out, err := Run(rctx, dir, "rev-parse", "--verify", "HEAD")
@@ -195,11 +201,6 @@ func FastForwardWithOptions(ctx context.Context, dir string, opts FastForwardOpt
 	}
 	return PullResult{Outcome: PullFastForwarded, Old: old, New: newHead}
 }
-
-// mergeTimeout is the default bound on the merge of FastForward, which ignores
-// the caller's cancellation. It is a variable only so that tests can shorten
-// it; it must not be changed while FastForward runs.
-var mergeTimeout = DefaultMergeTimeout
 
 // rereadTimeout bounds the HEAD re-reads after the merge.
 const rereadTimeout = 5 * time.Second
@@ -231,19 +232,11 @@ func preCheck(ctx context.Context, dir string, withAheadBehind bool) (PullResult
 	return PullResult{Old: old}, true
 }
 
-// afterPreCheckHook, when set by a test, runs in FastForward right after the
-// pre-checks passed.
-var afterPreCheckHook func()
-
-// afterMergeHook, when set by a test, runs right after a successful merge in
-// FastForward, before HEAD is re-read.
-var afterMergeHook func()
-
 // FetchAll runs `git fetch --prune --all` in dir: it fetches every remote
 // of the repository (work tree or bare) and deletes remote-tracking refs
 // whose remote branch no longer exists. Like FetchRemote, callers serialize it per
 // repository. It is cancellable through ctx.
-func FetchAll(ctx context.Context, dir string) error {
-	_, err := run(ctx, netOpts(ctx), dir, "fetch", "--quiet", "--prune", "--all")
+func (n Net) FetchAll(ctx context.Context, dir string) error {
+	_, err := run(ctx, n.opts(), dir, "fetch", "--quiet", "--prune", "--all")
 	return err
 }

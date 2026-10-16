@@ -17,7 +17,7 @@ func TestFastForwardOnMergeStartOnlyWhenMerging(t *testing.T) {
 		t.Fatalf("up to date: outcome %v, %d calls, want 0", r.Outcome, calls)
 	}
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, dir, "file-1.txt", "dirty\n")
@@ -34,16 +34,14 @@ func TestFastForwardOnMergeStartOnlyWhenMerging(t *testing.T) {
 func TestFastForwardCancelledAfterPreCheckDoesNotMerge(t *testing.T) {
 	o, dir := cloneOrigin(t, testutil.OriginOpts{})
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
-	if err := FetchRemote(context.Background(), dir, "origin"); err != nil {
+	if err := (Net{}).FetchRemote(context.Background(), dir, "origin"); err != nil {
 		t.Fatal(err)
 	}
 	before := head(t, dir)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	afterPreCheckHook = cancel
-	t.Cleanup(func() { afterPreCheckHook = nil })
 	started := false
-	r := FastForwardWithOptions(ctx, dir, FastForwardOptions{OnMergeStart: func() { started = true }})
+	r := FastForwardWithOptions(ctx, dir, FastForwardOptions{OnMergeStart: func() { started = true }, afterPreCheck: cancel})
 	if r.Outcome != PullFailed || !errors.Is(r.Err, context.Canceled) || started || head(t, dir) != before || r.New != before {
 		t.Fatalf("result %+v, merge started %v; want failed (context.Canceled) without merging", r, started)
 	}

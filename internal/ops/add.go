@@ -29,6 +29,8 @@ type AddRequest struct {
 	// NoFork disables fork detection: each repository is cloned as the
 	// single remote origin even when the user has a fork of it.
 	NoFork bool
+	// Interactive clones in interactive git mode (see gitx.Net).
+	Interactive bool
 }
 
 func (r AddRequest) validate() error {
@@ -161,7 +163,7 @@ func Add(ctx context.Context, w *Workspace, h hosting.Hosting, req AddRequest, j
 	if !req.NoFork {
 		forks = detectForks(ctx, h, clonable(w.Bundle(), specs), rep)
 	}
-	sum := Execute(ctx, jobs, planClones(w, specs, req.As, origin, source, forks), rep)
+	sum := Execute(ctx, jobs, planClones(w, gitx.Net{Interactive: req.Interactive}, specs, req.As, origin, source, forks), rep)
 	// Successful clones recorded the source with their entry. Nothing was
 	// cloned: track the organization anyway when nothing failed either (an
 	// empty organization selected with All, or everything already present).
@@ -255,7 +257,7 @@ func skippedTask(repo, reason string) Task {
 
 // planClones turns lookups into tasks, checking names against the bundle and
 // against each other (case-insensitively, like the bundle does).
-func planClones(w *Workspace, specs []lookup, as, origin, source string, forks forkIndex) []Task {
+func planClones(w *Workspace, net gitx.Net, specs []lookup, as, origin, source string, forks forkIndex) []Task {
 	b := w.Bundle()
 	taken := map[string]bool{}
 	for _, r := range b.Repositories {
@@ -303,7 +305,7 @@ func planClones(w *Workspace, specs []lookup, as, origin, source string, forks f
 			entry.Fork = bundle.Fork{Slug: fk.Slug(), URL: fk.CloneURL}
 		}
 		tasks = append(tasks, Task{Repo: name, Phase: PhaseClone, Run: func(ctx context.Context, emit func(Event)) (string, error) {
-			return cloneRepo(ctx, w, entry, branchDir, source, emit)
+			return cloneRepo(ctx, w, net, entry, branchDir, source, emit)
 		}})
 	}
 	return tasks
@@ -350,7 +352,7 @@ func looksLikeGitHubAlias(host string) bool {
 
 // cloneRepo creates <root>/<name> (which must not exist), clones into it and
 // records the entry. On any failure the repository directory is removed.
-func cloneRepo(ctx context.Context, w *Workspace, entry bundle.Repository, branchDir, source string, emit func(Event)) (string, error) {
+func cloneRepo(ctx context.Context, w *Workspace, net gitx.Net, entry bundle.Repository, branchDir, source string, emit func(Event)) (string, error) {
 	repoDir := bundle.RepoDir(w.Root, entry.Name)
 	if err := os.Mkdir(repoDir, 0o755); err != nil {
 		if errors.Is(err, fs.ErrExist) {
@@ -363,12 +365,12 @@ func cloneRepo(ctx context.Context, w *Workspace, entry bundle.Repository, branc
 	if entry.Forked() {
 		emit(Event{Message: fmt.Sprintf("using your fork %s as origin and %s as upstream", entry.Fork.Slug, entry.Slug)})
 		emit(Event{Message: "cloning " + entry.URL + " (upstream) and " + entry.Fork.URL + " (origin) into " + dest})
-		if err = gitx.CloneFork(ctx, entry.URL, entry.Fork.URL, dest, entry.DefaultBranch); err != nil && ctx.Err() == nil {
+		if err = net.CloneFork(ctx, entry.URL, entry.Fork.URL, dest, entry.DefaultBranch); err != nil && ctx.Err() == nil {
 			err = fmt.Errorf("%w (to clone %s without your fork, pass --no-fork)", err, entry.Slug)
 		}
 	} else {
 		emit(Event{Message: "cloning " + entry.URL + " into " + dest})
-		err = gitx.Clone(ctx, entry.URL, dest, entry.DefaultBranch)
+		err = net.Clone(ctx, entry.URL, dest, entry.DefaultBranch)
 	}
 	if err == nil {
 		err = w.updateCtx(ctx, emit, func(b *bundle.Bundle) error {

@@ -44,19 +44,17 @@ func (e *GitError) Error() string {
 // works for cancelled invocations.
 func (e *GitError) Unwrap() error { return e.Err }
 
-// waitDelay bounds how long Run waits after cancellation before escalating
-// to SIGKILL (see Run), and how long it waits for I/O after git was killed (a
-// grandchild may keep the output pipes open).
-//
-// It is a variable only so that tests can shorten it; it must not be changed
-// while git commands are running.
-var waitDelay = 5 * time.Second
+// defaultWaitDelay bounds how long Run waits after cancellation before
+// escalating to SIGKILL (see Run), and how long it waits for I/O after git
+// was killed (a grandchild may keep the output pipes open). Tests shorten
+// it per invocation (runOpts.waitDelay).
+const defaultWaitDelay = 5 * time.Second
 
 // Run executes git with args in dir and returns its raw standard output.
 //
 // If git exits 0 but a process it spawned keeps standard output or error
 // open (e.g. a hook that starts `sleep 60 &`), Run stops waiting for the
-// output waitDelay after git exited and reports success with the output read
+// output defaultWaitDelay after git exited and reports success with the output read
 // so far, unless ctx is done. If ctx is cancelled after git exited 0 but
 // while Run is still in that pipe wait, Run returns an error (wrapping
 // ctx.Err()) although the git operation itself completed: callers that care
@@ -74,7 +72,7 @@ var waitDelay = 5 * time.Second
 //
 //   - When ctx is done, the whole group receives SIGTERM, which lets git
 //     remove its lock files (e.g. index.lock) on the way out. If the group is
-//     still alive waitDelay after that, it receives SIGKILL; Run returns only
+//     still alive defaultWaitDelay after that, it receives SIGKILL; Run returns only
 //     once the group is gone or has been sent SIGKILL. A process that leaves
 //     the group (setsid/setpgid of its own) escapes this.
 //   - Neither git nor ssh can open /dev/tty, so they can never prompt on the
@@ -102,8 +100,10 @@ type runOpts struct {
 	// its lock files); the error then wraps ErrForceKilled.
 	force <-chan struct{}
 	// interactive keeps the caller's session and controlling terminal (see
-	// WithInteractive).
+	// Net.Interactive).
 	interactive bool
+	// waitDelay replaces defaultWaitDelay when positive (tests only).
+	waitDelay time.Duration
 }
 
 // run runs git like Run, with the options o, through the query cache of ctx
@@ -125,7 +125,10 @@ func runProcess(ctx context.Context, o runOpts, dir string, args ...string) (str
 	} else {
 		cmd.Env = childEnv(os.Environ())
 	}
-	delay := waitDelay
+	delay := o.waitDelay
+	if delay <= 0 {
+		delay = defaultWaitDelay
+	}
 	cmd.WaitDelay = delay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = o.stdin, &stdout, &stderr
@@ -168,7 +171,7 @@ func runProcess(ctx context.Context, o runOpts, dir string, args ...string) (str
 	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() && ctx.Err() == nil {
 		// git exited 0, but a process it spawned (typically a hook running
 		// something in the background) kept stdout or stderr open past
-		// waitDelay. The git operation itself succeeded; the output captured
+		// the wait delay. The git operation itself succeeded; the output captured
 		// until the pipes were closed is kept.
 		err = nil
 	}

@@ -14,17 +14,6 @@ import (
 	"github.com/jponge/sheaf/internal/gitx"
 )
 
-// adoptAfterMove is a test hook run after the primary checkout was
-// relocated and its worktrees repaired; an error (or a panic) triggers the
-// rollback.
-var adoptAfterMove = func() error { return nil }
-
-// Filesystem seams for tests of the move's failure paths.
-var (
-	osRename = os.Rename
-	osMkdir  = os.Mkdir
-)
-
 // rollbackTimeout bounds the git calls of a rollback, which run even when
 // the caller's context is done.
 const rollbackTimeout = 30 * time.Second
@@ -42,6 +31,13 @@ type AdoptOptions struct {
 	// Recheck re-examines the remotes of repositories that are already
 	// registered instead of adopting directories (see Adopt).
 	Recheck bool
+	// Interactive asks remotes in interactive git mode (see gitx.Net).
+	Interactive bool
+
+	// afterMove, when set by a test, runs after the primary checkout was
+	// relocated and its worktrees repaired; an error (or a panic) triggers
+	// the rollback.
+	afterMove func() error
 }
 
 // Adopt registers the existing checkout dir, an immediate subdirectory of the
@@ -120,7 +116,7 @@ func Adopt(ctx context.Context, w *Workspace, dir string, opts AdoptOptions, emi
 		}
 		return checkout
 	}
-	entry, warnings, err := describeCheckout(ctx, checkout, finalPath, name, opts.DefaultBranch, opts.Host)
+	entry, warnings, err := describeCheckout(ctx, gitx.Net{Interactive: opts.Interactive}, checkout, finalPath, name, opts.DefaultBranch, opts.Host)
 	if err != nil {
 		return "", fmt.Errorf("cannot adopt %s: %w", dir, err)
 	}
@@ -138,7 +134,7 @@ func Adopt(ctx context.Context, w *Workspace, dir string, opts AdoptOptions, emi
 	for _, m := range warnings {
 		emit(Event{Message: "warning: " + m})
 	}
-	msg, err := adoptCheckout(ctx, w.Root, layout{plain: plain, dir: dir, checkout: checkout}, entry, register, emit)
+	msg, err := adoptCheckout(ctx, w.Root, layout{plain: plain, dir: dir, checkout: checkout}, entry, register, opts.afterMove, emit)
 	if err != nil || !entry.Forked() {
 		return msg, err
 	}
@@ -186,8 +182,9 @@ type layout struct {
 	checkout string // the primary checkout (dir for a plain clone)
 }
 
-// adoptCheckout relocates (if needed) and registers (see Adopt).
-func adoptCheckout(ctx context.Context, root string, l layout, entry bundle.Repository, register func() error, emit func(Event)) (msg string, err error) {
+// adoptCheckout relocates (if needed) and registers (see Adopt). afterMove
+// is a test hook (see AdoptOptions).
+func adoptCheckout(ctx context.Context, root string, l layout, entry bundle.Repository, register, afterMove func() error, emit func(Event)) (msg string, err error) {
 	defDir, err := bundle.NormalizeBranch(entry.DefaultBranch)
 	if err != nil {
 		return "", fmt.Errorf("cannot adopt %s: %w", l.dir, err)
@@ -238,7 +235,7 @@ func adoptCheckout(ctx context.Context, root string, l layout, entry bundle.Repo
 	}()
 
 	emit(Event{Message: "moving " + l.checkout + " to " + primary})
-	undo, err := relocate(root, l, defDir)
+	undo, err := relocate(moveFS{}, root, l, defDir)
 	if err != nil {
 		return "", err
 	}
@@ -254,8 +251,10 @@ func adoptCheckout(ctx context.Context, root string, l layout, entry bundle.Repo
 	if err = gitx.WorktreeRepair(ctx, primary, joinAll(primary, nested)...); err != nil {
 		return "", err
 	}
-	if err = adoptAfterMove(); err != nil {
-		return "", err
+	if afterMove != nil {
+		if err = afterMove(); err != nil {
+			return "", err
+		}
 	}
 	if err = register(); err != nil {
 		return "", err
@@ -263,17 +262,38 @@ func adoptCheckout(ctx context.Context, root string, l layout, entry bundle.Repo
 	return fmt.Sprintf("moved to %s and registered %s (%s)", primary, entry.Name, entry.Slug), nil
 }
 
+// moveFS are the file system operations of relocate; nil fields mean
+// os.Rename and os.Mkdir (tests inject failures).
+type moveFS struct {
+	rename func(oldpath, newpath string) error
+	mkdir  func(name string, perm os.FileMode) error
+}
+
+func (f moveFS) Rename(oldpath, newpath string) error {
+	if f.rename != nil {
+		return f.rename(oldpath, newpath)
+	}
+	return os.Rename(oldpath, newpath)
+}
+
+func (f moveFS) Mkdir(name string, perm os.FileMode) error {
+	if f.mkdir != nil {
+		return f.mkdir(name, perm)
+	}
+	return os.Mkdir(name, perm)
+}
+
 // relocate moves the primary checkout to dir/defDir and returns the inverse
 // operation.
-func relocate(root string, l layout, defDir string) (func() error, error) {
+func relocate(fsys moveFS, root string, l layout, defDir string) (func() error, error) {
 	if l.plain {
-		return moveIntoSubdir(root, l.dir, defDir)
+		return moveIntoSubdir(fsys, root, l.dir, defDir)
 	}
 	target := filepath.Join(l.dir, defDir)
-	if err := osRename(l.checkout, target); err != nil {
+	if err := fsys.Rename(l.checkout, target); err != nil {
 		return nil, err
 	}
-	return func() error { return osRename(target, l.checkout) }, nil
+	return func() error { return fsys.Rename(target, l.checkout) }, nil
 }
 
 // nestedWorktrees returns the linked worktrees located inside checkout,
@@ -387,7 +407,7 @@ func sharedHistory(ctx context.Context, checkout, primary, name, def, upstreamSl
 // recorded as the fork. No hosting service is asked. The warnings explain
 // why an upstream remote was not recorded. finalPath maps the default branch
 // to the path of the primary checkout after adoption (for hints).
-func describeCheckout(ctx context.Context, checkout string, finalPath func(def string) string, name, defaultBranch, hostOverride string) (bundle.Repository, []string, error) {
+func describeCheckout(ctx context.Context, net gitx.Net, checkout string, finalPath func(def string) string, name, defaultBranch, hostOverride string) (bundle.Repository, []string, error) {
 	url, err := gitx.RemoteURL(ctx, checkout, "origin")
 	if err != nil {
 		return bundle.Repository{}, nil, fmt.Errorf("no usable origin remote: %w", err)
@@ -401,7 +421,7 @@ func describeCheckout(ctx context.Context, checkout string, finalPath func(def s
 		if defaultBranch != "" {
 			return defaultBranch, nil
 		}
-		def, err := gitx.DefaultBranchOf(ctx, checkout, remote)
+		def, err := net.DefaultBranchOf(ctx, checkout, remote)
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
@@ -446,7 +466,7 @@ func describeCheckout(ctx context.Context, checkout string, finalPath func(def s
 
 // moveIntoSubdir moves dir to dir/sub through a temporary directory in root
 // and returns a function that moves it back.
-func moveIntoSubdir(root, dir, sub string) (func() error, error) {
+func moveIntoSubdir(fsys moveFS, root, dir, sub string) (func() error, error) {
 	fi, err := os.Lstat(dir)
 	if err != nil {
 		return nil, err
@@ -457,22 +477,22 @@ func moveIntoSubdir(root, dir, sub string) (func() error, error) {
 		return nil, err
 	}
 	staged := filepath.Join(tmp, "repo")
-	if err := osRename(dir, staged); err != nil {
+	if err := fsys.Rename(dir, staged); err != nil {
 		os.Remove(tmp)
 		return nil, err
 	}
 	// From here on dir is missing: every failure must put it back.
 	restore := func(cause error) error {
-		if err := osRename(staged, dir); err != nil {
+		if err := fsys.Rename(staged, dir); err != nil {
 			return fmt.Errorf("%w; restoring %s from %s failed: %v", cause, dir, staged, err)
 		}
 		os.Remove(tmp)
 		return cause
 	}
-	if err := osMkdir(dir, fi.Mode().Perm()); err != nil {
+	if err := fsys.Mkdir(dir, fi.Mode().Perm()); err != nil {
 		return nil, restore(err)
 	}
-	if err := osRename(staged, target); err != nil {
+	if err := fsys.Rename(staged, target); err != nil {
 		if rerr := os.Remove(dir); rerr != nil {
 			return nil, fmt.Errorf("%w; the clone is still in %s (removing %s failed: %v)", err, staged, dir, rerr)
 		}
@@ -485,18 +505,18 @@ func moveIntoSubdir(root, dir, sub string) (func() error, error) {
 			return err
 		}
 		staged := filepath.Join(back, "repo")
-		if err := osRename(target, staged); err != nil {
+		if err := fsys.Rename(target, staged); err != nil {
 			os.Remove(back)
 			return err
 		}
 		if err := os.Remove(dir); err != nil {
-			if rerr := osRename(staged, target); rerr != nil {
+			if rerr := fsys.Rename(staged, target); rerr != nil {
 				return fmt.Errorf("%w; the clone is in %s", err, staged)
 			}
 			os.Remove(back)
 			return err
 		}
-		if err := osRename(staged, dir); err != nil {
+		if err := fsys.Rename(staged, dir); err != nil {
 			return fmt.Errorf("%w; the clone is in %s", err, staged)
 		}
 		os.Remove(back)
@@ -547,7 +567,7 @@ func recheckEntry(ctx context.Context, w *Workspace, name string, opts AdoptOpti
 	if prob != nil {
 		return "", fmt.Errorf("cannot re-examine %s: %s: %w", name, prob.Path, prob.Err)
 	}
-	found, warnings, err := describeCheckout(ctx, primary, func(string) string { return primary }, name, cur.DefaultBranch, opts.Host)
+	found, warnings, err := describeCheckout(ctx, gitx.Net{Interactive: opts.Interactive}, primary, func(string) string { return primary }, name, cur.DefaultBranch, opts.Host)
 	if err != nil {
 		return "", fmt.Errorf("cannot re-examine %s: %w", name, err)
 	}

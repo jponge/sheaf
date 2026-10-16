@@ -59,7 +59,7 @@ func layout(t *testing.T, opts testutil.OriginOpts) (o testutil.Origin, repo, pr
 	o = testutil.NewOrigin(t, opts)
 	repo = filepath.Join(t.TempDir(), "repo")
 	primary = filepath.Join(repo, "main")
-	if err := Clone(context.Background(), o.URL, primary, ""); err != nil {
+	if err := (Net{}).Clone(context.Background(), o.URL, primary, ""); err != nil {
 		t.Fatal(err)
 	}
 	return o, resolved(t, repo), resolved(t, primary)

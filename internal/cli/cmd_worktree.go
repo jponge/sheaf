@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/ops"
 	"github.com/spf13/cobra"
 )
@@ -30,16 +28,13 @@ func addWorktreeCommands(root *cobra.Command, d Deps) {
 	root.AddCommand(wt, newPathCmd(d))
 }
 
-// singleRepoContext is checkoutContext for the commands that work on a
-// single repository (remove, wt add, wt rm, wt pr): they run one git process
-// at a time, so interactive git mode does not depend on -j (prompts cannot
-// interleave); it still needs CLI mode and standard input on a terminal.
-func singleRepoContext(c *cobra.Command) context.Context {
-	ctx := c.Context()
-	if gitInteractive(false, 1, stdinIsTerminal(c.InOrStdin())) {
-		ctx = gitx.WithInteractive(ctx)
-	}
-	return ctx
+// singleRepoInteractiveGit is interactiveGit for the commands that work on
+// a single repository (remove, wt add, wt rm, wt pr): they run one git
+// process at a time, so interactive git mode does not depend on -j (prompts
+// cannot interleave); it still needs CLI mode and standard input on a
+// terminal.
+func (d Deps) singleRepoInteractiveGit(c *cobra.Command) bool {
+	return gitInteractive(false, 1, d.stdinIsTerminal(c.InOrStdin()))
 }
 
 // eventSink returns an emitter filling the defaults of events (repository,
@@ -148,7 +143,8 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				res, err := ops.AddTagWorktree(singleRepoContext(c), w, repo, target.Name, opts, eventSink(c, repo, ops.PhaseWorktree))
+				opts.Interactive = d.singleRepoInteractiveGit(c)
+				res, err := ops.AddTagWorktree(c.Context(), w, repo, target.Name, opts, eventSink(c, repo, ops.PhaseWorktree))
 				if err != nil {
 					return err
 				}
@@ -159,7 +155,8 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := ops.AddWorktree(singleRepoContext(c), w, repo, branch.Name, opts, eventSink(c, repo, ops.PhaseWorktree))
+			opts.Interactive = d.singleRepoInteractiveGit(c)
+			res, err := ops.AddWorktree(c.Context(), w, repo, branch.Name, opts, eventSink(c, repo, ops.PhaseWorktree))
 			if err != nil {
 				return err
 			}
@@ -376,7 +373,7 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 			if opts.WorkingDir, err = d.getwd(); err != nil {
 				return err
 			}
-			return tuiWorktreeRemove(c, w, repo, target, opts, yes)
+			return tuiWorktreeRemove(c, d, w, repo, target, opts, yes)
 		}
 		emit := eventSink(c, repo, ops.PhaseWorktree)
 		opts.Confirm = func(p ops.WorktreeRemovePlan) bool {
@@ -388,7 +385,8 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 		if opts.WorkingDir, err = d.getwd(); err != nil {
 			return err
 		}
-		msg, err := ops.RemoveWorktree(singleRepoContext(c), w, repo, target, opts, emit)
+		opts.Interactive = d.singleRepoInteractiveGit(c)
+		msg, err := ops.RemoveWorktree(c.Context(), w, repo, target, opts, emit)
 		if errors.Is(err, ops.ErrNotConfirmed) {
 			return fmt.Errorf("removing worktree %s of %s needs confirmation: pass --yes (sheaf never prompts in CLI mode)", target.Name, repo)
 		}
@@ -533,7 +531,7 @@ func newWorktreePRCmd(d Deps) *cobra.Command {
 				return err
 			}
 			emit := eventSink(c, rc.Name, ops.PhasePR)
-			res, err := ops.AddPRWorktree(singleRepoContext(c), w, d.hosting(), rc.Name, n, emit)
+			res, err := ops.AddPRWorktree(c.Context(), w, d.hosting(), rc.Name, n, ops.PRWorktreeOptions{Interactive: d.singleRepoInteractiveGit(c)}, emit)
 			if err != nil {
 				return err
 			}

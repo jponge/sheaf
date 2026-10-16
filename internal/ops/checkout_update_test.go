@@ -124,6 +124,7 @@ func TestUpdateFetchFailureFailsTheRepositoryCheckouts(t *testing.T) {
 // Cancelled while fetching: no merge starts, every checkout of the
 // repository is reported as failed with the context's error.
 func TestUpdateCancelledDuringFetchStartsNoMerge(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	o, alpha := addRepoWith(t, f, "alpha", "feat")
 	addWorktree(t, alpha, "feat", "feat", true)
@@ -131,10 +132,7 @@ func TestUpdateCancelledDuringFetchStartsNoMerge(t *testing.T) {
 	before := testutil.Git(t, alpha, "rev-parse", "HEAD")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	old := fetchHook
-	t.Cleanup(func() { fetchHook = old })
-	fetchHook = func(string) { cancel() }
-	r, _ := Update(ctx, f.w, UpdateOptions{Jobs: 1}, Discard)
+	r, _ := Update(ctx, f.w, UpdateOptions{Jobs: 1, fetchHook: func(string) { cancel() }}, Discard)
 	if len(r.Checkouts) != 2 {
 		t.Fatalf("report = %+v", r)
 	}

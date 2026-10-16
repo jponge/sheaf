@@ -47,6 +47,10 @@ type RunOptions struct {
 	// DefaultRunGrace).
 	Grace time.Duration
 	Sink  RunSink
+
+	// spillHook, when set by a test, is called with the path of each
+	// temporary file used to hold a large output.
+	spillHook func(path string)
 }
 
 // RunResult is the outcome of the command in one checkout.
@@ -179,7 +183,7 @@ func RunCommand(ctx context.Context, w *Workspace, opts RunOptions) (RunReport, 
 	}
 	forEach(opts.Jobs, len(cs), func(i int) {
 		if !notStarted(i) {
-			buf := &spillBuffer{}
+			buf := &spillBuffer{hook: opts.spillHook}
 			r := runIn(ctx, cs[i], argv, buf, grace)
 			mu.Lock()
 			results[i], outputs[i] = r, buf
@@ -211,6 +215,7 @@ const spillLimit = 1 << 20
 // exits without cleanup (emergency stop); elsewhere it is removed after
 // replay.
 type spillBuffer struct {
+	hook     func(path string) // see RunOptions.spillHook
 	mu       sync.Mutex
 	unlinked bool
 	buf      bytes.Buffer
@@ -248,8 +253,8 @@ func (s *spillBuffer) spill() {
 	}
 	s.f = f
 	s.unlinked = unlinkOpen(f.Name())
-	if spillHook != nil {
-		spillHook(s.f.Name())
+	if s.hook != nil {
+		s.hook(s.f.Name())
 	}
 	if _, err := s.f.Write(s.buf.Bytes()); err != nil {
 		s.err = err
@@ -392,10 +397,6 @@ func runIn(ctx context.Context, c Checkout, argv []string, out io.Writer, grace 
 	}
 	return res
 }
-
-// spillHook, when set by a test, is called with the path of each temporary
-// file used to hold a large output.
-var spillHook func(path string)
 
 // resetCommands re-enables starting commands after KillCommands (tests
 // only).

@@ -33,7 +33,12 @@ func pushPullRef(t *testing.T, o testutil.Origin, n int, parent, file string) st
 
 func (f *fixture) addPRWorktree(t *testing.T, repo string, n int) (PRWorktreeResult, error) {
 	t.Helper()
-	return AddPRWorktree(context.Background(), f.w, f.fake, repo, n, noEmit)
+	return f.addPRWorktreeWith(t, repo, n, PRWorktreeOptions{})
+}
+
+func (f *fixture) addPRWorktreeWith(t *testing.T, repo string, n int, opts PRWorktreeOptions) (PRWorktreeResult, error) {
+	t.Helper()
+	return AddPRWorktree(context.Background(), f.w, f.fake, repo, n, opts, noEmit)
 }
 
 func TestPRWorktreeSameRepository(t *testing.T) {
