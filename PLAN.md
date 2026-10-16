@@ -195,7 +195,7 @@ What to do differently
 | B1 | User documentation: README (install, concepts, layout, `sheaf.yaml` schema, commands, shell integration, safety model) | done (README.md) |
 | B2 | Bare `sheaf` (no subcommand) opens a TUI home screen (goals.md: "runs as a bubbletea TUI and displays menus") instead of printing help | done (af66acc) |
 | B3 | Merge the duplicated listings `ops.ListWorktrees` (step 6) and `ops.ListCheckouts` (step 5) | done (810b2fd, 975e844) |
-| B4 | CI (GitHub Actions): `make test`, `make test-symlinked-tmp`, `make test-shells` on Linux and macOS | later; the user pushes/enables it |
+| B4 | CI (GitHub Actions): `make test`, `make test-symlinked-tmp`, `make test-shells` on Linux and macOS | workflow added (never run: needs push; macOS runner, ubuntu fish 3.7 and timeout unverified) |
 | B5 | Windows: declare unsupported (docs + clear startup error) rather than half-support | done (a4a8745: refused at startup) |
 | B6 | Cross-step end-to-end review: inconsistencies, dead code, leftovers from design changes (e.g. adopt's old switching logic) | done (b315805) |
 | B7 | Dogfooding on the user's Mac (real bundles, GitHub error texts, ssh prompts, terminal emulator, macOS fish/zsh) | later, user-driven |

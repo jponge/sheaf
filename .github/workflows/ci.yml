@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # The fish and zsh tests skip without the shells; test-shells requires
+      # them and finds them on PATH.
+      - name: Install fish and zsh (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fish zsh
+      - name: Install fish and zsh (macOS)
+        if: runner.os == 'macOS'
+        run: brew install fish zsh
+
+      - name: Tool versions
+        run: |
+          go version
+          git --version
+          fish --version
+          zsh --version
+
+      - name: Vet
+        run: |
+          make vet
+          GOOS=windows go vet ./...
+
+      - name: Test
+        run: make test
+
+      - name: Test with TMPDIR through a symbolic link
+        run: make test-symlinked-tmp
+
+      - name: Test with fish and zsh required
+        run: make test-shells
