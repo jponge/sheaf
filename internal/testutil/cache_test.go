@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"testing"
 )
@@ -198,5 +199,23 @@ func TestCachedEntryBuildsInItsOwnDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root1, "k2")); err == nil {
 		t.Errorf("%s holds the build of another entry", root1)
+	}
+}
+
+// A build that does not return (CachedTree's build failing its test with
+// t.Fatal exits the goroutine inside the entry's once) leaves an error for
+// the later callers, not an empty directory without error.
+func TestCachedEntryBuildThatDoesNotReturnIsAnError(t *testing.T) {
+	t.Parallel()
+	key := fmt.Sprintf("test\x00goexit\x00%d", cacheRaceRun.Add(1))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = cached(key, func(string) error { runtime.Goexit(); return nil })
+	}()
+	<-done
+	root, err := cached(key, func(string) error { t.Error("built twice"); return nil })
+	if err == nil || root != "" {
+		t.Fatalf("cached = %q, %v; want an error", root, err)
 	}
 }

@@ -112,7 +112,25 @@ func skipFor(p PrunePlan, branch string) (PruneSkip, bool) {
 //   - wip: worktree tracking origin/wip, unmerged;
 //   - old: branch without worktree tracking origin/old, merged then deleted;
 //   - stale: branch without worktree tracking origin/stale, deleted unmerged.
+//
+// The scenario is built once per test process (see testutil.CachedTree) and
+// each test gets a copy of the bundle and of the origin.
 func pruneScenario(t *testing.T) (*fixture, string, testutil.Origin) {
+	t.Helper()
+	tf := testutil.CachedTree(t, "ops.pruneScenario", func(t *testing.T) testutil.TreeFixture {
+		f, primary, o := buildPruneScenario(t)
+		return testutil.TreeFixture{
+			Dirs:   []string{f.w.Root, filepath.Dir(o.Path)},
+			Values: map[string]string{"root": f.w.Root, "primary": primary, "origin": o.Path, "url": o.URL},
+		}
+	})
+	f := openFixture(t, tf.Values["root"])
+	f.fake.AddRepo(hostingRepo("o", "a", tf.Values["url"]))
+	return f, tf.Values["primary"], testutil.Origin{Path: tf.Values["origin"], URL: tf.Values["url"]}
+}
+
+// buildPruneScenario builds what pruneScenario returns.
+func buildPruneScenario(t *testing.T) (*fixture, string, testutil.Origin) {
 	t.Helper()
 	f := newFixture(t)
 	primary, o := f.clonedRepo(t, "a")

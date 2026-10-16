@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -16,7 +17,29 @@ func confirmAll(WorktreeRemovePlan) bool { return true }
 // forkGoneTopic: a forked repository whose worktree topic tracks
 // origin/topic (one commit, pushed to the fork only), then the fork is
 // deleted: origin/topic is a stale ref holding the only remote copy.
+//
+// The fixture is built once per test process (see testutil.CachedTree) and
+// each test gets a copy of the bundle and of the forked origin.
 func forkGoneTopic(t *testing.T) (*fixture, string) {
+	t.Helper()
+	tf := testutil.CachedTree(t, "ops.forkGoneTopic", func(t *testing.T) testutil.TreeFixture {
+		f, primary, fo := buildForkGoneTopic(t)
+		return testutil.TreeFixture{
+			Dirs: []string{f.w.Root, filepath.Dir(filepath.Dir(fo.Upstream.Path))},
+			Values: map[string]string{"root": f.w.Root, "primary": primary,
+				"upstreamURL": fo.Upstream.URL, "forkURL": fo.Fork.URL},
+		}
+	})
+	f := openFixture(t, tf.Values["root"])
+	// As addForked registered them.
+	f.fake.User = forkUser
+	f.fake.AddRepo(hostingRepoBranch("up", "x", tf.Values["upstreamURL"], "main"))
+	f.fake.AddFork(hostingFork("x", tf.Values["forkURL"]))
+	return f, tf.Values["primary"]
+}
+
+// buildForkGoneTopic builds what forkGoneTopic returns.
+func buildForkGoneTopic(t *testing.T) (*fixture, string, testutil.ForkedOrigin) {
 	t.Helper()
 	f := newFixture(t)
 	fo, primary := f.addForked(t, "x", testutil.OriginOpts{})
@@ -24,7 +47,7 @@ func forkGoneTopic(t *testing.T) (*fixture, string) {
 	if err := os.RemoveAll(fo.Fork.Path); err != nil {
 		t.Fatal(err)
 	}
-	return f, primary
+	return f, primary, fo
 }
 
 func TestRemoveWorktreeForkGoneKeepsBranchUnlessForced(t *testing.T) {

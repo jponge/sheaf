@@ -287,6 +287,9 @@ func cached(key string, build func(root string) error) (string, error) {
 		testHookCacheEntry(key)
 	}
 	e.once.Do(func() {
+		// Kept if build does not return (e.g. CachedTree's build failing its
+		// test with t.Fatal, which exits the goroutine): once is then done.
+		e.err = fmt.Errorf("building the cache entry %q did not complete", key)
 		base, err := rootDir()
 		if err != nil {
 			e.err = err
@@ -301,7 +304,7 @@ func cached(key string, build func(root string) error) (string, error) {
 			e.err = err
 			return
 		}
-		e.path = root
+		e.path, e.err = root, nil
 	})
 	return e.path, e.err
 }

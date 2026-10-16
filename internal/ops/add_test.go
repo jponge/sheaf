@@ -34,6 +34,18 @@ func newFixture(t *testing.T) *fixture {
 	return &fixture{w: w, fake: hosting.NewFake()}
 }
 
+// openFixture returns a fixture for the existing bundle root (a copy of a
+// cached fixture, see testutil.CachedTree), with an empty fake.
+func openFixture(t *testing.T, root string) *fixture {
+	t.Helper()
+	testutil.IsolateGit(t)
+	w, err := OpenWorkspace(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &fixture{w: w, fake: hosting.NewFake()}
+}
+
 // repo registers owner/name in the fake, backed by a fresh bare origin.
 func (f *fixture) repo(t *testing.T, owner, name, defaultBranch string, archived bool) hosting.Repo {
 	t.Helper()
