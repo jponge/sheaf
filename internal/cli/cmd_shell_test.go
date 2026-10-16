@@ -616,3 +616,54 @@ cd a/main; scd feat-x; pwd; scd b; pwd`)
 		t.Fatalf("got:\n%s\nwant:\n%s", out, want)
 	}
 }
+
+// TestScdBashCompletionQuotedWords drives readline through a pty: words typed
+// with quotes or escapes (including an open quote in the word being completed)
+// must reach sheaf unquoted, and the inserted candidate must give back the
+// candidate as one argument. Each case runs in its own shell, so that a quote
+// left open cannot affect the next ones.
+func TestScdBashCompletionQuotedWords(t *testing.T) {
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is not installed: no pty-driven completion test")
+	}
+	bin := sheafBinary(t)
+	_, root := shellBundle(t)
+	parent, name := filepath.Dir(root), filepath.Base(root)
+	// a bundle directory name with a backslash (git refuses them in branches)
+	if err := os.Symlink(root, filepath.Join(parent, `back\slash`)); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	rc := filepath.Join(dir, "rc")
+	script := filepath.Join(dir, "drive.py")
+	// args stands for scd and shows the arguments it receives
+	rcText := "eval \"$(sheaf shell-init bash)\"\nargs() { printf '<%s>' \"$@\"; echo; }\ncomplete -F _sheaf_scd args\n"
+	for f, c := range map[string]string{rc: rcText, script: ptyDriver} {
+		if err := os.WriteFile(f, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b := "<--bundle><" + name + "><a>"
+	// keys are decoded by the driver: \\ is one backslash, \t a tab
+	for _, c := range []struct{ keys, want string }{
+		{`args --bundle 'my bundle' a ma\t`, b + "<main>"},
+		{`args --bundle "my bundle" a q-\t`, b + "<q-r>"},
+		{`args --bundle my' 'bun"dle" a ma\t`, b + "<main>"},
+		{`args --bundle my\\ bundle a q\\&\t`, b + "<q&r>"},
+		{`args --bundle my\\ bundle a 'x$\t`, b + "<x$y>"},
+		{`args --bundle my\\ bundle a "q&\t`, b + "<q&r>"},
+		{`args --bundle my\\ bundle a "x$\t`, b + "<x$y>"},
+		{`args --bundle back\\\\slash a ma\t`, `<--bundle><back\slash><a><main>`},
+		{`args --bundle 'back\\slash' a ma\t`, `<--bundle><back\slash><a><main>`},
+		{`args --bundle "back\\\\slash" a ma\t`, `<--bundle><back\slash><a><main>`},
+	} {
+		out, err := exec.Command(py, "-I", script, "/bin/bash", bin, parent, rc, c.keys, `\n`).CombinedOutput()
+		if err != nil {
+			t.Fatalf("driver: %v\n%s", err, out)
+		}
+		if !strings.Contains(string(out), c.want+"\r\n") || strings.Contains(string(out), "DRIVER:") {
+			t.Errorf("%s: want %s in:\n%s", c.keys, c.want, out)
+		}
+	}
+}

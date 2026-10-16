@@ -152,13 +152,46 @@ var shellInit = map[string]string{
   cd -- "$dir"
 }
 
+# _sheaf_scd_dequote word: sets dq to the word as the shell would pass it
+# (quote removal, no expansion), dq_quote to the quote left open at its end
+# (' or ", or empty) and dq_head to the value of the part before that quote.
+_sheaf_scd_dequote() {
+  local s=$1 c i bq=$'\x60'
+  dq= dq_quote= dq_head=
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    if [[ $dq_quote == "'" ]]; then
+      if [[ $c == "'" ]]; then dq_quote=; else dq+=$c; fi
+    elif [[ $dq_quote == '"' ]]; then
+      if [[ $c == '"' ]]; then
+        dq_quote=
+      elif [[ $c == '\' && ( ${s:i+1:1} == [\"\$\\] || ${s:i+1:1} == "$bq" ) ]]; then
+        dq+=${s:i+1:1}
+        ((i++))
+      else
+        dq+=$c
+      fi
+    elif [[ $c == "'" || $c == '"' ]]; then
+      dq_quote=$c
+      dq_head=$dq
+    elif [[ $c == '\' ]]; then
+      dq+=${s:i+1:1}
+      ((i++))
+    else
+      dq+=$c
+    fi
+  done
+}
+
 _sheaf_scd() {
-  local i n w v pre cur line d=4
+  local i n w v pre cur line dq dq_quote dq_head bq=$'\x60' d=4
   local -a args=() out=()
   COMPREPLY=()
-  # COMP_WORDBREAKS splits --bundle=X into three words: join them again.
+  # COMP_WORDS are as typed: unquote them. COMP_WORDBREAKS splits --bundle=X
+  # into three words: join them again.
   for ((i = 1; i <= COMP_CWORD; i++)); do
-    w="${COMP_WORDS[i]//\\/}"
+    _sheaf_scd_dequote "${COMP_WORDS[i]}"
+    w=$dq
     n=${#args[@]}
     if ((n)) && { [[ $w == = ]] || [[ ${args[n-1]} == -*= ]]; }; then
       args[n-1]+=$w
@@ -181,7 +214,10 @@ _sheaf_scd() {
       args[i]=$pre$HOME${v#\~}
     fi
   done
-  cur=${COMP_WORDS[COMP_CWORD]//\\/}
+  # dq* now describe the current word. Inside a quote left open, readline
+  # replaces the text after the quote and closes it: insert the rest of the
+  # candidate, quoted for that quote, instead of escaping it.
+  cur=$dq
   [[ $cur == = ]] && cur=
   while IFS= read -r line; do
     out+=("$line")
@@ -196,7 +232,19 @@ _sheaf_scd() {
     line="${line%%$'\t'*}"
     case "$line" in
       '' | --jobs | -j | --no-tui) continue ;;
-      "$cur"*) COMPREPLY+=("$(printf '%q' "$line")") ;;
+      "$cur"*)
+        if [[ $dq_quote == "'" ]]; then
+          COMPREPLY+=("${line#"$dq_head"}")
+        elif [[ $dq_quote == '"' ]]; then
+          line=${line#"$dq_head"}
+          line=${line//\\/\\\\}
+          line=${line//\$/\\\$}
+          line=${line//"$bq"/\\$bq}
+          COMPREPLY+=("${line//\"/\\\"}")
+        else
+          COMPREPLY+=("$(printf '%q' "$line")")
+        fi
+        ;;
     esac
   done
   if ((${#COMPREPLY[@]} == 0 && (d & 4) == 0)); then

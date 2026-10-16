@@ -178,3 +178,5 @@ What to do differently
 - macOS (user) at 040cb46, -race slowest ops tests: TestR10BranchMovedAfterPlan 4.02 s (builds the cached scenario), other prune-scenario tests 1.8–2.4 s (were 3.1–3.9 s); TestGitCallsPerCommand 3.35 s (was 5.1).
 - Decision 2026-10-16 (user): test execution time is acceptable; speed work closed.
 - fish 4.0.2 / zsh 5.9 verified in the container (Debian debs unpacked without root): scd + completion work; fixed quoting/escaping in zsh and fish scd completion, and patched cobra's generated fish script (it evaluated quoted (cmd) words on TAB). make test-shells added. Open: same quoting bug in bash scd completion; cobra zsh open-quote issue (upstream).
+- Decisions 2026-10-16 (user): keep the cobra fish-script patch (orchestrator drafts an upstream report for the user to file); fix bash scd completion quoting with a dequote routine.
+- bash scd completion: quote-aware dequote and open-quote completion (test-first, 9/10 red → green). Cobra fish issue draft left untracked at ./cobra-fish-issue.md for the user to file.
