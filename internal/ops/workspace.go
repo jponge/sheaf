@@ -162,9 +162,11 @@ func createIn(dir string) (string, error) {
 type CandidateKind int
 
 const (
-	// CandidatePlainClone: <dir>/.git; Adopt moves it to <dir>/<branch>/.
+	// CandidatePlainClone is a checkout at <dir>/.git; Adopt moves it to
+	// <dir>/<branch>/.
 	CandidatePlainClone CandidateKind = iota + 1
-	// CandidateLaidOut: <dir>/<branch-dir>/.git; Adopt only registers it.
+	// CandidateLaidOut is a checkout at <dir>/<branch-dir>/.git; Adopt only
+	// registers it.
 	CandidateLaidOut
 )
 

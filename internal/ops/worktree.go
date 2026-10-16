@@ -173,7 +173,7 @@ func ListWorktrees(ctx context.Context, w *Workspace, repo string) ([]WorktreeIn
 		fails []RepoError
 	)
 	for _, r := range repos {
-		infos, _, _, err := listRepo(ctx, w.Root, r)
+		infos, _, err := listRepo(ctx, w.Root, r)
 		if err != nil {
 			if ctx.Err() != nil {
 				return out, fails, ctx.Err()
@@ -192,35 +192,39 @@ func ListWorktrees(ctx context.Context, w *Workspace, repo string) ([]WorktreeIn
 	return out, fails, nil
 }
 
-// listRepo returns the checkouts of r in the order of enumerateRepo, its
-// repository directory and its primary checkout, after checking them (see
+// listRepo returns the checkouts of r in the order of enumerateRepo and its
+// primary checkout, after checking them (see
 // coCheckPrimary). A linked worktree that cannot be used is listed with
 // WorktreeInfo.unusable set, unless only its directory is missing (it is
 // then listed, prunable).
-func listRepo(ctx context.Context, root string, r bundle.Repository) (infos []WorktreeInfo, repoDir, primary string, err error) {
+func listRepo(ctx context.Context, root string, r bundle.Repository) (infos []WorktreeInfo, primary string, err error) {
 	primary, common, prob := coCheckPrimary(ctx, root, r)
 	if prob != nil {
-		return nil, "", "", fmt.Errorf("%s: %w", prob.Path, prob.Err)
+		return nil, "", fmt.Errorf("%s: %w", prob.Path, prob.Err)
 	}
-	return listCheckedRepo(ctx, r, primary, common, true)
+	if infos, _, err = listCheckedRepo(ctx, r, primary, common, true); err != nil {
+		return nil, "", err
+	}
+	return infos, primary, nil
 }
 
 // listRepoUnverified is listRepo without the verification of the linked
-// worktrees (unusable is never set), for collision checks.
-func listRepoUnverified(ctx context.Context, root string, r bundle.Repository) (infos []WorktreeInfo, repoDir, primary string, err error) {
+// worktrees (unusable is never set), for collision checks; it returns the
+// repository directory instead of the primary checkout.
+func listRepoUnverified(ctx context.Context, root string, r bundle.Repository) (infos []WorktreeInfo, repoDir string, err error) {
 	primary, common, prob := coCheckPrimary(ctx, root, r)
 	if prob != nil {
-		return nil, "", "", fmt.Errorf("%s: %w", prob.Path, prob.Err)
+		return nil, "", fmt.Errorf("%s: %w", prob.Path, prob.Err)
 	}
 	return listCheckedRepo(ctx, r, primary, common, false)
 }
 
 // listCheckedRepo is listRepo (listRepoUnverified without verify) for a
 // primary checkout already accepted by coCheckPrimary.
-func listCheckedRepo(ctx context.Context, r bundle.Repository, primary, common string, verify bool) (infos []WorktreeInfo, repoDir, _ string, err error) {
+func listCheckedRepo(ctx context.Context, r bundle.Repository, primary, common string, verify bool) (infos []WorktreeInfo, repoDir string, err error) {
 	entries, err := enumerateRepo(ctx, primary, common, enumPolicy{keepMissing: true, noVerify: !verify})
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", err
 	}
 	for _, wt := range entries {
 		p := filepath.Clean(wt.Path)
@@ -236,7 +240,7 @@ func listCheckedRepo(ctx context.Context, r bundle.Repository, primary, common s
 		}
 		infos = append(infos, info)
 	}
-	return infos, filepath.Dir(primary), primary, nil
+	return infos, filepath.Dir(primary), nil
 }
 
 // errNoWorktree is wrapped by findWorktree when nothing matches.
@@ -439,7 +443,7 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 		return WorktreeAddResult{}, err
 	}
 	// Cheap checks before the fetch; repeated under the lock below.
-	infos, repoDir, _, err := listRepoUnverified(ctx, w.Root, r)
+	infos, repoDir, err := listRepoUnverified(ctx, w.Root, r)
 	if err != nil {
 		return WorktreeAddResult{}, fmt.Errorf("%s: %w", r.Name, err)
 	}
@@ -490,7 +494,7 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 		return WorktreeAddResult{}, fmt.Errorf("locking %s: %w", bundle.FileName, err)
 	}
 	defer unlock()
-	if infos, repoDir, _, err = listRepoUnverified(ctx, w.Root, r); err != nil {
+	if infos, repoDir, err = listRepoUnverified(ctx, w.Root, r); err != nil {
 		return WorktreeAddResult{}, fmt.Errorf("%s: %w", r.Name, err)
 	}
 	if err := checkAddTarget(infos, repoDir, branch, dir); err != nil {
@@ -591,7 +595,7 @@ func checkNotRefLike(ctx context.Context, dir, branch string) error {
 	if err != nil {
 		return err
 	}
-	for _, rem := range strings.Fields(out) {
+	for rem := range strings.FieldsSeq(out) {
 		if branch == rem {
 			return fmt.Errorf("branch name %q is not allowed: it is the name of a remote", branch)
 		}
@@ -829,7 +833,7 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 	if prob != nil {
 		return "", fmt.Errorf("%s: %s: %w", r.Name, prob.Path, prob.Err)
 	}
-	infos, repoDir, _, err := listCheckedRepo(ctx, r, primary, common, true)
+	infos, repoDir, err := listCheckedRepo(ctx, r, primary, common, true)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", r.Name, err)
 	}
@@ -1004,16 +1008,7 @@ func checkContained(repoDir string, wt WorktreeInfo) error {
 	if err != nil {
 		return fmt.Errorf("refusing to remove %s: %w", expected, err)
 	}
-	if fi.Mode()&fs.ModeSymlink != 0 {
-		return fmt.Errorf("refusing to remove %s: it is a symbolic link", expected)
-	}
-	if !fi.IsDir() {
-		return fmt.Errorf("refusing to remove %s: not a directory", expected)
-	}
-	if rp, err := filepath.EvalSymlinks(expected); err != nil || rp != expected {
-		return fmt.Errorf("refusing to remove %s: it does not resolve to itself (%s, %v)", expected, rp, err)
-	}
-	return nil
+	return refuseRemovalUnlessRealDir(expected, fi)
 }
 
 func planWorktreeRemoval(ctx context.Context, r bundle.Repository, repoDir, primary string, wt WorktreeInfo, deleteBr bool, wd, fetchMsg string,
@@ -1140,7 +1135,7 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 		if err != nil {
 			return err
 		}
-		for _, ref := range strings.Fields(out) {
+		for ref := range strings.FieldsSeq(out) {
 			if ref != own && !distrust.covers(ref) {
 				plan.ContainedIn = strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "refs/remotes/"), "refs/tags/")
 				return nil

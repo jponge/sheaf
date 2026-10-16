@@ -51,7 +51,7 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 		return WorktreeAddResult{}, fmt.Errorf("tag %q cannot be mapped to a directory name", tag)
 	}
 	// Cheap checks before the fetch; repeated under the lock below.
-	infos, repoDir, _, err := listRepoUnverified(ctx, w.Root, r)
+	infos, repoDir, err := listRepoUnverified(ctx, w.Root, r)
 	if err != nil {
 		return WorktreeAddResult{}, fmt.Errorf("%s: %w", r.Name, err)
 	}
@@ -81,7 +81,7 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 		return WorktreeAddResult{}, fmt.Errorf("locking %s: %w", bundle.FileName, err)
 	}
 	defer unlock()
-	if infos, repoDir, _, err = listRepoUnverified(ctx, w.Root, r); err != nil {
+	if infos, repoDir, err = listRepoUnverified(ctx, w.Root, r); err != nil {
 		return WorktreeAddResult{}, fmt.Errorf("%s: %w", r.Name, err)
 	}
 	if err := checkTagTarget(infos, repoDir, tag, dir); err != nil {

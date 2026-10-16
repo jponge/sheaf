@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,10 +14,11 @@ import (
 // RowState is the state of a Progress row.
 type RowState int
 
+// Row states.
 const (
-	// RowRunning: the work of the row is in progress (spinner).
+	// RowRunning means the work of the row is in progress (spinner).
 	RowRunning RowState = iota + 1
-	// RowDone, RowSkipped and RowFailed are final states.
+	// RowDone, like RowSkipped and RowFailed, is a final state.
 	RowDone
 	RowSkipped
 	RowFailed
@@ -175,7 +177,7 @@ func (m Progress) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case RowUpdate:
 		m.apply(msg)
 	case AskMsg:
-		m.asks = append(m.asks[:len(m.asks):len(m.asks)], msg)
+		m.asks = append(slices.Clip(m.asks), msg)
 		if len(m.asks) == 1 {
 			m.showAsk()
 		}

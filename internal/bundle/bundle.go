@@ -112,7 +112,7 @@ func ValidateHost(h string) error {
 	if len(h) > 253 {
 		return fmt.Errorf("invalid host %q: too long", h)
 	}
-	for _, label := range strings.Split(h, ".") {
+	for label := range strings.SplitSeq(h, ".") {
 		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
 			return fmt.Errorf("invalid host %q", h)
 		}

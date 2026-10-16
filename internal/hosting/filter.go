@@ -1,7 +1,7 @@
 package hosting
 
 import (
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -20,15 +20,14 @@ func Filter(repos []Repo, opts FilterOpts) []Repo {
 		}
 		out = append(out, r)
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		a, b := out[i], out[j]
+	slices.SortStableFunc(out, func(a, b Repo) int {
 		if c := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {
-			return c < 0
+			return c
 		}
-		if a.Name != b.Name {
-			return a.Name < b.Name
+		if c := strings.Compare(a.Name, b.Name); c != 0 {
+			return c
 		}
-		return a.Owner < b.Owner
+		return strings.Compare(a.Owner, b.Owner)
 	})
 	return out
 }

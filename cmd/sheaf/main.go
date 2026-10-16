@@ -1,3 +1,6 @@
+// Command sheaf manages a group of git repositories checked out side by side
+// in one directory, the bundle, each with a primary checkout and linked
+// worktrees as siblings. The commands are implemented in internal/cli.
 package main
 
 import (

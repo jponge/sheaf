@@ -16,21 +16,21 @@ import (
 type ProposalKind string
 
 const (
-	// ProposalNew: a repository of a tracked organization that is not in the
+	// ProposalNew is for a repository of a tracked organization that is not in the
 	// bundle and not excluded. Accepting it clones it (SyncAddNew);
 	// declining it for good records it in the source's exclude list
 	// (SyncExclude).
 	ProposalNew ProposalKind = "new"
-	// ProposalGone: a repository recorded with origin org:<name> that the
+	// ProposalGone is for a repository recorded with origin org:<name> that the
 	// organization no longer lists (deleted, transferred or renamed: the
 	// hosting service lists repositories under their current name, so a
 	// rename shows up as one gone and one new proposal). Accepting it removes
 	// the repository (SyncRemoveGone, with all the safety of Remove).
 	ProposalGone ProposalKind = "gone"
-	// ProposalArchived: a repository of the bundle that the organization
+	// ProposalArchived is for a repository of the bundle that the organization
 	// lists as archived. Informational only: nothing is applied for it.
 	ProposalArchived ProposalKind = "archived"
-	// ProposalMoved: a repository recorded with origin org:<name> that the
+	// ProposalMoved is for a repository recorded with origin org:<name> that the
 	// organization no longer lists but that still exists under another
 	// owner or name (transferred or renamed; Proposal.Repo is its current
 	// identity). Informational only.

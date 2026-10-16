@@ -9,6 +9,7 @@ import "fmt"
 // Kind is the kind of an Event.
 type Kind int
 
+// Event kinds.
 const (
 	KindStart    Kind = iota + 1 // an operation on a repository started
 	KindProgress                 // intermediate information

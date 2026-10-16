@@ -61,7 +61,7 @@ func parseWorktrees(out string) ([]Worktree, error) {
 		wts []Worktree
 		cur *Worktree
 	)
-	for _, f := range strings.Split(out, "\x00") {
+	for f := range strings.SplitSeq(out, "\x00") {
 		if f == "" {
 			cur = nil
 			continue
@@ -98,12 +98,12 @@ func parseWorktrees(out string) ([]Worktree, error) {
 type WorktreeAddMode int
 
 const (
-	// WorktreeLocalBranch: the local branch existed and was checked out.
+	// WorktreeLocalBranch means the local branch existed and was checked out.
 	WorktreeLocalBranch WorktreeAddMode = iota + 1
-	// WorktreeRemoteBranch: origin/<branch> existed; a local branch tracking
+	// WorktreeRemoteBranch means origin/<branch> existed; a local branch tracking
 	// it was created.
 	WorktreeRemoteBranch
-	// WorktreeNewBranch: neither existed; a new branch without upstream was
+	// WorktreeNewBranch means neither existed; a new branch without upstream was
 	// created from WorktreeAddOpts.Base.
 	WorktreeNewBranch
 )

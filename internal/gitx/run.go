@@ -174,8 +174,7 @@ func runProcess(ctx context.Context, o runOpts, dir string, args ...string) (str
 	}
 	if err != nil {
 		ge := &GitError{Args: args, Dir: dir, ExitCode: -1, Stderr: strings.TrimSpace(stderr.String()), Err: err}
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
+		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 			ge.ExitCode = ee.ExitCode()
 		}
 		if forced.Load() {

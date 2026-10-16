@@ -310,3 +310,24 @@ func TestKillCommandsKillsRunningGroups(t *testing.T) {
 		t.Fatal("RunCommand did not return")
 	}
 }
+
+// After KillCommands, RunCommand starts nothing; the result's error is what
+// the CLI shows for the checkout (as "[...]" after its block and in the
+// "failed: ... (...)" summary line).
+func TestRunCommandAfterKillCommandsDoesNotStart(t *testing.T) {
+	t.Cleanup(coResetCommands)
+	f, _ := coThreeCheckouts(t)
+	KillCommands()
+	r, err := RunCommand(context.Background(), f.w, RunOptions{
+		Jobs: 1, Shell: true, Filter: CheckoutFilter{Repos: []string{"beta"}}, Sink: &coRecSink{},
+		Args: []string{"true"},
+	})
+	if err != nil || len(r.Results) != 1 {
+		t.Fatalf("%v %+v", err, r.Results)
+	}
+	res := r.Results[0]
+	const want = "not started (killed on request)"
+	if res.Started || res.Err == nil || res.Err.Error() != want {
+		t.Errorf("started %v, err %v, want not started with error %q", res.Started, res.Err, want)
+	}
+}

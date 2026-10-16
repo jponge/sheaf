@@ -26,6 +26,7 @@ type Task struct {
 // Status is the final state of a task.
 type Status int
 
+// Final states of a task.
 const (
 	StatusDone Status = iota + 1
 	StatusSkipped
@@ -91,12 +92,10 @@ func Execute(ctx context.Context, jobs int, tasks []Task, rep Reporter) Summary 
 			report(Event{Repo: t.Repo, Phase: t.Phase, Kind: KindFailed, Message: "not started", Err: err})
 			continue
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 			results[i] = runTask(ctx, t, report)
-		}()
+		})
 	}
 	wg.Wait()
 	slices.SortStableFunc(results, func(a, b Result) int { return strings.Compare(a.Repo, b.Repo) })

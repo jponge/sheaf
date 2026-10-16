@@ -19,10 +19,10 @@ type Remotes struct {
 }
 
 var (
-	// OriginRemotes: a single remote "origin", the reference repository.
+	// OriginRemotes is a single remote "origin", the reference repository.
 	OriginRemotes = Remotes{Reference: "origin"}
-	// ForkRemotes: "origin" is the user's fork, "upstream" the reference
-	// repository.
+	// ForkRemotes is the fork layout: "origin" is the user's fork,
+	// "upstream" the reference repository.
 	ForkRemotes = Remotes{Reference: "upstream", Fork: "origin"}
 )
 

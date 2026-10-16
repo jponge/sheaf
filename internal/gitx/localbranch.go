@@ -130,11 +130,10 @@ func branchConfig(ctx context.Context, dir string) (map[string]branchCfg, error)
 		if !ok {
 			continue
 		}
-		i := strings.LastIndexByte(rest, '.')
-		if i < 0 {
+		name, v, found := strings.CutLast(rest, ".")
+		if !found {
 			continue
 		}
-		name, v := rest[:i], rest[i+1:]
 		c := m[name]
 		switch v {
 		case "remote":

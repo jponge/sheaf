@@ -266,7 +266,7 @@ func coUntrackedInTheWay(err error) []string {
 		return nil
 	}
 	var files []string
-	for _, l := range strings.Split(rest, "\n") {
+	for l := range strings.SplitSeq(rest, "\n") {
 		if strings.HasPrefix(l, "\t") {
 			files = append(files, strings.TrimSpace(l))
 		} else if len(files) > 0 {

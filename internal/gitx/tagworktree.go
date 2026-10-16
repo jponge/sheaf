@@ -56,7 +56,7 @@ func fetchTags(ctx context.Context, dir, remote string) (kept []string, err erro
 // fail rather than succeed.
 func keptTags(stderr string) []string {
 	var kept []string
-	for _, line := range strings.Split(stderr, "\n") {
+	for line := range strings.SplitSeq(stderr, "\n") {
 		f := strings.Fields(line)
 		switch {
 		case len(f) == 0 || strings.HasPrefix(line, "From "),

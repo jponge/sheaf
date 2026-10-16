@@ -1,3 +1,6 @@
+// Package cli implements the sheaf command line on top of ops: the cobra
+// commands, the rendering of their results, the interactive screens, shell
+// integration and completion.
 package cli
 
 import (

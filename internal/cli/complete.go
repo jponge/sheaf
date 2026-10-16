@@ -300,7 +300,7 @@ func (k completer) branchesToAdd(c *cobra.Command, repoArg string) []string {
 	}
 	var names []string
 	seen := map[string]bool{}
-	for _, ref := range strings.Split(out, "\n") {
+	for ref := range strings.SplitSeq(out, "\n") {
 		b := strings.TrimPrefix(ref, "refs/heads/")
 		if b == ref {
 			b = ""
@@ -340,7 +340,7 @@ func (k completer) tagsToAdd(c *cobra.Command, repoArg string) []string {
 		return nil
 	}
 	var names []string
-	for _, ref := range strings.Split(out, "\n") {
+	for ref := range strings.SplitSeq(out, "\n") {
 		if t, ok := strings.CutPrefix(ref, "refs/tags/"); ok && t != "" && !taken[t] {
 			names = append(names, t)
 		}

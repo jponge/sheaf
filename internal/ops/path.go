@@ -120,7 +120,7 @@ func ParseRepoArgs(w *Workspace, args []string, sel *WorktreeTarget, cwd string)
 // checkout selected by target.
 func selectCheckout(ctx context.Context, w *Workspace, repo string, target *WorktreeTarget) (WorktreeInfo, error) {
 	r, _ := lookupRepo(w.Bundle(), repo)
-	infos, _, _, err := listRepo(ctx, w.Root, r)
+	infos, _, err := listRepo(ctx, w.Root, r)
 	if err != nil {
 		return WorktreeInfo{}, fmt.Errorf("%s: %w", repo, err)
 	}

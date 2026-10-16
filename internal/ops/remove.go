@@ -302,14 +302,8 @@ func repoDirOf(root, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if fi.Mode()&fs.ModeSymlink != 0 {
-		return "", fmt.Errorf("refusing to remove %s: it is a symbolic link", dir)
-	}
-	if !fi.IsDir() {
-		return "", fmt.Errorf("refusing to remove %s: not a directory", dir)
-	}
-	if r, err := filepath.EvalSymlinks(dir); err != nil || r != dir {
-		return "", fmt.Errorf("refusing to remove %s: it does not resolve to itself (%s, %v)", dir, r, err)
+	if err := refuseRemovalUnlessRealDir(dir, fi); err != nil {
+		return "", err
 	}
 	return dir, nil
 }
@@ -453,7 +447,7 @@ func planRemoval(ctx context.Context, w *Workspace, name, wd string, fetch func(
 		}
 		plan.Items = append(plan.Items, it)
 	}
-	return plan, addUnknownEntries(dir, primary, known, &plan)
+	return plan, addUnknownEntries(dir, known, &plan)
 }
 
 // publishedPullHeads returns the recorded heads (gitx.PullHeadRef) of the
@@ -522,9 +516,9 @@ func nameUnpushedBranches(ctx context.Context, plan *RemovePlan, published []str
 				}
 				continue // the count alone
 			}
-			const max = 5
-			if len(names) > max {
-				names = append(names[:max:max], fmt.Sprintf("and %d more", len(names)-max))
+			const maxListed = 5
+			if len(names) > maxListed {
+				names = append(names[:maxListed:maxListed], fmt.Sprintf("and %d more", len(names)-maxListed))
 			}
 			plan.Items[i].Risks[j].Detail = strings.Join(names, ", ")
 		}
@@ -659,7 +653,7 @@ func significantEntries(dir string) ([]string, error) {
 // addUnknownEntries adds an item for each entry of dir that is none of the
 // known checkouts, and a hard one for each worktree of another repository
 // found in them (see foreignWorktrees).
-func addUnknownEntries(dir, primary string, known []string, plan *RemovePlan) error {
+func addUnknownEntries(dir string, known []string, plan *RemovePlan) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err

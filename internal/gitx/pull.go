@@ -12,23 +12,23 @@ import (
 type PullOutcome int
 
 const (
-	// PullUpToDate: the pull succeeded and HEAD did not move (includes a
+	// PullUpToDate means the pull succeeded and HEAD did not move (includes a
 	// branch that is only ahead of its upstream).
 	PullUpToDate PullOutcome = iota + 1
-	// PullFastForwarded: HEAD moved forward from PullResult.Old to New.
+	// PullFastForwarded means HEAD moved forward from PullResult.Old to New.
 	PullFastForwarded
-	// PullSkippedDirty: staged, unstaged or conflicted changes; nothing was
-	// run.
+	// PullSkippedDirty means there were staged, unstaged or conflicted
+	// changes; nothing was run.
 	PullSkippedDirty
-	// PullSkippedNoUpstream: no upstream configured, or its remote-tracking
-	// ref is gone; nothing was run.
+	// PullSkippedNoUpstream means no upstream is configured, or its
+	// remote-tracking ref is gone; nothing was run.
 	PullSkippedNoUpstream
-	// PullSkippedDiverged: local and upstream both have commits the other
+	// PullSkippedDiverged means local and upstream both have commits the other
 	// lacks according to the remote-tracking ref; HEAD was not moved.
 	PullSkippedDiverged
-	// PullSkippedDetached: HEAD is detached; nothing was run.
+	// PullSkippedDetached means HEAD is detached; nothing was run.
 	PullSkippedDetached
-	// PullFailed: any other failure; PullResult.Err says why.
+	// PullFailed is any other failure; PullResult.Err says why.
 	PullFailed
 )
 

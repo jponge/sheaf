@@ -124,7 +124,7 @@ func AddPRWorktree(ctx context.Context, w *Workspace, h hosting.Hosting, repo st
 
 func sameRepoPR(ctx context.Context, w *Workspace, r bundle.Repository, head, headRemote string, res PRWorktreeResult, emit func(Event)) (PRWorktreeResult, error) {
 	res.Branch = head
-	infos, _, primary, err := listRepo(ctx, w.Root, r)
+	infos, primary, err := listRepo(ctx, w.Root, r)
 	if err != nil {
 		return PRWorktreeResult{}, fmt.Errorf("%s: %w", r.Name, err)
 	}
@@ -250,7 +250,7 @@ func pullRefPR(ctx context.Context, w *Workspace, r bundle.Repository, primary s
 			return PRWorktreeResult{}, fmt.Errorf("local branch %s exists but does not track pull request #%d (branch.%s.merge is %q, not %s); rename or delete it first", branch, n, branch, merge, pullRef)
 		}
 	}
-	infos, _, _, err := listRepo(ctx, w.Root, r)
+	infos, _, err := listRepo(ctx, w.Root, r)
 	if err != nil {
 		return PRWorktreeResult{}, fmt.Errorf("%s: %w", r.Name, err)
 	}

@@ -23,12 +23,11 @@ func procStat(pid int) (ppid int, start string, ok bool) {
 	if err != nil {
 		return 0, "", false
 	}
-	s := string(b)
-	i := strings.LastIndexByte(s, ')')
-	if i < 0 {
+	_, after, found := strings.CutLast(string(b), ")")
+	if !found {
 		return 0, "", false
 	}
-	f := strings.Fields(s[i+1:]) // state ppid pgrp session ... starttime is field 22 overall
+	f := strings.Fields(after) // state ppid pgrp session ... starttime is field 22 overall
 	if len(f) < 20 {
 		return 0, "", false
 	}

@@ -388,16 +388,16 @@ func TestRemoveWorktreeSymlinkedDirRefused(t *testing.T) {
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	root := f.w.Root
-	real := filepath.Join(t.TempDir(), "real")
-	testutil.Git(t, primary, "worktree", "add", "-q", "-b", "linked", real)
+	target := filepath.Join(t.TempDir(), "real")
+	testutil.Git(t, primary, "worktree", "add", "-q", "-b", "linked", target)
 	link := filepath.Join(root, "a", "linked")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
 	testutil.Git(t, primary, "worktree", "repair", link)
 	_, err := f.rmWT(t, "a", "linked", WorktreeRemoveOptions{Force: true})
-	if err == nil || !exists(real) {
-		t.Fatalf("symlinked worktree: err = %v, real exists %v", err, exists(real))
+	if err == nil || !exists(target) {
+		t.Fatalf("symlinked worktree: err = %v, real exists %v", err, exists(target))
 	}
 }
 

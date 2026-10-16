@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -23,13 +24,14 @@ type Row struct {
 type Scope int
 
 const (
-	// ScopeRows: the selected rows, or the current row when none is selected.
-	// Like MultiSelect.SelectedKeys, selected rows count whether the filter
-	// shows them or not (the status line gives the number selected).
+	// ScopeRows applies to the selected rows, or the current row when none
+	// is selected. Like MultiSelect.SelectedKeys, selected rows count whether
+	// the filter shows them or not (the status line gives the number
+	// selected).
 	ScopeRows Scope = iota
-	// ScopeCurrent: the current row only.
+	// ScopeCurrent applies to the current row only.
 	ScopeCurrent
-	// ScopeNone: no row (e.g. an action on the whole bundle).
+	// ScopeNone applies to no row (e.g. an action on the whole bundle).
 	ScopeNone
 )
 
@@ -230,9 +232,7 @@ func (m Overview) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // copies must keep their selection.
 func cloneSet(s map[string]bool) map[string]bool {
 	c := make(map[string]bool, len(s))
-	for k, v := range s {
-		c[k] = v
-	}
+	maps.Copy(c, s)
 	return c
 }
 

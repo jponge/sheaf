@@ -273,7 +273,7 @@ func coWriteProblems(out io.Writer, ps []ops.Problem, color bool) {
 	}
 }
 
-type coJsonCheckout struct {
+type coJSONCheckout struct {
 	Dir          string `json:"dir"`
 	Path         string `json:"path"`
 	Primary      bool   `json:"primary"`
@@ -296,35 +296,35 @@ type coJsonCheckout struct {
 	Error        string `json:"error,omitempty"`
 }
 
-type coJsonRepo struct {
+type coJSONRepo struct {
 	Name      string           `json:"name"`
 	Stashes   int              `json:"stashes"`
-	Checkouts []coJsonCheckout `json:"checkouts"`
+	Checkouts []coJSONCheckout `json:"checkouts"`
 }
 
-type coJsonProblem struct {
+type coJSONProblem struct {
 	Repo  string `json:"repo"`
 	Path  string `json:"path"`
 	Error string `json:"error"`
 }
 
-type coJsonStatus struct {
+type coJSONStatus struct {
 	Version      int             `json:"version"`
 	Bundle       string          `json:"bundle"`
-	Repositories []coJsonRepo    `json:"repositories"`
-	Problems     []coJsonProblem `json:"problems"`
+	Repositories []coJSONRepo    `json:"repositories"`
+	Problems     []coJSONProblem `json:"problems"`
 }
 
 func coWriteStatusJSON(out io.Writer, root string, r ops.StatusReport) error {
-	doc := coJsonStatus{Version: 1, Bundle: root, Repositories: []coJsonRepo{}, Problems: []coJsonProblem{}}
+	doc := coJSONStatus{Version: 1, Bundle: root, Repositories: []coJSONRepo{}, Problems: []coJSONProblem{}}
 	stashKnown := false
 	for _, c := range r.Checkouts {
 		if n := len(doc.Repositories); n == 0 || doc.Repositories[n-1].Name != c.Repo {
-			doc.Repositories = append(doc.Repositories, coJsonRepo{Name: c.Repo, Checkouts: []coJsonCheckout{}})
+			doc.Repositories = append(doc.Repositories, coJSONRepo{Name: c.Repo, Checkouts: []coJSONCheckout{}})
 			stashKnown = false
 		}
 		repo := &doc.Repositories[len(doc.Repositories)-1]
-		jc := coJsonCheckout{Dir: c.Dir, Path: c.Path, Primary: c.Primary, Outside: c.Outside, Branch: c.Branch, Detached: c.Detached, Tag: c.Tag, TagMoved: c.TagMovedTo != ""}
+		jc := coJSONCheckout{Dir: c.Dir, Path: c.Path, Primary: c.Primary, Outside: c.Outside, Branch: c.Branch, Detached: c.Detached, Tag: c.Tag, TagMoved: c.TagMovedTo != ""}
 		if c.Err != nil {
 			jc.Error = c.Err.Error()
 		} else {
@@ -342,7 +342,7 @@ func coWriteStatusJSON(out io.Writer, root string, r ops.StatusReport) error {
 		repo.Checkouts = append(repo.Checkouts, jc)
 	}
 	for _, p := range r.Problems {
-		doc.Problems = append(doc.Problems, coJsonProblem{Repo: p.Repo, Path: p.Path, Error: p.Err.Error()})
+		doc.Problems = append(doc.Problems, coJSONProblem{Repo: p.Repo, Path: p.Path, Error: p.Err.Error()})
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")

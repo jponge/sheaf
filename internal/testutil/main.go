@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -451,8 +452,8 @@ func copyTree(src, dst string) error {
 		return err
 	}
 	// Directory modes last: a read-only directory is filled first.
-	for i := len(dirs) - 1; i >= 0; i-- {
-		if err := os.Chmod(dirs[i].path, dirs[i].mode); err != nil {
+	for _, d := range slices.Backward(dirs) {
+		if err := os.Chmod(d.path, d.mode); err != nil {
 			return err
 		}
 	}

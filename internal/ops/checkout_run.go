@@ -303,7 +303,7 @@ var coCommands = struct {
 }{m: map[*exec.Cmd]bool{}}
 
 // coErrCommandsKilled is the error of commands not started after KillCommands.
-var coErrCommandsKilled = errors.New("coCommands killed on request")
+var coErrCommandsKilled = errors.New("not started (killed on request)")
 
 // KillCommands sends SIGKILL to the process group (outside Unix: the process)
 // of every command started by RunCommand that is still running, and returns

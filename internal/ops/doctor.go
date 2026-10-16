@@ -18,6 +18,7 @@ import (
 // CheckLevel is the severity of a doctor Check.
 type CheckLevel int
 
+// Check levels, from the least to the most severe.
 const (
 	CheckOK   CheckLevel = iota + 1 // all good
 	CheckInfo                       // worth knowing, nothing to fix
@@ -216,7 +217,7 @@ func doctorRepo(ctx context.Context, root string, r bundle.Repository, now time.
 		checkRemote(rs.Reference, r.URL, " (the repository)", "url")
 		checkDefaultTracking(ctx, primary, r, rs, func(msg, hint string) { add(CheckWarn, "tracking", msg, hint) })
 	}
-	if infos, _, _, err := listCheckedRepo(ctx, r, primary, common, true); err != nil {
+	if infos, _, err := listCheckedRepo(ctx, r, primary, common, true); err != nil {
 		add(CheckWarn, "worktree", "cannot list worktrees: "+err.Error(), "")
 	} else {
 		for _, in := range infos {
@@ -224,8 +225,7 @@ func doctorRepo(ctx context.Context, root string, r bundle.Repository, now time.
 			case in.Primary:
 			case in.unusable != nil:
 				hint := ""
-				var fe *foreignWorktreeError
-				if errors.As(in.unusable, &fe) {
+				if _, ok := errors.AsType[*foreignWorktreeError](in.unusable); ok {
 					hint = fmt.Sprintf("git keeps the entry while the directory holds another repository: move %s away, run `git -C %s worktree prune`, then move it back", in.Path, primary)
 				}
 				add(CheckWarn, "worktree", fmt.Sprintf("worktree %s [%s] cannot be used: %v", in.Path, branchOrDetached(in), in.unusable), hint)

@@ -110,12 +110,24 @@ type cacheTicket struct {
 
 func argsKey(args []string) string { return strings.Join(args, "\x00") }
 
+// cacheLookup is the result of queryCache.lookup.
+type cacheLookup struct {
+	hit bool
+	// out and err are the cached answer when hit.
+	out string
+	err error
+	// ticket stores the answer once obtained, valid iff storable (never on
+	// a hit).
+	ticket   cacheTicket
+	storable bool
+}
+
 // lookup returns the cached answer to args in dir, or a ticket to store the
-// answer once obtained (ok false, ticket valid iff storable).
-func (c *queryCache) lookup(dir string, args []string) (out string, err error, hit bool, t cacheTicket, storable bool) {
+// answer once obtained.
+func (c *queryCache) lookup(dir string, args []string) cacheLookup {
 	repo, ok := repoKey(dir)
 	if !ok {
-		return "", nil, false, cacheTicket{}, false
+		return cacheLookup{}
 	}
 	k := cacheKey{repo: repo, dir: filepath.Clean(dir), args: argsKey(args)}
 	c.mu.Lock()
@@ -124,11 +136,11 @@ func (c *queryCache) lookup(dir string, args []string) (out string, err error, h
 		if e.err != nil {
 			ge := *e.err
 			ge.Args = slices.Clone(ge.Args)
-			return e.out, &ge, true, cacheTicket{}, false
+			return cacheLookup{hit: true, out: e.out, err: &ge}
 		}
-		return e.out, nil, true, cacheTicket{}, false
+		return cacheLookup{hit: true, out: e.out}
 	}
-	return "", nil, false, cacheTicket{key: k, gen: c.gen, repoGen: c.repoGen[repo]}, true
+	return cacheLookup{ticket: cacheTicket{key: k, gen: c.gen, repoGen: c.repoGen[repo]}, storable: true}
 }
 
 // store records an answer unless the repository was invalidated since the
@@ -399,16 +411,16 @@ func runCached(ctx context.Context, o runOpts, dir string, args []string) (strin
 		if sc.fresh || o.stdin != nil || o.force != nil || o.interactive || ctx.Err() != nil {
 			return runProcess(ctx, o, dir, args...)
 		}
-		out, err, hit, ticket, storable := sc.c.lookup(dir, args)
-		if hit {
-			return out, err
+		l := sc.c.lookup(dir, args)
+		if l.hit {
+			return l.out, l.err
 		}
-		out, err = runProcess(ctx, o, dir, args...)
-		if ge, ok := cacheableResult(ctx, args, err); ok && storable {
-			sc.c.store(ticket, out, ge)
+		out, err := runProcess(ctx, o, dir, args...)
+		if ge, ok := cacheableResult(ctx, args, err); ok && l.storable {
+			sc.c.store(l.ticket, out, ge)
 			if ge == nil {
 				for _, d := range derivedAnswers(args, out) {
-					t := ticket
+					t := l.ticket
 					t.key.args = argsKey(d.args)
 					sc.c.store(t, d.out, nil)
 				}

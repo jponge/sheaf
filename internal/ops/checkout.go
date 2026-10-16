@@ -159,13 +159,55 @@ func coCheckRealDir(dir, what string) error {
 		return errors.New(what + " missing")
 	case err != nil:
 		return err
-	case fi.Mode()&fs.ModeSymlink != 0:
+	}
+	switch fault, r, err := realDirFault(dir, fi); fault {
+	case dirSymlink:
 		return errors.New(what + " is a symbolic link")
-	case !fi.IsDir():
+	case dirNotDir:
 		return errors.New(what + " is not a directory")
+	case dirNotSelf:
+		return fmt.Errorf("%s does not resolve to itself (%s, %v)", what, r, err)
+	}
+	return nil
+}
+
+// dirFault is why an existing path is not a real directory (realDirFault).
+type dirFault int
+
+const (
+	dirReal    dirFault = iota // a directory, not a symbolic link, resolving to itself
+	dirSymlink                 // a symbolic link
+	dirNotDir                  // not a directory
+	dirNotSelf                 // a directory that does not resolve to itself
+)
+
+// realDirFault tells whether dir, whose os.Lstat information is fi, is a
+// directory, not a symbolic link, that resolves to itself. For dirNotSelf it
+// also returns what dir resolves to and the resolution error.
+func realDirFault(dir string, fi fs.FileInfo) (fault dirFault, resolved string, err error) {
+	switch {
+	case fi.Mode()&fs.ModeSymlink != 0:
+		return dirSymlink, "", nil
+	case !fi.IsDir():
+		return dirNotDir, "", nil
 	}
 	if r, err := filepath.EvalSymlinks(dir); err != nil || r != dir {
-		return fmt.Errorf("%s does not resolve to itself (%s, %v)", what, r, err)
+		return dirNotSelf, r, err
+	}
+	return dirReal, "", nil
+}
+
+// refuseRemovalUnlessRealDir returns a "refusing to remove" error unless dir,
+// whose os.Lstat information is fi, is a directory, not a symbolic link, that
+// resolves to itself.
+func refuseRemovalUnlessRealDir(dir string, fi fs.FileInfo) error {
+	switch fault, r, err := realDirFault(dir, fi); fault {
+	case dirSymlink:
+		return fmt.Errorf("refusing to remove %s: it is a symbolic link", dir)
+	case dirNotDir:
+		return fmt.Errorf("refusing to remove %s: not a directory", dir)
+	case dirNotSelf:
+		return fmt.Errorf("refusing to remove %s: it does not resolve to itself (%s, %v)", dir, r, err)
 	}
 	return nil
 }
@@ -322,12 +364,10 @@ func coForEach(jobs, n int, fn func(i int)) {
 	var wg sync.WaitGroup
 	for i := range n {
 		sem <- struct{}{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 			fn(i)
-		}()
+		})
 	}
 	wg.Wait()
 }

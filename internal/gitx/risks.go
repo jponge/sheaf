@@ -22,50 +22,53 @@ import (
 // would lose.
 type RiskKind int
 
+// Risk kinds.
 const (
 	// Work-tree-local kinds (lost when the work tree is deleted).
+
 	RiskStaged     RiskKind = iota + 1 // entries with staged changes
 	RiskUnstaged                       // entries with unstaged changes (incl. submodules with new commits or modified content)
 	RiskConflicted                     // unmerged entries
 	RiskUntracked                      // untracked entries (incl. submodules with only untracked content)
 	// Repository-wide kinds (lost when the repository, i.e. its last work
 	// tree, is deleted; irrelevant to removing a linked worktree).
+
 	RiskStash                 // stash entries
 	RiskUnpushedBranchCommits // commits on local branches not on any remote-tracking ref (nor DeletionRisksOptions.PublishedRefs)
-	// RiskDetachedCommits: commits reachable from this work tree's detached
+	// RiskDetachedCommits covers commits reachable from this work tree's detached
 	// HEAD but from no branch, tag or remote-tracking ref (work-tree-local).
 	RiskDetachedCommits
-	// RiskTagOnlyCommits: commits reachable only from tags (neither from a
+	// RiskTagOnlyCommits covers commits reachable only from tags (neither from a
 	// local branch nor from a remote-tracking ref); repository-wide and
 	// informational (see Risk.Informational).
 	RiskTagOnlyCommits
-	// RiskIgnoredFiles: ignored entries; informational (usually build
+	// RiskIgnoredFiles covers ignored entries; informational (usually build
 	// output), see Risk.Informational.
 	RiskIgnoredFiles
-	// RiskHiddenModifications: tracked files flagged skip-worktree or
+	// RiskHiddenModifications covers tracked files flagged skip-worktree or
 	// assume-unchanged (`git update-index`) whose work tree content differs
 	// from the index. Status does not show them; work-tree-local, blocking.
 	// Flagged files absent from the work tree (e.g. outside a sparse
 	// checkout) do not count; a symlink entry checked out as a regular file
 	// (core.symlinks=false) holding its target does not either.
 	RiskHiddenModifications
-	// RiskUnverifiable: skip-worktree or assume-unchanged files whose content
-	// could not be compared with the index (e.g. a required clean filter such
-	// as Git LFS is not installed); Risk.Detail says why. Work-tree-local,
-	// blocking: the files may hold modifications.
+	// RiskUnverifiable covers skip-worktree or assume-unchanged files whose
+	// content could not be compared with the index (e.g. a required clean
+	// filter such as Git LFS is not installed); Risk.Detail says why.
+	// Work-tree-local, blocking: the files may hold modifications.
 	RiskUnverifiable
-	// RiskNestedRepository: other repositories inside the work tree
+	// RiskNestedRepository covers other repositories inside the work tree
 	// (submodules, embedded gitlinks, independent clones, linked worktrees of
 	// other repositories) that have data at risk themselves, have no remote,
 	// or could not be inspected. Linked worktrees of the same repository do
 	// not count. Work-tree-local, blocking; Risk.Detail lists their paths
 	// with the reasons.
 	RiskNestedRepository
-	// RiskNestedRepositoryClean: nested repositories with nothing to lose
+	// RiskNestedRepositoryClean covers nested repositories with nothing to lose
 	// (clean, with a remote, everything pushed); informational, work-tree-
 	// local. Risk.Detail lists their paths.
 	RiskNestedRepositoryClean
-	// RiskForeignWorktree: work trees of other repositories found inside the
+	// RiskForeignWorktree covers work trees of other repositories found inside the
 	// work tree, at any nesting level, whose .git file names a git directory
 	// outside the deleted tree (or cannot be read): deleting them would lose
 	// their changes unchecked and leave their repository's administrative
@@ -459,7 +462,7 @@ func hiddenModifications(ctx context.Context, top string) (modified, unverifiabl
 		return 0, 0, "", err
 	}
 	var paths, oids []string
-	for _, rec := range strings.Split(out, "\x00") {
+	for rec := range strings.SplitSeq(out, "\x00") {
 		if rec == "" {
 			continue
 		}
@@ -1016,9 +1019,9 @@ func resolvePath(p string) string {
 
 // summarizeList joins up to five entries for Risk.Detail.
 func summarizeList(entries []string, sep string) string {
-	const max = 5
-	if len(entries) <= max {
+	const maxListed = 5
+	if len(entries) <= maxListed {
 		return strings.Join(entries, sep)
 	}
-	return fmt.Sprintf("%s and %d more", strings.Join(entries[:max], sep), len(entries)-max)
+	return fmt.Sprintf("%s and %d more", strings.Join(entries[:maxListed], sep), len(entries)-maxListed)
 }

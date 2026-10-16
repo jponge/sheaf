@@ -19,13 +19,13 @@ import (
 // (a concurrent fetch overwriting FETCH_HEAD).
 func racingGit(t *testing.T) {
 	t.Helper()
-	real, err := exec.LookPath("git")
+	realGit, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	script := "#!/bin/sh\n\"" + real + "\" \"$@\"; rc=$?\n" +
-		"case \"$*\" in\n  *fetch*refs/pull/7/head*) \"" + real + "\" fetch -q origin refs/pull/8/head ;;\nesac\nexit $rc\n"
+	script := "#!/bin/sh\n\"" + realGit + "\" \"$@\"; rc=$?\n" +
+		"case \"$*\" in\n  *fetch*refs/pull/7/head*) \"" + realGit + "\" fetch -q origin refs/pull/8/head ;;\nesac\nexit $rc\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

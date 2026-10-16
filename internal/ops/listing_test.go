@@ -229,11 +229,11 @@ func TestListingsRefuseSymlinks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			real := filepath.Join(tmp, "real")
-			if err := os.Rename(link, real); err != nil {
+			target := filepath.Join(tmp, "real")
+			if err := os.Rename(link, target); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Symlink(real, link); err != nil {
+			if err := os.Symlink(target, link); err != nil {
 				t.Fatal(err)
 			}
 			want := "alpha: " + link + ": " + which + " is a symbolic link"
@@ -394,11 +394,11 @@ func TestCommandsRefuseSymlinkedPrimary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	real := filepath.Join(tmp, "real")
-	if err := os.Rename(alpha, real); err != nil {
+	target := filepath.Join(tmp, "real")
+	if err := os.Rename(alpha, target); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(real, alpha); err != nil {
+	if err := os.Symlink(target, alpha); err != nil {
 		t.Fatal(err)
 	}
 	const why = "primary checkout is a symbolic link"

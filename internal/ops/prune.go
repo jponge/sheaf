@@ -170,7 +170,7 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 	} else if rs.Forked() {
 		distrust = offlineForkDistrust(rs.Fork)
 	}
-	infos, repoDir, _, err := listCheckedRepo(ctx, r, primary, common, true)
+	infos, repoDir, err := listCheckedRepo(ctx, r, primary, common, true)
 	if err != nil {
 		return fail(err)
 	}
@@ -329,13 +329,13 @@ func onFirstParentLine(ctx context.Context, dir, commit, target string) (bool, e
 type PruneOutcome int
 
 const (
-	// PruneRemoved: the worktree (and, if requested, its branch) or the
+	// PruneRemoved means the worktree (and, if requested, its branch) or the
 	// branch was removed.
 	PruneRemoved PruneOutcome = iota + 1
-	// PruneKept: left alone for safety (data at risk, unmerged branch,
-	// changed since the plan); Message says why.
+	// PruneKept means it was left alone for safety (data at risk, unmerged
+	// branch, changed since the plan); Message says why.
 	PruneKept
-	// PruneFailed: an error; Err says why.
+	// PruneFailed means an error occurred; Err says why.
 	PruneFailed
 )
 
