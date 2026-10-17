@@ -249,12 +249,19 @@ when it opens. Checkouts that cannot be inspected are shown as problem rows.
 | q, esc | quit with status 0 (esc first clears an applied filter) |
 | ctrl+c | exit with status 130 |
 
-Actions run with the TUI of the corresponding command (progress view,
-confirmation dialogs, menus) and return to the overview, which shows the
-outcome (e.g. `prune: nothing to prune` when nothing changed). An action
-that fails prints its error and is reported in the overview; quitting
-afterwards still exits with 0. The selection is kept, except after an
-update, fetch or removal of the selected rows that succeeded.
+The overview is drawn on the terminal's alternate screen, so each one starts
+on a clear screen. Actions run with the TUI of the corresponding command
+(progress view, confirmation dialogs, menus) on the normal screen, where
+their output stays as a log you see after quitting, and return to the
+overview, which shows the outcome (e.g. `prune: nothing to prune` when
+nothing changed). An action that fails prints its error and waits for a key
+(`press any key to return to the overview`; ctrl+c exits with 130) so that
+the error can be read, then is reported in the overview; quitting afterwards
+still exits with 0. `doctor` waits the same way when it reports warnings.
+Keys pressed during the first quarter second of the wait (e.g. typed while
+the action ran) are ignored, so the error is not skipped unseen. The
+selection is kept, except after an update, fetch or removal of the selected
+rows that succeeded.
 
 Enter writes the checkout's path to the file named by `SHEAF_CD_FILE`, which
 the `sheaf` shell function defined by `sheaf shell-init` creates and then

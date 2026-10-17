@@ -138,8 +138,9 @@ func (d Deps) tuiMode(c *cobra.Command) bool {
 
 // tuiSession runs the bubbletea programs of one command: menus and
 // confirmations (tui.MultiSelect, tui.Confirm) and progress views. Programs
-// render inline (no alternate screen), so their last frame stays in the
-// terminal; bubbletea's own signal handler is disabled: signals go through
+// render inline (no alternate screen; the overview of the home screen is
+// the exception), so their last frame stays in the terminal; bubbletea's
+// own signal handler is disabled: signals go through
 // execute's interruptCtl, like ctrl+c in a progress view.
 type tuiSession struct {
 	ctx       context.Context

@@ -79,6 +79,7 @@ type Overview struct {
 	offset   int   // index into visible of the first rendered row
 
 	width, height int // 0 = unknown
+	altScreen     bool
 
 	filter    string
 	filtering bool
@@ -118,6 +119,14 @@ func NewOverview(title string, header []string, rows []Row, actions []OverviewAc
 // WithMessage returns a copy of m displaying msg below the table.
 func (m Overview) WithMessage(msg string) Overview {
 	m.message = msg
+	return m
+}
+
+// WithAltScreen returns a copy of m rendered on the alternate screen: each
+// program starts on a clear screen, and the terminal shows again what it
+// showed before once the program ends.
+func (m Overview) WithAltScreen() Overview {
+	m.altScreen = true
 	return m
 }
 
@@ -480,7 +489,9 @@ func cells(cs []string, widths []int, last *lipgloss.Style) string {
 // View implements tea.Model.
 func (m Overview) View() tea.View {
 	if m.done() {
-		return tea.NewView("")
+		v := tea.NewView("")
+		v.AltScreen = m.altScreen
+		return v
 	}
 	st := m.styles
 	l := m.layout()
@@ -525,7 +536,9 @@ func (m Overview) View() tea.View {
 			lines[i] = trunc.Render(line)
 		}
 	}
-	return tea.NewView(strings.Join(lines, "\n"))
+	v := tea.NewView(strings.Join(lines, "\n"))
+	v.AltScreen = m.altScreen
+	return v
 }
 
 // helpLines renders the key help: the movement keys and quit, then the

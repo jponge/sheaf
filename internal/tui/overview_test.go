@@ -436,3 +436,23 @@ func TestOverviewWithSelectedRestoresTheSelection(t *testing.T) {
 	next, _ = press(next, "u")
 	assertChosen(t, next, "update", "/b/a/main", "/b/bravo/main")
 }
+
+// WithAltScreen renders the overview on the alternate screen, its final
+// (empty) view included, so that bubbletea leaves the alternate screen when
+// the program ends; by default the overview is inline.
+func TestOverviewWithAltScreen(t *testing.T) {
+	t.Parallel()
+	if newOv().View().AltScreen {
+		t.Fatal("inline overview on the alternate screen")
+	}
+	m := newOv().WithAltScreen()
+	if v := m.View(); !v.AltScreen || !strings.Contains(v.Content, "STATE") {
+		t.Fatalf("view on the alternate screen %v:\n%s", v.AltScreen, v.Content)
+	}
+	for _, k := range []string{"q", "u"} {
+		done, _ := press(m, k)
+		if v := done.View(); !v.AltScreen || v.Content != "" {
+			t.Errorf("%s: final view on the alternate screen %v: %q", k, v.AltScreen, v.Content)
+		}
+	}
+}

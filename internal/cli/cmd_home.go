@@ -19,6 +19,9 @@ import (
 // homeHint follows the help of bare sheaf outside a bundle.
 const homeHint = "Not in a bundle: create one with `sheaf create [dir]`, or `sheaf init [dir]` to adopt existing checkouts."
 
+// homePauseText is displayed after an action that failed (see home.loop).
+const homePauseText = "press any key to return to the overview"
+
 // cdFileVar names the file in which the shell function defined by
 // shell-init expects the directory to change to (see runHome).
 const cdFileVar = "SHEAF_CD_FILE"
@@ -44,7 +47,12 @@ func installHome(root *cobra.Command, d Deps) {
 // and a hint. Otherwise it opens the overview of the bundle's checkouts
 // (local state only, nothing is fetched) and runs the action chosen there
 // with the TUI of its command, then opens the overview again, until the
-// user quits. Enter on a checkout ends sheaf: the path of the checkout is
+// user quits. The overview is on the alternate screen, so that each one
+// starts on a clear screen; actions run inline on the normal screen, where
+// their output stays as a log, and after an action that failed (or doctor
+// reporting warnings) a prompt waits for a key there before the overview
+// comes back, so that the errors can be read (keys typed ahead are ignored,
+// see tui.Pause). Enter on a checkout ends sheaf: the path of the checkout is
 // written to the file named by $SHEAF_CD_FILE, set by the shell function
 // of shell-init, which then changes the directory; without it the path is
 // printed.
@@ -88,12 +96,15 @@ type home struct {
 	// selected are the selected rows of the next overview: those of the
 	// last one, unless its action applied to them and succeeded.
 	selected []string
-	// succeeded tells whether every run of the last action succeeded (see
-	// outcome).
-	succeeded bool
+	// succeeded tells whether every run of the last action succeeded, and
+	// failed whether one failed (see outcome).
+	succeeded, failed bool
 	// unchanged is the note of the last command that changed nothing (see
-	// Deps.unchanged), reset before each action.
+	// Deps.unchanged), and attention whether the last command reported
+	// something to read (see Deps.attention); both reset before each
+	// action.
 	unchanged string
+	attention bool
 }
 
 // homeRow is what a row of the overview shows: a checkout, or a problem.
@@ -135,6 +146,14 @@ func (h *home) loop() error {
 		if err := h.s.ctx.Err(); err != nil {
 			return err // interrupted during the action: exit 130
 		}
+		if h.failed || h.attention {
+			// The overview would hide the error output (or the warnings
+			// of doctor): wait for a key (ctrl+c interrupts, as in the
+			// action's dialogs; input ending returns to the overview).
+			if _, err := h.s.runModel(tui.NewPause(homePauseText)); err != nil {
+				return err
+			}
+		}
 		if h.succeeded && h.scope(name) == tui.ScopeRows {
 			h.selected = nil // the selection was acted upon
 		}
@@ -168,7 +187,7 @@ func (h *home) overview() (tui.Overview, error) {
 		rows = append(rows, tui.Row{Key: key, Cells: []string{p.Repo, filepath.Base(p.Path), "-", "problem: " + firstLine(p.Err.Error())}, Alert: true})
 	}
 	ov := tui.NewOverview("sheaf: "+w.Root, []string{"REPO", "DIR", "BRANCH", "STATE"}, rows, h.actions())
-	return ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected), nil
+	return ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithAltScreen(), nil
 }
 
 // scope returns the scope of the action name.
@@ -269,7 +288,7 @@ func (h *home) cd(r homeRow) error {
 // act runs the action name on targets and returns the message the next
 // overview displays.
 func (h *home) act(name string, targets []string) string {
-	h.unchanged = ""
+	h.unchanged, h.attention = "", false
 	var repos []string
 	for _, k := range targets {
 		if r := h.rows[k].repo(); !slices.Contains(repos, r) {
@@ -341,6 +360,7 @@ func (h *home) command(args ...string) error {
 	d := h.d
 	d.ctl = h.s.ctl // the home screen's controller, with its context
 	d.unchanged = func(note string) { h.unchanged = note }
+	d.attention = func() { h.attention = true }
 	root := NewRootCmdWithDeps(Streams{In: h.c.InOrStdin(), Out: h.c.OutOrStdout(), Err: h.c.ErrOrStderr()}, d)
 	root.SetArgs(append([]string{"--bundle=" + h.root, "--jobs=" + strconv.Itoa(h.jobs)}, args...))
 	return root.ExecuteContext(h.s.ctx)
@@ -368,7 +388,7 @@ func (h *home) outcome(name string, errs []error) string {
 			}
 		}
 	}
-	h.succeeded = cancelled == 0 && failed == 0
+	h.succeeded, h.failed = cancelled == 0 && failed == 0, failed > 0
 	switch {
 	case len(errs) > 1:
 		return fmt.Sprintf("%s: %d done, %d cancelled, %d failed", name, done, cancelled, failed)

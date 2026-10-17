@@ -48,6 +48,10 @@ type Deps struct {
 	// anything (e.g. "nothing to prune"): the home screen reports that
 	// rather than "done".
 	unchanged func(note string)
+	// attention, if set, is told when a command succeeded but reported
+	// something to read (doctor warnings): the home screen then pauses
+	// before showing its overview, as after a failure.
+	attention func()
 	// stdinTTY and stdoutTTY replace isTerminal for standard input
 	// (interactive git mode) and standard output (colors); tests only.
 	stdinTTY  func(io.Reader) bool
@@ -59,6 +63,14 @@ type Deps struct {
 func (d Deps) reportUnchanged(note string) {
 	if d.unchanged != nil {
 		d.unchanged(note)
+	}
+}
+
+// reportAttention tells d.attention, if set, that the command reported
+// something to read.
+func (d Deps) reportAttention() {
+	if d.attention != nil {
+		d.attention()
 	}
 }
 

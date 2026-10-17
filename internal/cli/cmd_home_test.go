@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jponge/sheaf/internal/hosting"
 	"github.com/jponge/sheaf/internal/testutil"
+	"github.com/jponge/sheaf/internal/tui"
 )
 
 // runHomeWith executes the CLI with deps d, the TUI forced on and in as
@@ -40,6 +42,15 @@ func ovKeys(t *testing.T, out *syncBuffer, marker string, n int, ks ...string) [
 		}
 	}
 	return k
+}
+
+// pauseKey is the key press k for the pause after a failed action: it waits
+// until the pause is displayed, then for the grace period during which the
+// pause ignores keys (see tui.Pause).
+func pauseKey(t *testing.T, out *syncBuffer, k string) []key {
+	t.Helper()
+	wait := waitOutput(t, out, homePauseText)
+	return []key{{keys: k, wait: func() { wait(); time.Sleep(tui.PauseGrace) }}}
 }
 
 // homeBundle has repositories alpha (primary main, worktree feat tracking
@@ -349,17 +360,103 @@ func TestHomeScriptSegmentsBelongToTheirProgram(t *testing.T) {
 	}
 }
 
+// A failed action pauses until a key is pressed (the error output stays
+// readable), then the overview comes back with the failure as message.
 func TestHomeAddWorktreeFailureIsShownAndReturns(t *testing.T) {
 	t.Parallel()
 	e, _, _, _, _ := homeBundle(t)
 	var out syncBuffer
 	// main is the primary's branch: wt add refuses it.
-	errs, code := runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("m", "a", "i", "n", "\r"), ovKeys(t, &out, "add failed", 1, "q")), &out)
+	errs, code := runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("m", "a", "i", "n", "\r"),
+		pauseKey(t, &out, "x"), ovKeys(t, &out, "add failed", 1, "q")), &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 	if !strings.Contains(errs, "sheaf: ") || !strings.Contains(out.String(), "add failed: ") {
 		t.Fatalf("failure not reported\nstdout:\n%s\nstderr:\n%s", out.String(), errs)
+	}
+	if o := out.String(); strings.Count(o, homePauseText) != 1 || strings.Index(o, homePauseText) > strings.Index(o, "add failed: ") {
+		t.Fatalf("no pause before the overview came back\nstdout:\n%s", o)
+	}
+}
+
+// ctrl+c at the pause after a failure is an interruption, as in the other
+// dialogs of the home screen (exit 130); input ending there returns to the
+// overview.
+func TestHomeFailurePauseCtrlCAndEOF(t *testing.T) {
+	t.Parallel()
+	e, _, _, _, _ := homeBundle(t)
+	var out syncBuffer
+	errs, code := runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("m", "a", "i", "n", "\r"),
+		[]key{{keys: "\x03", wait: waitOutput(t, &out, homePauseText)}}), &out)
+	if code != 130 || !strings.Contains(errs, "interrupted") || strings.Contains(out.String(), "add failed: ") {
+		t.Fatalf("ctrl+c at the pause: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	out = syncBuffer{}
+	errs, code = runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("m", "a", "i", "n", "\r"),
+		keys(), ovKeys(t, &out, "add failed", 1, "q")), &out)
+	if code != 0 || !strings.Contains(out.String(), homePauseText) || !strings.Contains(out.String(), "add failed: ") {
+		t.Fatalf("input ending at the pause: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+}
+
+// doctor pauses like a failed action when its report has warnings, and
+// only once when it also failed; with information only it does not.
+func TestHomeDoctorWarningsPause(t *testing.T) {
+	t.Parallel()
+	t.Run("warnings", func(t *testing.T) {
+		t.Parallel()
+		e, _, _, _, _ := homeBundle(t)
+		var out syncBuffer
+		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), pauseKey(t, &out, "x"), ovKeys(t, &out, "doctor: done", 1, "q"))
+		errs, code := runHomeWith(t, probeDeps(e, hosting.ErrGHNotFound), in, &out)
+		if o := out.String(); code != 0 || !strings.Contains(o, "WARN  gh not found") || strings.Count(o, homePauseText) != 1 {
+			t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, o, errs)
+		}
+	})
+	t.Run("failure and warnings", func(t *testing.T) {
+		t.Parallel()
+		e, _, _, beta, _ := homeBundle(t)
+		if err := os.RemoveAll(filepath.Dir(beta)); err != nil {
+			t.Fatal(err)
+		}
+		var out syncBuffer
+		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), pauseKey(t, &out, "x"), ovKeys(t, &out, "doctor failed", 1, "q"))
+		errs, code := runHomeWith(t, probeDeps(e, hosting.ErrGHNotFound), in, &out)
+		if o := out.String(); code != 0 || !strings.Contains(o, "WARN  gh not found") || !strings.Contains(o, "FAIL  beta: ") || strings.Count(o, homePauseText) != 1 {
+			t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, o, errs)
+		}
+	})
+	t.Run("information only", func(t *testing.T) {
+		t.Parallel()
+		e, alpha, _, beta, _ := homeBundle(t)
+		testutil.Git(t, alpha, "switch", "-q", "-c", "other") // INFO: primary not on the default branch
+		for _, p := range []string{alpha, beta} {
+			testutil.Git(t, p, "config", "remote.origin.gh-resolved", "base") // no gh default warning
+		}
+		var out syncBuffer
+		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), ovKeys(t, &out, "doctor: done", 1, "q"))
+		errs, code := runHomeWith(t, probeDeps(e, nil), in, &out)
+		if o := out.String(); code != 0 || !strings.Contains(o, "INFO  alpha: primary checkout") || strings.Contains(o, "WARN ") || strings.Contains(o, homePauseText) {
+			t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, o, errs)
+		}
+	})
+}
+
+// Actions that succeeded, were cancelled or changed nothing return to the
+// overview without pausing.
+func TestHomeNoPauseWithoutFailure(t *testing.T) {
+	t.Parallel()
+	e, _, _, _, _ := homeBundle(t) // nothing to prune
+	var out syncBuffer
+	in := newScript(t, false,
+		ovKeys(t, &out, "STATE", 1, "f"), keys(),
+		ovKeys(t, &out, "fetch: done", 1, "w"), keys("x", "\x1b"),
+		ovKeys(t, &out, "add: cancelled", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}},
+		ovKeys(t, &out, "prune: nothing to prune", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 || strings.Contains(out.String(), homePauseText) {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 }
 
@@ -407,7 +504,7 @@ func TestHomePruneDoctorAndSync(t *testing.T) {
 	var out syncBuffer
 	in := newScript(t, false,
 		ovKeys(t, &out, "STATE", 1, "p"), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}},
-		ovKeys(t, &out, "prune: done", 1, "d"),
+		ovKeys(t, &out, "prune: done", 1, "d"), pauseKey(t, &out, "x"), // doctor warns: no gh default repository
 		ovKeys(t, &out, "doctor: done", 1, "s"), keys(" ", "\r"), keys("\r"), keys(),
 		ovKeys(t, &out, "sync: done", 1, "q"))
 	errs, code := runHomeWith(t, d, in, &out)
@@ -424,6 +521,9 @@ func TestHomePruneDoctorAndSync(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out.String())
 		}
+	}
+	if n := strings.Count(out.String(), homePauseText); n != 1 { // doctor's warnings only, not sync
+		t.Errorf("%d pauses, want 1:\n%s", n, out.String())
 	}
 }
 

@@ -28,7 +28,13 @@ type vtScreen struct {
 
 	scrollback []string
 	unknown    map[string]int
+
+	alt   bool     // the alternate screen is active (grid)
+	other [][]rune // the inactive screen
 }
+
+// altActive reports whether the alternate screen is active.
+func (s *vtScreen) altActive() bool { return s.alt }
 
 func newVTScreen(rows, cols int) *vtScreen {
 	s := &vtScreen{rows: rows, cols: cols, unknown: map[string]int{}}
@@ -92,7 +98,15 @@ func (s *vtScreen) lineFeed() {
 		s.y++
 		return
 	}
-	s.scrollback = append(s.scrollback, lineText(s.grid[0]))
+	s.scrollOff()
+}
+
+// scrollOff scrolls the screen up by one line: the top line goes to the
+// scrollback, unless the alternate screen is active.
+func (s *vtScreen) scrollOff() {
+	if !s.alt {
+		s.scrollback = append(s.scrollback, lineText(s.grid[0]))
+	}
 	s.grid = append(s.grid[1:], s.blank())
 }
 
@@ -147,6 +161,10 @@ func (s *vtScreen) csi(seq string, cmd ansi.Cmd, params ansi.Params) {
 			return def
 		}
 		return v
+	}
+	if cmd.Prefix() == '?' && cmd.Intermediate() == 0 && (cmd.Final() == 'h' || cmd.Final() == 'l') {
+		params.ForEach(0, func(_, mode int, _ bool) { s.altScreen(mode, cmd.Final() == 'h') })
+		return
 	}
 	if cmd.Prefix() != 0 || cmd.Intermediate() != 0 {
 		switch cmd.Final() {
@@ -227,13 +245,48 @@ func (s *vtScreen) csi(seq string, cmd ansi.Cmd, params ansi.Params) {
 		}
 	case 'S':
 		for range n(0, 1) {
-			s.scrollback = append(s.scrollback, lineText(s.grid[0]))
-			s.grid = append(s.grid[1:], s.blank())
+			s.scrollOff()
 		}
 	case 'm', 'h', 'l', 'n', 'c', 'r', 't', 'q':
 		// attributes, modes, reports, scroll region (unused by inline programs)
 	default:
 		s.unknown[seq]++
+	}
+}
+
+// altScreen applies DECSET (set) or DECRST of mode when it switches
+// screens, as xterm does: 47 switches; 1047 also clears the alternate
+// screen when leaving it; 1049 saves the cursor and clears the alternate
+// screen when entering it, and restores the cursor when leaving it. Other
+// private modes have no effect on the screen.
+func (s *vtScreen) altScreen(mode int, set bool) {
+	if mode != 47 && mode != 1047 && mode != 1049 {
+		return
+	}
+	if mode == 1049 && set {
+		s.esc('7')
+	}
+	if mode == 1047 && !set && s.alt {
+		for y := range s.grid {
+			s.grid[y] = s.blank()
+		}
+	}
+	if set != s.alt {
+		if s.other == nil {
+			for range s.rows {
+				s.other = append(s.other, s.blank())
+			}
+		}
+		s.grid, s.other, s.alt = s.other, s.grid, set
+		s.wrap = false
+	}
+	if mode == 1049 && set {
+		for y := range s.grid {
+			s.grid[y] = s.blank()
+		}
+	}
+	if mode == 1049 && !set {
+		s.esc('8')
 	}
 }
 
@@ -247,11 +300,35 @@ func lineText(row []rune) string {
 	return strings.TrimRight(b.String(), " ")
 }
 
-// lines returns the scrollback followed by the screen, trailing empty
-// lines of the screen removed.
-func (s *vtScreen) lines() []string {
-	out := append([]string(nil), s.scrollback...)
-	for _, row := range s.grid {
+// lines returns the scrollback followed by the normal screen (see
+// normalLines), then the alternate screen while it is active (see
+// altLines): the screen the user sees then, the normal one coming back
+// when the program leaves it.
+func (s *vtScreen) lines() []string { return append(s.normalLines(), s.altLines()...) }
+
+// normalLines returns the scrollback followed by the normal screen,
+// trailing empty lines removed, whichever screen is active.
+func (s *vtScreen) normalLines() []string {
+	normal := s.grid
+	if s.alt {
+		normal = s.other
+	}
+	return trimmedLines(append([]string(nil), s.scrollback...), normal)
+}
+
+// altLines returns the alternate screen while it is active, trailing empty
+// lines removed, and nil otherwise.
+func (s *vtScreen) altLines() []string {
+	if !s.alt {
+		return nil
+	}
+	return trimmedLines(nil, s.grid)
+}
+
+// trimmedLines appends the rows of grid to out, and removes the trailing
+// empty lines.
+func trimmedLines(out []string, grid [][]rune) []string {
+	for _, row := range grid {
 		out = append(out, lineText(row))
 	}
 	for len(out) > 0 && out[len(out)-1] == "" {
@@ -292,5 +369,33 @@ func TestVTScreen(t *testing.T) {
 	vt.write("1\r\n2\r\n3\r\n4")
 	if strings.Join(vt.scrollback, "|") != "1" {
 		t.Errorf("scrollback %q, want [1]", vt.scrollback)
+	}
+}
+
+// The alternate screen (DECSET/DECRST 1049, 1047 and 47, as xterm
+// implements them): while it is active, lines ends with it; leaving it
+// brings back the normal screen as it was (and the cursor for 1049), and
+// what scrolls off the alternate screen does not go to the scrollback.
+func TestVTScreenAlternateScreen(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, out string
+		alt       bool
+		want      []string
+	}{
+		{"1049 enters a clear screen", "ab\r\ncd\x1b[?1049h\x1b[Hx", true, []string{"ab", "cd", "x"}},
+		{"1049 restores screen and cursor", "ab\r\ncd\x1b[?1049h\x1b[2J\x1b[Hxyz\r\n1\r\n2\r\n3\r\n4\x1b[?1049lE", false, []string{"ab", "cdE"}},
+		{"1049 clears again on re-entry", "ab\x1b[?1049h\x1b[Hxy\x1b[?1049l\x1b[?1049h", true, []string{"ab"}},
+		{"1047 clears on leaving", "ab\x1b[?1047hx\x1b[?1047l\x1b[?1047h", true, []string{"ab"}},
+		{"47 keeps the alternate screen", "ab\x1b[?47hx\x1b[?47l\x1b[?47h", true, []string{"ab", "  x"}},
+	} {
+		vt := newVTScreen(3, 4)
+		vt.write(tc.out)
+		if got := vt.lines(); strings.Join(got, "|") != strings.Join(tc.want, "|") || vt.altActive() != tc.alt || len(vt.unknown) > 0 {
+			t.Errorf("%s: lines %q, alternate screen %v (unknown %v), want %q, %v", tc.name, got, vt.altActive(), vt.unknown, tc.want, tc.alt)
+		}
+		if len(vt.scrollback) > 0 {
+			t.Errorf("%s: scrollback %q, want none", tc.name, vt.scrollback)
+		}
 	}
 }

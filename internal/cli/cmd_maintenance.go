@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -354,6 +355,9 @@ func newDoctorCmd(d Deps) *cobra.Command {
 			}
 			if failed {
 				return errDoctorFailed
+			}
+			if slices.ContainsFunc(checks, func(ch ops.Check) bool { return ch.Level == ops.CheckWarn }) {
+				d.reportAttention()
 			}
 			return nil
 		},
