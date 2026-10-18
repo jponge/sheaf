@@ -25,6 +25,9 @@ type vtScreen struct {
 	x, y    int
 	wrap    bool // the cursor is past the last column (deferred wrap)
 	sx, sy  int  // saved cursor
+	// top and bottom are the rows of the scroll region (DECSTBM): line
+	// feeds on the bottom row and scrolls move its rows only.
+	top, bottom int
 
 	scrollback []string
 	unknown    map[string]int
@@ -37,7 +40,7 @@ type vtScreen struct {
 func (s *vtScreen) altActive() bool { return s.alt }
 
 func newVTScreen(rows, cols int) *vtScreen {
-	s := &vtScreen{rows: rows, cols: cols, unknown: map[string]int{}}
+	s := &vtScreen{rows: rows, cols: cols, bottom: rows - 1, unknown: map[string]int{}}
 	for range rows {
 		s.grid = append(s.grid, s.blank())
 	}
@@ -94,20 +97,29 @@ func (s *vtScreen) print(g string, width int) {
 }
 
 func (s *vtScreen) lineFeed() {
-	if s.y < s.rows-1 {
+	switch {
+	case s.y == s.bottom:
+		s.scrollOff()
+	case s.y < s.rows-1:
 		s.y++
-		return
 	}
-	s.scrollOff()
 }
 
-// scrollOff scrolls the screen up by one line: the top line goes to the
-// scrollback, unless the alternate screen is active.
+// scrollOff scrolls the scroll region up by one line. When the region is
+// the whole screen, its top line goes to the scrollback, unless the
+// alternate screen is active.
 func (s *vtScreen) scrollOff() {
-	if !s.alt {
+	if s.top == 0 && s.bottom == s.rows-1 && !s.alt {
 		s.scrollback = append(s.scrollback, lineText(s.grid[0]))
 	}
-	s.grid = append(s.grid[1:], s.blank())
+	copy(s.grid[s.top:s.bottom], s.grid[s.top+1:s.bottom+1])
+	s.grid[s.bottom] = s.blank()
+}
+
+// scrollDown scrolls the scroll region down by one line.
+func (s *vtScreen) scrollDown() {
+	copy(s.grid[s.top+1:s.bottom+1], s.grid[s.top:s.bottom])
+	s.grid[s.top] = s.blank()
 }
 
 func (s *vtScreen) control(b byte) {
@@ -138,10 +150,11 @@ func (s *vtScreen) esc(final byte) {
 	case '8':
 		s.x, s.y, s.wrap = s.sx, s.sy, false
 	case 'M': // reverse index
-		if s.y > 0 {
+		switch {
+		case s.y == s.top:
+			s.scrollDown()
+		case s.y > 0:
 			s.y--
-		} else {
-			s.grid = append([][]rune{s.blank()}, s.grid[:s.rows-1]...)
 		}
 	case 'D':
 		s.lineFeed()
@@ -235,20 +248,37 @@ func (s *vtScreen) csi(seq string, cmd ansi.Cmd, params ansi.Params) {
 		row, k := s.grid[s.y], n(0, 1)
 		copy(row[min(s.cols, s.x+k):], row[s.x:])
 		clear(row, s.x, s.x+k)
-	case 'L':
-		for range n(0, 1) {
-			s.grid = append(s.grid[:s.y], append([][]rune{s.blank()}, s.grid[s.y:s.rows-1]...)...)
+	case 'L', 'M': // insert or delete lines: from the cursor row to the bottom of the region
+		if s.y < s.top || s.y > s.bottom {
+			break
 		}
-	case 'M':
+		top := s.top
+		s.top = s.y
 		for range n(0, 1) {
-			s.grid = append(append(s.grid[:s.y:s.y], s.grid[s.y+1:]...), s.blank())
+			if cmd.Final() == 'L' {
+				s.scrollDown()
+			} else {
+				copy(s.grid[s.top:s.bottom], s.grid[s.top+1:s.bottom+1])
+				s.grid[s.bottom] = s.blank()
+			}
 		}
+		s.top = top
+		s.x = 0
 	case 'S':
 		for range n(0, 1) {
 			s.scrollOff()
 		}
-	case 'm', 'h', 'l', 'n', 'c', 'r', 't', 'q':
-		// attributes, modes, reports, scroll region (unused by inline programs)
+	case 'T':
+		for range n(0, 1) {
+			s.scrollDown()
+		}
+	case 'r':
+		if top, bottom := n(0, 1)-1, min(s.rows, n(1, s.rows))-1; top < bottom {
+			s.top, s.bottom = top, bottom
+			s.x, s.y = 0, 0
+		}
+	case 'm', 'h', 'l', 'n', 'c', 't', 'q':
+		// attributes, modes, reports
 	default:
 		s.unknown[seq]++
 	}
@@ -372,6 +402,30 @@ func TestVTScreen(t *testing.T) {
 	}
 }
 
+// A scroll region (DECSTBM, which homes the cursor): line feeds on its
+// bottom row and CSI S/T scroll its rows only, without scrollback.
+func TestVTScreenScrollRegion(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, out string
+		want      []string
+	}{
+		{"line feed on the bottom row", "1\r\n2\r\n3\r\n4\x1b[2;3rx\x1b[3;1H\n", []string{"x", "3", "", "4"}},
+		{"scroll up", "1\r\n2\r\n3\r\n4\x1b[2;3r\x1b[S", []string{"1", "3", "", "4"}},
+		{"scroll down", "1\r\n2\r\n3\r\n4\x1b[2;3r\x1b[T", []string{"1", "", "2", "4"}},
+		{"reset", "1\r\n2\r\n3\r\n4\x1b[2;3r\x1b[r\x1b[4;1H\n5", []string{"2", "3", "4", "5"}},
+	} {
+		vt := newVTScreen(4, 4)
+		vt.write(tc.out)
+		if got := vt.grid; strings.Join(trimmedLines(nil, got), "|") != strings.Join(tc.want, "|") || len(vt.unknown) > 0 {
+			t.Errorf("%s: screen %q (unknown %v), want %q", tc.name, trimmedLines(nil, got), vt.unknown, tc.want)
+		}
+		if tc.name != "reset" && len(vt.scrollback) > 0 {
+			t.Errorf("%s: scrollback %q, want none", tc.name, vt.scrollback)
+		}
+	}
+}
+
 // The alternate screen (DECSET/DECRST 1049, 1047 and 47, as xterm
 // implements them): while it is active, lines ends with it; leaving it
 // brings back the normal screen as it was (and the cursor for 1049), and
@@ -396,6 +450,37 @@ func TestVTScreenAlternateScreen(t *testing.T) {
 		}
 		if len(vt.scrollback) > 0 {
 			t.Errorf("%s: scrollback %q, want none", tc.name, vt.scrollback)
+		}
+	}
+}
+
+// Reverse index (ESC M) and line insertion and deletion (CSI L, CSI M)
+// honour the scroll region, as in xterm: ESC M on the top row of the
+// region scrolls it down; CSI L and CSI M move the rows from the cursor
+// to the bottom of the region only, and do nothing outside the region.
+func TestVTScreenScrollRegionEditing(t *testing.T) {
+	t.Parallel()
+	const fill = "1\r\n2\r\n3\r\n4\r\n5"
+	for _, tc := range []struct {
+		name, out string
+		want      []string
+	}{
+		{"reverse index on the top row", fill + "\x1b[2;4r\x1b[2;1H\x1bM", []string{"1", "", "2", "3", "5"}},
+		{"reverse index inside", fill + "\x1b[2;4r\x1b[3;1H\x1bMx", []string{"1", "x", "3", "4", "5"}},
+		{"reverse index without region", fill + "\x1b[1;1H\x1bM", []string{"", "1", "2", "3", "4"}},
+		{"insert line", fill + "\x1b[2;4r\x1b[3;1H\x1b[L", []string{"1", "2", "", "3", "5"}},
+		{"delete line", fill + "\x1b[2;4r\x1b[2;1H\x1b[M", []string{"1", "3", "4", "", "5"}},
+		{"insert line outside", fill + "\x1b[2;4r\x1b[5;1H\x1b[L", []string{"1", "2", "3", "4", "5"}},
+		{"delete line outside", fill + "\x1b[2;4r\x1b[1;1H\x1b[M", []string{"1", "2", "3", "4", "5"}},
+	} {
+		vt := newVTScreen(5, 4)
+		vt.write(tc.out)
+		got := make([]string, len(vt.grid))
+		for i, row := range vt.grid {
+			got[i] = lineText(row)
+		}
+		if strings.Join(got, "|") != strings.Join(tc.want, "|") || len(vt.unknown) > 0 {
+			t.Errorf("%s: screen %q (unknown %v), want %q", tc.name, got, vt.unknown, tc.want)
 		}
 	}
 }

@@ -1,0 +1,227 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+)
+
+// ReportGrace is the time during which a Report ignores the keys that end
+// it (ctrl+c excepted), counted from NewReport.
+const ReportGrace = 250 * time.Millisecond
+
+// Report is a bubbletea model displaying a title and lines of text (e.g.
+// what a command printed) on the alternate screen until a key other than the
+// scroll keys is pressed: any such key ends it, ctrl+c as an interruption.
+// A report longer than the window scrolls (up/down/k/j, pgup/pgdown,
+// home/end) and a status line tells which lines are shown; lines wider
+// than the window are wrapped. With an unknown size every line is shown.
+// Keys that end the report are ignored during the first ReportGrace
+// (ctrl+c excepted), so that a key typed ahead, e.g. while the work that
+// precedes the report ran, does not end it before it can be read; scroll
+// keys always work. Pastes and other messages are ignored. Update returns
+// tea.Quit once the report ends; later messages are ignored and the view
+// is then empty. The title and lines are displayed with tabs expanded to
+// the next multiple of 8 columns and other control characters replaced by
+// U+FFFD.
+type Report struct {
+	title string
+	lines []string
+	back  string
+	now   func() time.Time
+	start time.Time
+
+	width, height int // 0 = unknown
+	offset        int // index into wrapped() of the first rendered line
+
+	done, interrupted bool
+	keys              multiSelectKeys
+	help              help.Model
+	styles            Styles
+}
+
+// NewReport returns a Report of lines under title; back describes what the
+// keys ending it lead to, in the help line (e.g. "back to the overview").
+func NewReport(title string, lines []string, back string) Report {
+	st := DefaultStyles()
+	h := help.New()
+	h.Styles = st.Help
+	m := Report{title: title, back: back, now: time.Now, keys: newMultiSelectKeys(), help: h, styles: st}
+	for _, l := range lines {
+		m.lines = append(m.lines, sanitize(expandTabs(l)))
+	}
+	m.start = m.now()
+	return m
+}
+
+// expandTabs replaces the tabs of s by spaces up to the next multiple of 8
+// columns.
+func expandTabs(s string) string {
+	if !strings.Contains(s, "\t") {
+		return s
+	}
+	var b strings.Builder
+	col := 0
+	for _, r := range s {
+		if r == '\t' {
+			n := 8 - col%8
+			b.WriteString(strings.Repeat(" ", n))
+			col += n
+			continue
+		}
+		b.WriteRune(r)
+		col += ansi.StringWidth(string(r))
+	}
+	return b.String()
+}
+
+// WithClock returns a copy of m using now as its clock; the grace period
+// counts from now().
+func (m Report) WithClock(now func() time.Time) Report {
+	m.now = now
+	m.start = now()
+	return m
+}
+
+// Init implements tea.Model.
+func (m Report) Init() tea.Cmd { return nil }
+
+// Done reports whether a key ended the report. A model whose program ended
+// for another reason (e.g. input closed) is not done.
+func (m Report) Done() bool { return m.done }
+
+// Interrupted reports whether the key was ctrl+c, which callers treat as an
+// interruption.
+func (m Report) Interrupted() bool { return m.interrupted }
+
+// Update implements tea.Model.
+func (m Report) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.done {
+		return m, nil
+	}
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.help.SetWidth(msg.Width)
+		m.scroll(0)
+	case tea.KeyPressMsg:
+		page := m.layout().rows
+		switch {
+		case key.Matches(msg, m.keys.ForceQuit):
+			m.done, m.interrupted = true, true
+			return m, tea.Quit
+		case key.Matches(msg, m.keys.Up):
+			m.scroll(-1)
+		case key.Matches(msg, m.keys.Down):
+			m.scroll(1)
+		case key.Matches(msg, m.keys.PageUp):
+			m.scroll(-page)
+		case key.Matches(msg, m.keys.PageDown):
+			m.scroll(page)
+		case key.Matches(msg, m.keys.Home):
+			m.scroll(-len(m.wrapped()))
+		case key.Matches(msg, m.keys.End):
+			m.scroll(len(m.wrapped()))
+		case m.now().Sub(m.start) >= ReportGrace:
+			m.done = true
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+// scroll moves the first rendered line by n, within bounds.
+func (m *Report) scroll(n int) {
+	m.offset = min(max(m.offset+n, 0), max(len(m.wrapped())-m.layout().rows, 0))
+}
+
+// wrapped returns the lines wrapped to the width, if known.
+func (m Report) wrapped() []string {
+	if m.width <= 0 {
+		return m.lines
+	}
+	var out []string
+	for _, l := range m.lines {
+		out = append(out, strings.Split(ansi.Wrap(l, m.width, ""), "\n")...)
+	}
+	return out
+}
+
+// reportLayout tells which lines View renders around the report lines, and
+// how many fit.
+type reportLayout struct {
+	title, status, help bool
+	rows                int
+}
+
+// layout fits the view into the window height: the status line is shown
+// when the lines do not fit. When the window is too small for at least one
+// line, the help, title and status lines are dropped in that order. With
+// an unknown height every line is shown.
+func (m Report) layout() reportLayout {
+	n := len(m.wrapped())
+	l := reportLayout{title: true, help: true}
+	if m.height <= 0 {
+		l.rows = max(1, n)
+		return l
+	}
+	l.status = n > m.height-2
+	chrome := func() int {
+		c := 0
+		for _, shown := range []bool{l.title, l.status, l.help} {
+			if shown {
+				c++
+			}
+		}
+		return c
+	}
+	for _, line := range []*bool{&l.help, &l.title, &l.status} {
+		if m.height-chrome() >= 1 {
+			break
+		}
+		*line = false
+	}
+	l.rows = max(1, m.height-chrome())
+	return l
+}
+
+// View implements tea.Model.
+func (m Report) View() tea.View {
+	v := tea.NewView("")
+	v.AltScreen = true
+	if m.done {
+		return v
+	}
+	st := m.styles
+	l := m.layout()
+	all := m.wrapped()
+	var lines []string
+	if l.title {
+		lines = append(lines, st.Title.Render(sanitize(m.title)))
+	}
+	end := min(m.offset+l.rows, len(all))
+	lines = append(lines, all[m.offset:end]...)
+	if l.status {
+		lines = append(lines, st.Status.Render(fmt.Sprintf("lines %d-%d of %d", m.offset+1, end, len(all))))
+	}
+	if l.help {
+		lines = append(lines, m.help.ShortHelpView([]key.Binding{
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll")),
+			key.NewBinding(key.WithKeys(""), key.WithHelp("any other key:", m.back)),
+		}))
+	}
+	if m.width > 0 {
+		trunc := lipgloss.NewStyle().MaxWidth(m.width)
+		for i, line := range lines {
+			lines[i] = trunc.Render(line)
+		}
+	}
+	v.SetContent(strings.Join(lines, "\n"))
+	return v
+}

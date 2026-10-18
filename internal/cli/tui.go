@@ -133,7 +133,16 @@ func (d Deps) tuiMode(c *cobra.Command) bool {
 	if f == nil {
 		f = UseTUI
 	}
-	return f(c.InOrStdin(), c.OutOrStdout(), OptionsFrom(c).NoTUI)
+	return f(c.InOrStdin(), d.termOf(c), OptionsFrom(c).NoTUI)
+}
+
+// termOf returns the output on which the TUI programs of c render: d.term
+// if set, else standard output.
+func (d Deps) termOf(c *cobra.Command) io.Writer {
+	if d.term != nil {
+		return d.term
+	}
+	return c.OutOrStdout()
 }
 
 // tuiSession runs the bubbletea programs of one command: menus and
@@ -158,7 +167,7 @@ func newTUISession(c *cobra.Command, d Deps) *tuiSession {
 		ctl = newInterruptCtl()
 		ctl.bind(cancel, c.ErrOrStderr())
 	}
-	out := c.OutOrStdout()
+	out := d.termOf(c)
 	if p, ok := out.(*pipeWatch); ok {
 		// bubbletea needs the terminal itself to know its size.
 		out = p.w

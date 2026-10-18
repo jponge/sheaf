@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,13 +45,26 @@ func ovKeys(t *testing.T, out *syncBuffer, marker string, n int, ks ...string) [
 	return k
 }
 
-// pauseKey is the key press k for the pause after a failed action: it waits
-// until the pause is displayed, then for the grace period during which the
-// pause ignores keys (see tui.Pause).
-func pauseKey(t *testing.T, out *syncBuffer, k string) []key {
+// reportKey is the key press k for the report view after the action name:
+// it waits until a report view of name was displayed, then for the grace
+// period during which the view ignores keys (see tui.Report). The input of
+// the view is read from its start, so the grace period has then elapsed
+// even when an earlier view of name matched.
+func reportKey(t *testing.T, out *syncBuffer, name, k string) []key {
 	t.Helper()
-	wait := waitOutput(t, out, homePauseText)
-	return []key{{keys: k, wait: func() { wait(); time.Sleep(tui.PauseGrace) }}}
+	wait := waitOutput(t, out, "sheaf "+name+": ")
+	return []key{{keys: k, wait: func() { wait(); time.Sleep(tui.ReportGrace) }}}
+}
+
+// declineRemoval is the input of the progress view of a worktree removal
+// answering no to its question. A last key waits until the view shows the
+// removal cancelled, so that the end of the input does not end the view
+// before it: its remaining events would then be printed (see
+// tuiSession.progress), and the home screen would show them in a report
+// view, which a terminal never leads to.
+func declineRemoval(t *testing.T, out *syncBuffer) []key {
+	t.Helper()
+	return []key{{keys: "n", wait: waitOutput(t, out, "[y/N]")}, {keys: "x", wait: waitOutput(t, out, "1 cancelled")}}
 }
 
 // homeBundle has repositories alpha (primary main, worktree feat tracking
@@ -226,7 +240,7 @@ func TestHomeUpdateSelectedCheckoutThenReturns(t *testing.T) {
 	writeFile(t, filepath.Join(feat, "new.txt"), "") // untracked files do not block update
 	oldMain := testutil.Git(t, alpha, "rev-parse", "HEAD")
 	var out syncBuffer
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", " ", "u"), keys(), ovKeys(t, &out, "update: done", 1, "q"))
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", " ", "u"), keys(), reportKey(t, &out, "update", "x"), ovKeys(t, &out, "update: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -247,6 +261,15 @@ func TestHomeUpdateSelectedCheckoutThenReturns(t *testing.T) {
 	if i, j := strings.Index(o2, "1 fast-forwarded"), strings.LastIndex(o2, "STATE"); j < i {
 		t.Errorf("no overview after the summary:\n%s", o2)
 	}
+	// The summary is printed as update runs, and the report view shows it
+	// again, but not the progress view, which renders on the terminal only.
+	view, done := strings.Index(o2, "sheaf update: "), strings.Index(o2, "update: done")
+	if i := strings.Index(o2, "1 fast-forwarded"); i < 0 || i > view {
+		t.Errorf("the summary was not printed before the report view:\n%s", o2)
+	}
+	if view < 0 || done < view || !strings.Contains(o2[view:done], "fast-forwarded") || strings.Contains(o2[view:done], "Updating") {
+		t.Errorf("the report view lacks the summary or shows the progress view:\n%s", o2)
+	}
 }
 
 func TestHomeFetchCurrentRepository(t *testing.T) {
@@ -254,7 +277,7 @@ func TestHomeFetchCurrentRepository(t *testing.T) {
 	e, alpha, _, beta, o := homeBundle(t)
 	before := testutil.Git(t, beta, "rev-parse", "origin/main")
 	var out syncBuffer
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "f"), keys(), ovKeys(t, &out, "fetch: done", 1, "q"))
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "x"), ovKeys(t, &out, "fetch: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -287,8 +310,8 @@ func TestHomeAddWorktreeForBranchAndTag(t *testing.T) {
 		return k
 	}
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "w"), hinted("an existing local or remote branch, else a new branch from the default branch", "t", "o", "p", "i", "c", "/", "y", "\r"),
-		ovKeys(t, &out, "add: done", 1, "w"), append(keys("v", "1", "\t"), hinted("a tag: a detached worktree pinned at it", "\r")...),
+		ovKeys(t, &out, "STATE", 1, "w"), hinted("an existing local or remote branch, else a new branch from the default branch", "t", "o", "p", "i", "c", "/", "y", "\r"), reportKey(t, &out, "add", "x"),
+		ovKeys(t, &out, "add: done", 1, "w"), append(keys("v", "1", "\t"), hinted("a tag: a detached worktree pinned at it", "\r")...), reportKey(t, &out, "add", "x"),
 		ovKeys(t, &out, "add: done", 2, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
@@ -323,9 +346,9 @@ func TestHomeSelectAllAndNoneAndAddWithW(t *testing.T) {
 	e, alpha, _, _, _ := homeBundle(t)
 	var out syncBuffer
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "a", "f"), keys(),
-		ovKeys(t, &out, "fetch: done", 1, "a", "n", "f"), keys(),
-		ovKeys(t, &out, "fetch: done", 2, "w"), keys("t", "o", "p", "i", "c", "/", "z", "\r"),
+		ovKeys(t, &out, "STATE", 1, "a", "f"), keys(), reportKey(t, &out, "fetch", "x"),
+		ovKeys(t, &out, "fetch: done", 1, "a", "n", "f"), keys(), reportKey(t, &out, "fetch", "x"),
+		ovKeys(t, &out, "fetch: done", 2, "w"), keys("t", "o", "p", "i", "c", "/", "z", "\r"), reportKey(t, &out, "add", "x"),
 		ovKeys(t, &out, "add: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
@@ -351,8 +374,8 @@ func TestHomeScriptSegmentsBelongToTheirProgram(t *testing.T) {
 	e, alpha, _, _, _ := homeBundle(t)
 	var out syncBuffer
 	q := keys("q")
-	q[0].wait = waitOutput(t, &out, "add: ")
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("x", "y", "\r"), q)
+	q[0].wait = waitOutput(t, &out, "add: done")
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("x", "y", "\r"), reportKey(t, &out, "add", "x"), q)
 	in.holdFirstEnd = true
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || !strings.Contains(out.String(), "add: done") || !exists(filepath.Join(filepath.Dir(alpha), "xy", ".git")) {
@@ -360,57 +383,60 @@ func TestHomeScriptSegmentsBelongToTheirProgram(t *testing.T) {
 	}
 }
 
-// A failed action pauses until a key is pressed (the error output stays
-// readable), then the overview comes back with the failure as message.
+// A failed action shows its error in the report view until a key is
+// pressed, then the overview comes back with the failure as message.
 func TestHomeAddWorktreeFailureIsShownAndReturns(t *testing.T) {
 	t.Parallel()
 	e, _, _, _, _ := homeBundle(t)
 	var out syncBuffer
 	// main is the primary's branch: wt add refuses it.
 	errs, code := runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("m", "a", "i", "n", "\r"),
-		pauseKey(t, &out, "x"), ovKeys(t, &out, "add failed", 1, "q")), &out)
+		reportKey(t, &out, "add", "x"), ovKeys(t, &out, "add failed", 1, "q")), &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
-	if !strings.Contains(errs, "sheaf: ") || !strings.Contains(out.String(), "add failed: ") {
-		t.Fatalf("failure not reported\nstdout:\n%s\nstderr:\n%s", out.String(), errs)
+	o := out.String()
+	if !strings.Contains(errs, "sheaf: ") || !strings.Contains(o, "add failed: ") {
+		t.Fatalf("failure not reported, or not on stderr\nstdout:\n%s\nstderr:\n%s", o, errs)
 	}
-	if o := out.String(); strings.Count(o, homePauseText) != 1 || strings.Index(o, homePauseText) > strings.Index(o, "add failed: ") {
-		t.Fatalf("no pause before the overview came back\nstdout:\n%s", o)
+	view, failed := strings.Index(o, "sheaf add: "), strings.Index(o, "add failed: ")
+	if strings.Count(o, "sheaf add: ") != 1 || view > failed || !strings.Contains(o[view:failed], "sheaf: ") {
+		t.Fatalf("no report view with the error before the overview came back\nstdout:\n%s", o)
 	}
 }
 
-// ctrl+c at the pause after a failure is an interruption, as in the other
-// dialogs of the home screen (exit 130); input ending there returns to the
-// overview.
-func TestHomeFailurePauseCtrlCAndEOF(t *testing.T) {
+// ctrl+c in the report view after a failure is an interruption, as in the
+// other dialogs of the home screen (exit 130); input ending there returns
+// to the overview.
+func TestHomeFailureReportCtrlCAndEOF(t *testing.T) {
 	t.Parallel()
 	e, _, _, _, _ := homeBundle(t)
 	var out syncBuffer
 	errs, code := runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("m", "a", "i", "n", "\r"),
-		[]key{{keys: "\x03", wait: waitOutput(t, &out, homePauseText)}}), &out)
+		[]key{{keys: "\x03", wait: waitOutput(t, &out, "sheaf add: ")}}), &out)
 	if code != 130 || !strings.Contains(errs, "interrupted") || strings.Contains(out.String(), "add failed: ") {
-		t.Fatalf("ctrl+c at the pause: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+		t.Fatalf("ctrl+c in the report view: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 	out = syncBuffer{}
 	errs, code = runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("m", "a", "i", "n", "\r"),
 		keys(), ovKeys(t, &out, "add failed", 1, "q")), &out)
-	if code != 0 || !strings.Contains(out.String(), homePauseText) || !strings.Contains(out.String(), "add failed: ") {
-		t.Fatalf("input ending at the pause: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	if code != 0 || !strings.Contains(out.String(), "sheaf add: ") || !strings.Contains(out.String(), "add failed: ") {
+		t.Fatalf("input ending in the report view: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 }
 
-// doctor pauses like a failed action when its report has warnings, and
-// only once when it also failed; with information only it does not.
-func TestHomeDoctorWarningsPause(t *testing.T) {
+// doctor shows its report in the report view (see tui.Report), its failure
+// included: a key after the grace period returns to the overview, ctrl+c
+// exits 130 and input ending returns to the overview.
+func TestHomeDoctorShowsReportView(t *testing.T) {
 	t.Parallel()
 	t.Run("warnings", func(t *testing.T) {
 		t.Parallel()
 		e, _, _, _, _ := homeBundle(t)
 		var out syncBuffer
-		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), pauseKey(t, &out, "x"), ovKeys(t, &out, "doctor: done", 1, "q"))
+		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), reportKey(t, &out, "doctor", "x"), ovKeys(t, &out, "doctor: done", 1, "q"))
 		errs, code := runHomeWith(t, probeDeps(e, hosting.ErrGHNotFound), in, &out)
-		if o := out.String(); code != 0 || !strings.Contains(o, "WARN  gh not found") || strings.Count(o, homePauseText) != 1 {
+		if o := out.String(); code != 0 || errs != "" || !strings.Contains(o, "sheaf doctor: ") || !strings.Contains(o, "WARN  gh not found") {
 			t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, o, errs)
 		}
 	})
@@ -421,42 +447,71 @@ func TestHomeDoctorWarningsPause(t *testing.T) {
 			t.Fatal(err)
 		}
 		var out syncBuffer
-		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), pauseKey(t, &out, "x"), ovKeys(t, &out, "doctor failed", 1, "q"))
+		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), reportKey(t, &out, "doctor", "x"), ovKeys(t, &out, "doctor failed", 1, "q"))
 		errs, code := runHomeWith(t, probeDeps(e, hosting.ErrGHNotFound), in, &out)
-		if o := out.String(); code != 0 || !strings.Contains(o, "WARN  gh not found") || !strings.Contains(o, "FAIL  beta: ") || strings.Count(o, homePauseText) != 1 {
-			t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, o, errs)
+		o := out.String()
+		if code != 0 || !strings.Contains(errs, "sheaf: doctor found problems (FAIL)") {
+			t.Fatalf("exit %d, the error is not on stderr\nstdout:\n%s\nstderr:\n%s", code, o, errs)
+		}
+		// The report, then the error, are in the report view (before the
+		// overview with the failure as message).
+		report := o[strings.Index(o, "sheaf doctor: "):strings.Index(o, "doctor failed: doctor found problems (FAIL)")]
+		if i, j, k := strings.Index(report, "sheaf doctor: "), strings.Index(report, "FAIL  beta: "), strings.Index(report, "sheaf: doctor found problems (FAIL)"); i < 0 || j < i || k < j {
+			t.Fatalf("report view lacks the title, the report or the error:\n%s", o)
 		}
 	})
-	t.Run("information only", func(t *testing.T) {
+	t.Run("ctrl+c and EOF", func(t *testing.T) {
 		t.Parallel()
-		e, alpha, _, beta, _ := homeBundle(t)
-		testutil.Git(t, alpha, "switch", "-q", "-c", "other") // INFO: primary not on the default branch
-		for _, p := range []string{alpha, beta} {
-			testutil.Git(t, p, "config", "remote.origin.gh-resolved", "base") // no gh default warning
-		}
+		e, _, _, _, _ := homeBundle(t)
 		var out syncBuffer
-		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), ovKeys(t, &out, "doctor: done", 1, "q"))
+		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), []key{{keys: "\x03", wait: waitOutput(t, &out, "sheaf doctor: ")}})
 		errs, code := runHomeWith(t, probeDeps(e, nil), in, &out)
-		if o := out.String(); code != 0 || !strings.Contains(o, "INFO  alpha: primary checkout") || strings.Contains(o, "WARN ") || strings.Contains(o, homePauseText) {
-			t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, o, errs)
+		if code != 130 || !strings.Contains(errs, "interrupted") || strings.Contains(out.String(), "doctor: done") {
+			t.Fatalf("ctrl+c in the report: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+		}
+		out = syncBuffer{}
+		in = newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), keys(), ovKeys(t, &out, "doctor: done", 1, "q"))
+		errs, code = runHomeWith(t, probeDeps(e, nil), in, &out)
+		if code != 0 || !strings.Contains(out.String(), "sheaf doctor: ") {
+			t.Fatalf("input ending in the report: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 		}
 	})
 }
 
-// Actions that succeeded, were cancelled or changed nothing return to the
-// overview without pausing.
-func TestHomeNoPauseWithoutFailure(t *testing.T) {
+// Every action that ran shows what it printed in the report view before the
+// overview comes back, whether it succeeded, failed or changed nothing; an
+// action cancelled in its dialog does not.
+func TestHomeShowsReportAfterActionsThatRan(t *testing.T) {
 	t.Parallel()
-	e, _, _, _, _ := homeBundle(t) // nothing to prune
+	e, _, feat, _, _ := homeBundle(t) // nothing to prune
+	if err := os.Remove(filepath.Join(feat, "new.txt")); err != nil {
+		t.Fatal(err)
+	}
 	var out syncBuffer
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "f"), keys(),
+		ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "x"),
 		ovKeys(t, &out, "fetch: done", 1, "w"), keys("x", "\x1b"),
-		ovKeys(t, &out, "add: cancelled", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}},
+		ovKeys(t, &out, "add: cancelled", 1, "j", "r"), declineRemoval(t, &out),
+		ovKeys(t, &out, "remove: cancelled", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}}, reportKey(t, &out, "prune", "x"),
 		ovKeys(t, &out, "prune: nothing to prune", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
-	if code != 0 || strings.Contains(out.String(), homePauseText) {
-		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	o := out.String()
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, o, errs)
+	}
+	// The view of the fetch shows its summary (printed, not the progress
+	// view's header) before the overview reporting it; the view of prune
+	// its note. None after the cancelled add and removal.
+	at := func(s string) int { return strings.Index(o, s) }
+	if n := strings.Count(o, "sheaf fetch: "); n != 1 || at("fetch: done") < at("sheaf fetch: ") || !strings.Contains(o[at("sheaf fetch: "):at("fetch: done")], "alpha: fetched origin") {
+		t.Errorf("%d fetch report views, want one with the summary before the overview:\n%s", n, o)
+	}
+	prune := at("sheaf prune: ")
+	if n := strings.Count(o, "sheaf prune: "); n != 1 || prune < at("remove: cancelled") || !strings.Contains(o[prune:], "nothing to prune") || prune > at("prune: nothing to prune") {
+		t.Errorf("%d prune report views, want one with its note after the cancelled actions:\n%s", n, o)
+	}
+	if strings.Contains(o, "sheaf add: ") || strings.Contains(o, "sheaf remove: ") {
+		t.Errorf("report view after a cancelled action:\n%s", o)
 	}
 }
 
@@ -467,7 +522,7 @@ func TestHomeRemoveWorktreeConfirmsAndRefusesPrimary(t *testing.T) {
 	}
 	var out syncBuffer
 	// r on the primary is refused in the overview; then r on feat, confirmed.
-	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "r"), key{keys: "j", wait: waitOutput(t, &out, "primary checkout")}, key{keys: "r"}), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, ovKeys(t, &out, "remove: done", 1, "q"))
+	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "r"), key{keys: "j", wait: waitOutput(t, &out, "primary checkout")}, key{keys: "r"}), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "remove", "x"), ovKeys(t, &out, "remove: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -488,7 +543,7 @@ func TestHomeRemoveDeclinedKeepsWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out syncBuffer
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", "r"), []key{{keys: "n", wait: waitOutput(t, &out, "[y/N]")}}, ovKeys(t, &out, "remove: cancelled", 1, "q"))
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", "r"), declineRemoval(t, &out), ovKeys(t, &out, "remove: cancelled", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || !exists(feat) || !strings.Contains(out.String(), "remove: cancelled") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -503,9 +558,9 @@ func TestHomePruneDoctorAndSync(t *testing.T) {
 	d := probeDeps(e, nil)
 	var out syncBuffer
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "p"), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}},
-		ovKeys(t, &out, "prune: done", 1, "d"), pauseKey(t, &out, "x"), // doctor warns: no gh default repository
-		ovKeys(t, &out, "doctor: done", 1, "s"), keys(" ", "\r"), keys("\r"), keys(),
+		ovKeys(t, &out, "STATE", 1, "p"), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "prune", "x"),
+		ovKeys(t, &out, "prune: done", 1, "d"), reportKey(t, &out, "doctor", "x"),
+		ovKeys(t, &out, "doctor: done", 1, "s"), keys(" ", "\r"), keys("\r"), keys(), reportKey(t, &out, "sync", "x"),
 		ovKeys(t, &out, "sync: done", 1, "q"))
 	errs, code := runHomeWith(t, d, in, &out)
 	if code != 0 {
@@ -522,8 +577,10 @@ func TestHomePruneDoctorAndSync(t *testing.T) {
 			t.Errorf("stdout lacks %q:\n%s", want, out.String())
 		}
 	}
-	if n := strings.Count(out.String(), homePauseText); n != 1 { // doctor's warnings only, not sync
-		t.Errorf("%d pauses, want 1:\n%s", n, out.String())
+	for _, name := range []string{"prune", "doctor", "sync"} {
+		if n := strings.Count(out.String(), "sheaf "+name+": "); n != 1 {
+			t.Errorf("%d report views of %s, want 1:\n%s", n, name, out.String())
+		}
 	}
 }
 
@@ -572,21 +629,24 @@ func TestHomeJobsValidatedInTUIMode(t *testing.T) {
 	}
 }
 
-// An action that changed nothing is reported as such, not as done.
+// An action that changed nothing is reported as such, not as done; enter
+// in the sync menu with nothing selected is a cancellation.
 func TestHomeReportsActionsThatChangedNothing(t *testing.T) {
 	t.Parallel()
 	e, _ := syncBundle(t) // a tracked; b and c proposed by sync
 	var out syncBuffer
+	// "prune: " is in the title of the report view, then in the message
+	// of the overview; likewise for sync.
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}},
-		ovKeys(t, &out, "prune: ", 1, "s"), keys("\r"),
-		ovKeys(t, &out, "sync: ", 1, "q"))
+		ovKeys(t, &out, "STATE", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}}, reportKey(t, &out, "prune", "x"),
+		ovKeys(t, &out, "prune: ", 2, "s"), keys("\r"), reportKey(t, &out, "sync", "x"),
+		ovKeys(t, &out, "sync: ", 2, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 	o := out.String()
-	for _, want := range []string{"prune: nothing to prune", "sync: nothing selected; nothing changed"} {
+	for _, want := range []string{"prune: nothing to prune", "sync: cancelled"} {
 		if !strings.Contains(o, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, o)
 		}
@@ -607,8 +667,8 @@ func TestHomeKeepsSelectionAfterCancelledRemoval(t *testing.T) {
 	}
 	var out syncBuffer
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "j", " ", "r"), []key{{keys: "n", wait: waitOutput(t, &out, "[y/N]")}},
-		ovKeys(t, &out, "remove: cancelled", 1, "r"), ovKeys(t, &out, "[y/N]", 2, "y"),
+		ovKeys(t, &out, "STATE", 1, "j", " ", "r"), declineRemoval(t, &out),
+		ovKeys(t, &out, "remove: cancelled", 1, "r"), ovKeys(t, &out, "[y/N]", 2, "y"), reportKey(t, &out, "remove", "x"),
 		ovKeys(t, &out, "remove: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || exists(feat) {
@@ -632,9 +692,9 @@ func TestHomeClearsSelectionAfterSuccessAndForgetsEarlierNotes(t *testing.T) {
 	e, _, _, _, _ := homeBundle(t) // nothing to prune
 	var out syncBuffer
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "a", "f"), keys(),
-		ovKeys(t, &out, "fetch: done", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}},
-		ovKeys(t, &out, "prune: nothing to prune", 1, "f"), keys(),
+		ovKeys(t, &out, "STATE", 1, "a", "f"), keys(), reportKey(t, &out, "fetch", "x"),
+		ovKeys(t, &out, "fetch: done", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}}, reportKey(t, &out, "prune", "x"),
+		ovKeys(t, &out, "prune: nothing to prune", 1, "f"), keys(), reportKey(t, &out, "fetch", "x"),
 		ovKeys(t, &out, "fetch: done", 2, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
@@ -647,5 +707,48 @@ func TestHomeClearsSelectionAfterSuccessAndForgetsEarlierNotes(t *testing.T) {
 	}
 	if strings.Count(o, "fetch: done") != 2 || strings.Contains(o, "fetch: nothing to prune") {
 		t.Errorf("the second fetch is not reported done:\n%s", o)
+	}
+}
+
+// The report view shows the lines an action printed, without escape
+// sequences, or its outcome when it printed nothing.
+func TestHomeReportLines(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		output string
+		want   []string
+	}{
+		{"", []string{"update: done"}},
+		{"\n", []string{"update: done"}},
+		{"a\n\nb\n", []string{"a", "", "b"}},
+		{"no newline", []string{"no newline"}},
+		{"\x1b[31mred\x1b[0m\n", []string{"red"}},
+	} {
+		if got := homeReportLines(tc.output, "update: done"); !slices.Equal(got, tc.want) {
+			t.Errorf("%q: %q, want %q", tc.output, got, tc.want)
+		}
+	}
+}
+
+// What an action prints is written live to the terminal (here the line
+// sync prints before listing, on standard error) and shown in the report
+// view. Enter in the sync menu with nothing selected counts as a
+// cancellation, as esc does; the report view is shown all the same, as the
+// action printed something.
+func TestHomeSyncOutputIsLiveAndInReport(t *testing.T) {
+	t.Parallel()
+	for _, k := range []string{"\r", "\x1b"} {
+		e, _ := syncBundle(t)
+		var out syncBuffer
+		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "s"), keys(k), reportKey(t, &out, "sync", "x"), ovKeys(t, &out, "sync: cancelled", 1, "q"))
+		errs, code := runHomeWith(t, e.deps(), in, &out)
+		o := out.String()
+		if code != 0 || !strings.Contains(errs, "listing repositories of ") {
+			t.Fatalf("%q: exit %d, the listing line is not on stderr\nstdout:\n%s\nstderr:\n%s", k, code, o, errs)
+		}
+		view, msg := strings.Index(o, "sheaf sync: "), strings.Index(o, "sync: cancelled")
+		if view < 0 || msg < view || !strings.Contains(o[view:msg], "listing repositories of ") {
+			t.Fatalf("%q: no report view with the listing line before the overview\nstdout:\n%s", k, o)
+		}
 	}
 }

@@ -1,14 +1,17 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 
 	"github.com/jponge/sheaf/internal/bundle"
@@ -18,9 +21,6 @@ import (
 
 // homeHint follows the help of bare sheaf outside a bundle.
 const homeHint = "Not in a bundle: create one with `sheaf create [dir]`, or `sheaf init [dir]` to adopt existing checkouts."
-
-// homePauseText is displayed after an action that failed (see home.loop).
-const homePauseText = "press any key to return to the overview"
 
 // cdFileVar names the file in which the shell function defined by
 // shell-init expects the directory to change to (see runHome).
@@ -48,11 +48,14 @@ func installHome(root *cobra.Command, d Deps) {
 // (local state only, nothing is fetched) and runs the action chosen there
 // with the TUI of its command, then opens the overview again, until the
 // user quits. The overview is on the alternate screen, so that each one
-// starts on a clear screen; actions run inline on the normal screen, where
-// their output stays as a log, and after an action that failed (or doctor
-// reporting warnings) a prompt waits for a key there before the overview
-// comes back, so that the errors can be read (keys typed ahead are ignored,
-// see tui.Pause). Enter on a checkout ends sheaf: the path of the checkout is
+// starts on a clear screen; the TUI of an action (menus, dialogs, prompt,
+// progress view) runs inline on the normal screen, where what the action
+// prints (summaries, notes, errors) also goes as it runs, so that it stays
+// there as a log (also on an interruption). That output is also captured
+// and, unless the action was cancelled without printing anything, shown in
+// a scrollable report view on the alternate screen until a key is pressed
+// (keys typed ahead are ignored, see tui.Report); the overview then comes
+// back. Enter on a checkout ends sheaf: the path of the checkout is
 // written to the file named by $SHEAF_CD_FILE, set by the shell function
 // of shell-init, which then changes the directory; without it the path is
 // printed.
@@ -97,14 +100,13 @@ type home struct {
 	// last one, unless its action applied to them and succeeded.
 	selected []string
 	// succeeded tells whether every run of the last action succeeded, and
-	// failed whether one failed (see outcome).
-	succeeded, failed bool
+	// ran whether one ran, i.e. was not cancelled (see outcome).
+	succeeded, ran bool
 	// unchanged is the note of the last command that changed nothing (see
-	// Deps.unchanged), and attention whether the last command reported
-	// something to read (see Deps.attention); both reset before each
-	// action.
+	// Deps.unchanged), and output a copy of what the last action printed
+	// (see command); both reset before each action.
 	unchanged string
-	attention bool
+	output    bytes.Buffer
 }
 
 // homeRow is what a row of the overview shows: a checkout, or a problem.
@@ -146,11 +148,13 @@ func (h *home) loop() error {
 		if err := h.s.ctx.Err(); err != nil {
 			return err // interrupted during the action: exit 130
 		}
-		if h.failed || h.attention {
-			// The overview would hide the error output (or the warnings
-			// of doctor): wait for a key (ctrl+c interrupts, as in the
-			// action's dialogs; input ending returns to the overview).
-			if _, err := h.s.runModel(tui.NewPause(homePauseText)); err != nil {
+		if h.ran || h.output.Len() > 0 {
+			// What the action printed, in a view until a key is pressed
+			// (ctrl+c interrupts, as in the action's dialogs; input
+			// ending returns to the overview); none after an action
+			// cancelled before printing anything.
+			report := tui.NewReport("sheaf "+name+": "+h.root, homeReportLines(h.output.String(), h.message), "back to the overview")
+			if _, err := h.s.runModel(report); err != nil {
 				return err
 			}
 		}
@@ -288,7 +292,8 @@ func (h *home) cd(r homeRow) error {
 // act runs the action name on targets and returns the message the next
 // overview displays.
 func (h *home) act(name string, targets []string) string {
-	h.unchanged, h.attention = "", false
+	h.unchanged = ""
+	h.output.Reset()
 	var repos []string
 	for _, k := range targets {
 		if r := h.rows[k].repo(); !slices.Contains(repos, r) {
@@ -303,8 +308,17 @@ func (h *home) act(name string, targets []string) string {
 		}
 		w, err := ops.OpenWorkspace(h.root)
 		if err == nil {
+			// As in command: what update prints is also captured, its TUI
+			// renders on the terminal only.
+			c := &cobra.Command{}
+			c.SetIn(h.c.InOrStdin())
+			c.SetOut(io.MultiWriter(h.c.OutOrStdout(), &h.output))
+			c.SetErr(io.MultiWriter(h.c.ErrOrStderr(), &h.output))
+			c.SetContext(h.s.ctx)
+			d := h.d
+			d.ctl, d.term = h.s.ctl, h.s.out
 			opts := ops.UpdateOptions{Filter: ops.CheckoutFilter{Repos: repos, Paths: paths}, Jobs: h.jobs}
-			err = tuiUpdate(h.c, h.d, w, opts, false)
+			err = tuiUpdate(c, d, w, opts, false)
 		}
 		return h.outcome(name, []error{err})
 	case "fetch":
@@ -354,23 +368,35 @@ func (h *home) add(repo string) string {
 }
 
 // command runs `sheaf <args>` (global options of this run, the bundle of
-// the home screen) as a command line would, TUI included, in this process
-// and with its context, so that interruptions are handled as usual.
+// the home screen) as a command line would, in this process and with its
+// context, so that interruptions are handled as usual. Its TUI renders on
+// the terminal; what it prints (standard output and error) goes to the
+// terminal as it runs, as for the command alone (so that it stays there,
+// e.g. after an interruption), and to h.output, for the report view. A
+// command whose user chose nothing (see Deps.cancelled) returns
+// errCancelled.
 func (h *home) command(args ...string) error {
 	d := h.d
 	d.ctl = h.s.ctl // the home screen's controller, with its context
+	d.term = h.s.out
 	d.unchanged = func(note string) { h.unchanged = note }
-	d.attention = func() { h.attention = true }
-	root := NewRootCmdWithDeps(Streams{In: h.c.InOrStdin(), Out: h.c.OutOrStdout(), Err: h.c.ErrOrStderr()}, d)
+	cancelled := false
+	d.cancelled = func() { cancelled = true }
+	out, errw := io.MultiWriter(h.c.OutOrStdout(), &h.output), io.MultiWriter(h.c.ErrOrStderr(), &h.output)
+	root := NewRootCmdWithDeps(Streams{In: h.c.InOrStdin(), Out: out, Err: errw}, d)
 	root.SetArgs(append([]string{"--bundle=" + h.root, "--jobs=" + strconv.Itoa(h.jobs)}, args...))
-	return root.ExecuteContext(h.s.ctx)
+	err := root.ExecuteContext(h.s.ctx)
+	if err == nil && cancelled {
+		return errCancelled
+	}
+	return err
 }
 
-// outcome prints the errors of an action like execute does (cancellations
-// excepted) and returns the message for the overview: "<name>: done",
-// "<name>: <note>" when the command changed nothing (e.g. "prune: nothing
-// to prune"), "<name>: cancelled", "<name> failed: <error>", or the counts
-// when the action ran several times.
+// outcome prints the errors of an action to standard error and h.output
+// like execute does (cancellations excepted) and returns the message for
+// the overview: "<name>: done", "<name>: <note>" when the command changed
+// nothing (e.g. "prune: nothing to prune"), "<name>: cancelled", "<name>
+// failed: <error>", or the counts when the action ran several times.
 func (h *home) outcome(name string, errs []error) string {
 	var done, cancelled, failed int
 	var last error
@@ -384,11 +410,11 @@ func (h *home) outcome(name string, errs []error) string {
 			failed++
 			last = err
 			if h.s.ctx.Err() == nil {
-				fmt.Fprintln(h.c.ErrOrStderr(), "sheaf:", err)
+				fmt.Fprintln(io.MultiWriter(h.c.ErrOrStderr(), &h.output), "sheaf:", err)
 			}
 		}
 	}
-	h.succeeded, h.failed = cancelled == 0 && failed == 0, failed > 0
+	h.succeeded, h.ran = cancelled == 0 && failed == 0, done+failed > 0
 	switch {
 	case len(errs) > 1:
 		return fmt.Sprintf("%s: %d done, %d cancelled, %d failed", name, done, cancelled, failed)
@@ -400,4 +426,15 @@ func (h *home) outcome(name string, errs []error) string {
 		return name + ": " + h.unchanged
 	}
 	return name + ": done"
+}
+
+// homeReportLines returns the lines of the report view of an action: those
+// of output, what it printed, without escape sequences; message, its
+// outcome, when it printed nothing.
+func homeReportLines(output, message string) []string {
+	output = strings.TrimSuffix(ansi.Strip(output), "\n")
+	if output == "" {
+		return []string{message}
+	}
+	return strings.Split(output, "\n")
 }

@@ -336,6 +336,7 @@ func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noF
 	if len(add) == 0 && len(gone) == 0 {
 		fmt.Fprintln(out, "nothing selected; nothing changed")
 		d.reportUnchanged("nothing selected; nothing changed")
+		d.reportCancelled()
 		return rep.Err()
 	}
 	errs := []error{rep.Err()}

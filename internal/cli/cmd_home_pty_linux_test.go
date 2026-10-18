@@ -4,6 +4,7 @@ package cli
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -68,13 +69,30 @@ func TestHomeOnPTYCtrlCExits130(t *testing.T) {
 	}
 }
 
-// An action runs its own TUI (progress view) and the overview comes back,
-// refreshed, below the summary.
+// dismissReport waits until the output of s contains the title of the
+// report view of the action name n times, then for the grace period of the
+// view, and presses a key.
+func dismissReport(t *testing.T, s *ptyShell, name string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for strings.Count(s.output(), "sheaf "+name+": ") < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("output never contained the report view of %s %d times:\n%q", name, n, s.output())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(tui.ReportGrace)
+	s.write("x")
+}
+
+// An action runs its own TUI (progress view), then its report view, and the
+// overview comes back, refreshed, below the summary.
 func TestHomeOnPTYActionReturnsToOverview(t *testing.T) {
 	e, _, _, _, _ := homeBundle(t)
 	s := startPTYShell(t, e.cwd, `B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
 	s.waitFor(`STATE`)
 	s.write("f")
+	dismissReport(t, s, "fetch", 1)
 	s.waitFor(`fetch: done`)
 	s.write("q")
 	wantTerminalRestored(t, s, "0")
@@ -133,9 +151,15 @@ func TestHomeEnterCDsThroughShellFunctionFish(t *testing.T) {
 // satisfies ok, and returns it.
 func waitScreenState(t *testing.T, s *ptyShell, what string, ok func(vt *vtScreen) bool) *vtScreen {
 	t.Helper()
+	return waitScreenStateRows(t, s, 24, what, ok)
+}
+
+// waitScreenStateRows is waitScreenState for a terminal of rows rows.
+func waitScreenStateRows(t *testing.T, s *ptyShell, rows int, what string, ok func(vt *vtScreen) bool) *vtScreen {
+	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		vt := newVTScreen(24, 100)
+		vt := newVTScreen(rows, 100)
 		vt.write(s.output())
 		if ok(vt) {
 			if len(vt.unknown) > 0 {
@@ -171,9 +195,19 @@ func TestHomeOnPTYOverviewOnAlternateScreen(t *testing.T) {
 	}
 	waitScreenState(t, s, "the first overview on the alternate screen", overviewShown(""))
 	s.write("f")
+	// The summary of the fetch is printed on the normal screen, below its
+	// progress view, and shown in its report view on the alternate screen.
+	waitScreenState(t, s, "the report view of fetch on the alternate screen", func(vt *vtScreen) bool {
+		alt, normal := vt.altLines(), strings.Join(vt.normalLines(), "\n")
+		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf fetch: ") && slices.Contains(alt, "done     alpha: fetched origin") &&
+			strings.Contains(normal, "Fetching: 1 done, 0 skipped, 0 failed") && strings.Contains(normal, "done     alpha: fetched origin")
+	})
+	time.Sleep(tui.ReportGrace)
+	s.write("x")
 	vt := waitScreenState(t, s, "the overview after fetch on the alternate screen", overviewShown("fetch: done"))
-	if normal := strings.Join(vt.normalLines(), "\n"); !strings.Contains(normal, "Fetching: 1 done, 0 skipped, 0 failed") {
-		t.Errorf("the summary of the fetch is not on the normal screen:\n%s", normal)
+	if normal := strings.Join(vt.normalLines(), "\n"); !strings.Contains(normal, "Fetching: 1 done, 0 skipped, 0 failed") ||
+		strings.Index(normal, "done     alpha: fetched origin") < strings.Index(normal, "Fetching: 1 done, 0 skipped, 0 failed") {
+		t.Errorf("the normal screen lacks the progress view of the fetch and its summary below it:\n%s", normal)
 	}
 	s.write("j\r")
 	wantTerminalRestored(t, s, "0")
@@ -185,10 +219,11 @@ func TestHomeOnPTYOverviewOnAlternateScreen(t *testing.T) {
 	}
 }
 
-// After a failed action, the normal screen shows the error and a prompt
-// until a key is pressed; the overview then comes back with the failure as
-// message. ctrl+c at the prompt interrupts sheaf (exit 130).
-func TestHomeOnPTYFailurePausesOnNormalScreen(t *testing.T) {
+// After a failed action, the error is printed on the normal screen and
+// shown in the report view on the alternate screen until a key is pressed;
+// the overview then comes back with the failure as message. ctrl+c in the
+// view interrupts sheaf (exit 130).
+func TestHomeOnPTYFailureShowsReportView(t *testing.T) {
 	for _, tc := range []struct{ key, exit string }{{"x", "0"}, {"\x03", "130"}} {
 		e, _, _, _, _ := homeBundle(t)
 		s := startPTYShell(t, e.cwd, `B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
@@ -196,13 +231,14 @@ func TestHomeOnPTYFailurePausesOnNormalScreen(t *testing.T) {
 		s.write("w")
 		s.waitFor(`New worktree of alpha`)
 		s.write("main\r") // the primary's branch: wt add refuses it
-		waitScreenState(t, s, "the error and the pause prompt on the normal screen", func(vt *vtScreen) bool {
-			normal := vt.normalLines()
-			i := slices.IndexFunc(normal, func(l string) bool { return strings.HasPrefix(l, "sheaf: ") && !strings.HasPrefix(l, "sheaf: /") })
-			return !vt.altActive() && i >= 0 && slices.Contains(normal[i:], homePauseText)
+		waitScreenState(t, s, "the error in the report view", func(vt *vtScreen) bool {
+			alt := vt.altLines()
+			isError := func(l string) bool { return strings.HasPrefix(l, "sheaf: ") && !strings.HasPrefix(l, "sheaf: /") }
+			return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf add: ") && slices.ContainsFunc(alt, isError) &&
+				slices.ContainsFunc(vt.normalLines(), isError)
 		})
 		if tc.exit == "0" {
-			time.Sleep(tui.PauseGrace) // keys are ignored during the grace period
+			time.Sleep(tui.ReportGrace) // keys are ignored during the grace period
 		}
 		s.write(tc.key)
 		if tc.exit == "0" {
@@ -220,10 +256,10 @@ func TestHomeOnPTYFailurePausesOnNormalScreen(t *testing.T) {
 	}
 }
 
-// A key typed while the failing action runs does not skip the pause: it
-// still shows the error and the prompt after the grace period, and a key
-// pressed then returns to the overview.
-func TestHomeOnPTYTypeAheadDoesNotSkipPause(t *testing.T) {
+// A key typed while the failing action runs does not skip the report view:
+// it still shows the error after the grace period, and a key pressed then
+// returns to the overview.
+func TestHomeOnPTYTypeAheadDoesNotSkipReport(t *testing.T) {
 	e, _, _, _, _ := homeBundle(t)
 	s := startPTYShell(t, e.cwd, `B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
 	s.waitFor(`STATE`)
@@ -232,15 +268,16 @@ func TestHomeOnPTYTypeAheadDoesNotSkipPause(t *testing.T) {
 	s.write("main\r") // the primary's branch: wt add refuses it
 	time.Sleep(50 * time.Millisecond)
 	s.write("x")
-	pauseShown := func(vt *vtScreen) bool {
-		return !vt.altActive() && slices.Contains(vt.normalLines(), homePauseText)
+	reportShown := func(vt *vtScreen) bool {
+		alt := vt.altLines()
+		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf add: ")
 	}
-	waitScreenState(t, s, "the pause prompt", pauseShown)
-	time.Sleep(2 * tui.PauseGrace)
+	waitScreenState(t, s, "the report view", reportShown)
+	time.Sleep(2 * tui.ReportGrace)
 	vt := newVTScreen(24, 100)
 	vt.write(s.output())
-	if !pauseShown(vt) {
-		t.Fatalf("the key typed ahead ended the pause: alternate screen %v\nnormal screen:\n%s", vt.altActive(), strings.Join(vt.normalLines(), "\n"))
+	if !reportShown(vt) {
+		t.Fatalf("the key typed ahead ended the report view: alternate screen %v\nalternate screen:\n%s", vt.altActive(), strings.Join(vt.altLines(), "\n"))
 	}
 	s.write("x")
 	waitScreenState(t, s, "the overview with the failure", func(vt *vtScreen) bool {
@@ -312,8 +349,10 @@ func TestHomeOnPTYLeavesNoStaleOverviews(t *testing.T) {
 	}
 	summaries := []string{"Fetching: 1 done", "Updating: 1 done", "Checking worktree feat of alpha for removal: 0 done, 0 skipped, 0 failed, 1 cancelled", "Fetching: 1 done"}
 	s.write("f")
+	dismissReport(t, s, "fetch", 1)
 	waitCount("fetch: done", 1)
 	s.write("u")
+	dismissReport(t, s, "update", 1)
 	waitCount("update: done", 1)
 	s.write("j")
 	s.write("r")
@@ -321,6 +360,7 @@ func TestHomeOnPTYLeavesNoStaleOverviews(t *testing.T) {
 	s.write("n")
 	waitCount("remove: cancelled", 1)
 	s.write("f")
+	dismissReport(t, s, "fetch", 2)
 	waitCount("fetch: done", 2)
 	// One overview: its header, 3 rows, status and help lines.
 	if n := counts(summaries...); n != [4]int{1, 3, 1, 1} {
@@ -330,5 +370,191 @@ func TestHomeOnPTYLeavesNoStaleOverviews(t *testing.T) {
 	wantTerminalRestored(t, s, "0")
 	if n := counts(summaries...); n != [4]int{} {
 		t.Errorf("after quitting the terminal shows %d header, %d row, %d status and %d help lines of overviews, want none", n[0], n[1], n[2], n[3])
+	}
+}
+
+// toolsDir returns a directory holding links to the given tools, to be
+// used as PATH (e.g. without gh, so that the real gh never runs).
+func toolsDir(t *testing.T, tools ...string) string {
+	t.Helper()
+	bin := t.TempDir()
+	for _, tool := range tools {
+		path, err := exec.LookPath(tool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(path, filepath.Join(bin, tool)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return bin
+}
+
+// doctorReport runs the home screen of e on a 10-row terminal without gh on
+// PATH (doctor warns) and presses d.
+func doctorReport(t *testing.T, e *env) *ptyShell {
+	t.Helper()
+	bin := toolsDir(t, "git", "stty")
+	s := startPTYShell(t, e.cwd, `PATH='`+bin+`'; export PATH; stty rows 10; B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	s.write("d")
+	return s
+}
+
+var (
+	doctorLine   = regexp.MustCompile(`^(OK|INFO|WARN|FAIL) +\S`)
+	reportStatus = regexp.MustCompile(`^lines (\d+)-(\d+) of (\d+)$`)
+)
+
+func isDoctorLine(l string) bool { return doctorLine.MatchString(l) }
+
+// doctorView waits until the 10-row terminal of s shows the report view of
+// doctor (bundle root) with a status line, and ok accepts its status line
+// (submatches of reportStatus) and its report lines; it returns the
+// terminal.
+func doctorView(t *testing.T, s *ptyShell, root, what string, ok func(status, lines []string) bool) *vtScreen {
+	t.Helper()
+	return waitScreenStateRows(t, s, 10, what, func(vt *vtScreen) bool {
+		alt := vt.altLines()
+		if !vt.altActive() || len(alt) == 0 || alt[0] != "sheaf doctor: "+root {
+			return false
+		}
+		var st, lines []string
+		for _, l := range alt {
+			if m := reportStatus.FindStringSubmatch(l); m != nil {
+				st = m
+			}
+			if isDoctorLine(l) || strings.HasPrefix(l, "      hint: ") {
+				lines = append(lines, l)
+			}
+		}
+		return st != nil && ok(st, lines)
+	})
+}
+
+// The report of doctor is printed on the normal screen as it runs (as the
+// command prints it) and shown in the report view on the alternate screen,
+// scrolled when longer than the window (here 10 rows): a key returns to
+// the overview, and after quitting the printed report is still on the
+// normal screen.
+func TestHomeOnPTYDoctorReportScrolls(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	s := doctorReport(t, e)
+	var first string
+	vt := doctorView(t, s, e.cwd, "the top of the report", func(st, lines []string) bool {
+		if st[1] != "1" || st[2] == st[3] || len(lines) == 0 {
+			return false
+		}
+		first = lines[0]
+		return true
+	})
+	if normal := vt.normalLines(); !slices.Contains(normal, first) {
+		t.Errorf("the normal screen lacks the report line %q:\n%s", first, strings.Join(normal, "\n"))
+	}
+	s.write("\x1b[F") // end
+	doctorView(t, s, e.cwd, "the end of the report", func(st, lines []string) bool {
+		return st[1] != "1" && st[2] == st[3] && !slices.Contains(lines, first)
+	})
+	s.write("\x1b[H") // home
+	doctorView(t, s, e.cwd, "the top of the report again", func(st, lines []string) bool {
+		return st[1] == "1" && len(lines) > 0 && lines[0] == first
+	})
+	time.Sleep(tui.ReportGrace)
+	s.write("x")
+	waitScreenStateRows(t, s, 10, "the overview after doctor", func(vt *vtScreen) bool {
+		alt := vt.altLines()
+		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf: ") && slices.Contains(alt, "doctor: done")
+	})
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
+	vt = newVTScreen(10, 100)
+	vt.write(s.output())
+	if !slices.Contains(vt.lines(), first) {
+		t.Errorf("the printed report is not left in the terminal after quitting:\n%s", strings.Join(vt.lines(), "\n"))
+	}
+}
+
+// Scrolling the report view line by line gives the same screen whatever the
+// way: j j k and home j both show lines 2-8.
+func TestHomeOnPTYReportScrollsLineByLine(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	s := doctorReport(t, e)
+	from := func(n string) func(st, _ []string) bool {
+		return func(st, _ []string) bool { return st[1] == n }
+	}
+	doctorView(t, s, e.cwd, "the top of the report", from("1"))
+	s.write("j")
+	doctorView(t, s, e.cwd, "lines 2-", from("2"))
+	s.write("j")
+	doctorView(t, s, e.cwd, "lines 3-", from("3"))
+	s.write("k")
+	a := doctorView(t, s, e.cwd, "lines 2- after j j k", from("2")).altLines()
+	s.write("\x1b[H") // home
+	doctorView(t, s, e.cwd, "lines 1- after home", from("1"))
+	s.write("j")
+	b := doctorView(t, s, e.cwd, "lines 2- after home j", from("2")).altLines()
+	if strings.Join(a, "\n") != strings.Join(b, "\n") {
+		t.Errorf("j j k and home j show different screens:\n%s\n---\n%s", strings.Join(a, "\n"), strings.Join(b, "\n"))
+	}
+	if !slices.ContainsFunc(a, func(l string) bool { return strings.HasPrefix(l, "lines 2-8 of ") }) {
+		t.Errorf("no status line \"lines 2-8 of ...\":\n%s", strings.Join(a, "\n"))
+	}
+	s.write("\x03")
+	wantTerminalRestored(t, s, "130")
+}
+
+// The progress lines that wt add prints as it runs appear on the normal
+// screen (live, as the command prints them), then in the report view.
+func TestHomeOnPTYAddProgressIsLive(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	s := startPTYShell(t, e.cwd, `B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	s.write("w")
+	s.waitFor(`New worktree of alpha`)
+	s.write("topic/live\r")
+	progress := regexp.MustCompile(`^alpha: \w+: \S`)
+	isProgress := func(l string) bool { return progress.MatchString(l) }
+	waitScreenState(t, s, "the progress lines on the normal screen and in the report view", func(vt *vtScreen) bool {
+		alt := vt.altLines()
+		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf add: ") && slices.ContainsFunc(alt, isProgress) &&
+			slices.ContainsFunc(vt.normalLines(), isProgress)
+	})
+	s.write("\x03")
+	wantTerminalRestored(t, s, "130")
+}
+
+// An action interrupted with ctrl+c (exit 130) leaves what its command
+// printed on the normal screen, as the command alone would: here the
+// summary of a fetch whose git processes were killed.
+func TestHomeOnPTYInterruptedActionLeavesItsOutput(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	writeFile(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = fetch ] && sleep 30; done\nexec '"+git+"' \"$@\"\n")
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := startPTYShell(t, e.cwd, `PATH='`+bin+`':$PATH; export PATH; B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	s.write("a")
+	s.write("f")
+	s.waitFor(`Fetching`)
+	time.Sleep(200 * time.Millisecond)
+	s.write("\x03")
+	wantTerminalRestored(t, s, "130")
+	vt := newVTScreen(24, 100)
+	vt.write(s.output())
+	normal := vt.normalLines()
+	n := 0
+	for _, l := range normal {
+		if l == "0 done, 0 skipped, 2 failed" {
+			n++
+		}
+	}
+	if n != 1 || !slices.ContainsFunc(normal, func(l string) bool { return strings.HasPrefix(l, "failed   alpha") }) {
+		t.Errorf("the summary of the interrupted fetch is not on the normal screen once (%d times):\n%s", n, strings.Join(normal, "\n"))
 	}
 }

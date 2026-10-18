@@ -48,10 +48,14 @@ type Deps struct {
 	// anything (e.g. "nothing to prune"): the home screen reports that
 	// rather than "done".
 	unchanged func(note string)
-	// attention, if set, is told when a command succeeded but reported
-	// something to read (doctor warnings): the home screen then pauses
-	// before showing its overview, as after a failure.
-	attention func()
+	// cancelled, if set, is told when the user chose nothing in a menu
+	// and the command ended without error (sync): the home screen counts
+	// that as a cancellation.
+	cancelled func()
+	// term, if set, replaces standard output as the terminal on which TUI
+	// programs render and which decides the TUI mode (see tuiMode): the
+	// home screen captures what its actions print for its report view.
+	term io.Writer
 	// stdinTTY and stdoutTTY replace isTerminal for standard input
 	// (interactive git mode) and standard output (colors); tests only.
 	stdinTTY  func(io.Reader) bool
@@ -66,11 +70,10 @@ func (d Deps) reportUnchanged(note string) {
 	}
 }
 
-// reportAttention tells d.attention, if set, that the command reported
-// something to read.
-func (d Deps) reportAttention() {
-	if d.attention != nil {
-		d.attention()
+// reportCancelled tells d.cancelled, if set, that the user chose nothing.
+func (d Deps) reportCancelled() {
+	if d.cancelled != nil {
+		d.cancelled()
 	}
 }
 
