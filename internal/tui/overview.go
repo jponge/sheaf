@@ -116,7 +116,8 @@ func NewOverview(title string, header []string, rows []Row, actions []OverviewAc
 	return m
 }
 
-// WithMessage returns a copy of m displaying msg below the table.
+// WithMessage returns a copy of m displaying msg below the table, on the
+// status line.
 func (m Overview) WithMessage(msg string) Overview {
 	m.message = msg
 	return m
@@ -396,23 +397,26 @@ func (m *Overview) applyFilter() {
 // ovLayout tells which lines View renders around the rows, and how many
 // rows fit.
 type ovLayout struct {
-	title, filter, header, status, message, help bool
-	rows                                         int
+	title, filter, header, status, help bool // status: with the message
+	gaps                                int  // blank lines of the footer, see footer
+	rows                                int
 }
 
-// layout fits the view into the window height. When the window is too
-// small for at least one row, the help, title, status, message, filter and
-// header lines are dropped in that order. With an unknown height every
-// visible row is shown.
+// layout fits the view into the window height. The blank lines of the
+// footer are dropped (the one above the help first) when that lets every
+// visible row fit (see fitGaps). When the window is too small for at least
+// one row, the blank lines, then the help, title, status (with the
+// message), filter and header lines are dropped in that order. With an
+// unknown height every visible row is shown.
 func (m Overview) layout() ovLayout {
-	l := ovLayout{title: true, filter: m.filtering || m.filter != "", header: true, status: true, message: m.message != "", help: true}
+	l := ovLayout{title: true, filter: m.filtering || m.filter != "", header: true, status: true, help: true, gaps: 2}
 	if m.height <= 0 {
 		l.rows = max(1, len(m.visible))
 		return l
 	}
 	chrome := func() int {
-		n := 0
-		for _, shown := range []bool{l.title, l.filter, l.header, l.status, l.message} {
+		n := l.gaps
+		for _, shown := range []bool{l.title, l.filter, l.header, l.status} {
 			if shown {
 				n++
 			}
@@ -422,7 +426,8 @@ func (m Overview) layout() ovLayout {
 		}
 		return n
 	}
-	for _, line := range []*bool{&l.help, &l.title, &l.status, &l.message, &l.filter, &l.header} {
+	l.gaps = fitGaps(l.gaps, m.height, chrome()-l.gaps, max(1, len(m.visible)))
+	for _, line := range []*bool{&l.help, &l.title, &l.status, &l.filter, &l.header} {
 		if m.height-chrome() >= 1 {
 			break
 		}
@@ -521,15 +526,21 @@ func (m Overview) View() tea.View {
 			lines = append(lines, m.renderRow(i, widths))
 		}
 	}
+	var status, help []string
 	if l.status {
-		lines = append(lines, st.Status.Render(m.status()))
-	}
-	if l.message {
-		lines = append(lines, sanitize(m.message))
+		s := st.Status.Render(m.status())
+		line := joinStatus(s, sanitize(m.message))
+		// A message cut off entirely by the truncation to the width below
+		// leaves no dangling separator.
+		if m.width > 0 && lipgloss.Width(lipgloss.NewStyle().MaxWidth(m.width).Render(line)) <= lipgloss.Width(s+" · ") {
+			line = s
+		}
+		status = []string{line}
 	}
 	if l.help {
-		lines = append(lines, m.helpLines()...)
+		help = m.helpLines()
 	}
+	lines = append(lines, footer(l.gaps, status, help)...)
 	if m.width > 0 {
 		trunc := lipgloss.NewStyle().MaxWidth(m.width)
 		for i, line := range lines {

@@ -3,10 +3,12 @@ package tui
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func ovRows() []Row {
@@ -265,7 +267,7 @@ func TestOverviewWithMessageCursorAndFilter(t *testing.T) {
 	t.Parallel()
 	m := newOv().WithMessage("update: 1 fast-forwarded").WithCursor("/b/bravo/main")
 	v := view(m)
-	if !hasLine(v, "update: 1 fast-forwarded") || !strings.Contains(v, "> [ ] bravo") {
+	if !hasLine(v, "0/3 selected · update: 1 fast-forwarded") || !strings.Contains(v, "> [ ] bravo") {
 		t.Fatalf("message or cursor:\n%s", v)
 	}
 	m = newOv().WithFilter("feat")
@@ -454,5 +456,148 @@ func TestOverviewWithAltScreen(t *testing.T) {
 		if v := done.View(); !v.AltScreen || v.Content != "" {
 			t.Errorf("%s: final view on the alternate screen %v: %q", k, v.AltScreen, v.Content)
 		}
+	}
+}
+
+// ovShape classifies the lines of an overview view: T title, F filter,
+// H header, R row, S status line, K key help, ? other.
+func ovShape(m tea.Model) string {
+	row := regexp.MustCompile(`^(> |  )\[[ x]\] `)
+	status := regexp.MustCompile(`^\d+/\d+ selected`)
+	return shape(view(m), func(l string) string {
+		switch {
+		case l == "t" || l == "sheaf: /b":
+			return "T"
+		case strings.HasPrefix(l, "/"):
+			return "F"
+		case strings.Contains(l, "REPO"):
+			return "H"
+		case row.MatchString(l):
+			return "R"
+		case status.MatchString(l):
+			return "S"
+		case strings.Contains(l, " • "):
+			return "K"
+		}
+		return "?"
+	})
+}
+
+// A blank line separates the rows from the status line, which also shows
+// the message, and another one separates it from the key help.
+func TestOverviewSpacesTheFooter(t *testing.T) {
+	t.Parallel()
+	for _, size := range []tea.Msg{nil, tea.WindowSizeMsg{Width: 80, Height: 24}} {
+		for _, msg := range []string{"", "prune: nothing to prune"} {
+			var m tea.Model = newOv().WithMessage(msg)
+			if size != nil {
+				m, _ = m.Update(size)
+			}
+			if got := ovShape(m); got != "T H R R R _ S _ K K" {
+				t.Errorf("size %v, message %q: shape %q:\n%s", size, msg, got, view(m))
+			}
+			want := "0/3 selected"
+			if msg != "" {
+				want += " · " + msg
+			}
+			if !hasLine(view(m), want) {
+				t.Errorf("size %v: no status line %q:\n%s", size, want, view(m))
+			}
+			m, _ = press(m, "/")
+			if got := ovShape(m); got != "T F H R R R _ S _ K" {
+				t.Errorf("size %v, message %q, filter mode: shape %q:\n%s", size, msg, got, view(m))
+			}
+		}
+	}
+}
+
+// On a short terminal the blank lines go first (the one above the help
+// first), then the help, title, status and header lines as before; the
+// view never exceeds the height and keeps the cursor row.
+func TestOverviewShortTerminalDropsSpacingFirst(t *testing.T) {
+	t.Parallel()
+	var rows []Row
+	for i := range 30 {
+		rows = append(rows, Row{Key: fmt.Sprint(i), Cells: []string{fmt.Sprintf("r%02d", i), "main"}})
+	}
+	want := map[int]string{
+		9: "T H R R _ S _ K K",
+		8: "T H R _ S _ K K",
+		7: "T H R _ S K K",
+		6: "T H R S K K",
+		5: "T H R R S",
+		4: "T H R S",
+		3: "H R S",
+		2: "H R",
+		1: "R",
+	}
+	for h := 1; h <= 9; h++ {
+		var m tea.Model = NewOverview("t", []string{"REPO", "DIR"}, rows, ovActions()).WithMessage("m")
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
+		m, _ = press(m, "end")
+		v := view(m)
+		if got := ovShape(m); got != want[h] || lineCount(v) > h || !strings.Contains(v, "> [ ] r29") {
+			t.Errorf("height %d: shape %q, want %q:\n%s", h, got, want[h], v)
+		}
+	}
+}
+
+// An overview whose rows all fit without some of the blank lines drops
+// them (the one above the help first) rather than scroll; one that scrolls
+// anyway keeps them, unless no row would fit.
+func TestOverviewDropsSpacingToFitWithoutScrolling(t *testing.T) {
+	t.Parallel()
+	want := map[int]string{
+		10: "T H R R R _ S _ K K",
+		9:  "T H R R R _ S K K",
+		8:  "T H R R R S K K",
+		7:  "T H R _ S K K",
+	}
+	for h := 7; h <= 10; h++ {
+		var m tea.Model = newOv().WithMessage("m")
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
+		v := view(m)
+		if got := ovShape(m); got != want[h] || lineCount(v) > h {
+			t.Errorf("height %d: shape %q, want %q:\n%s", h, got, want[h], v)
+		}
+		if scrolls := strings.Contains(v, "rows 1-"); scrolls != (h == 7) {
+			t.Errorf("height %d: scroll status %v:\n%s", h, scrolls, v)
+		}
+	}
+}
+
+// A message cut off entirely by the truncation to the width leaves no
+// dangling separator on the status line.
+func TestOverviewNarrowStatusLineHasNoDanglingSeparator(t *testing.T) {
+	t.Parallel()
+	for w := 10; w <= 20; w++ {
+		var m tea.Model = newOv().WithMessage("prune: nothing to prune")
+		m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 24})
+		for _, l := range strings.Split(view(m), "\n") {
+			if strings.HasSuffix(strings.TrimRight(l, " "), "·") || strings.HasPrefix(l, "0/3 selected ") && !strings.Contains(l, "· p") {
+				t.Errorf("width %d: status line %q", w, l)
+			}
+		}
+	}
+	var m tea.Model = newOv().WithMessage("prune: nothing to prune")
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 16, Height: 24})
+	if !hasLine(view(m), "0/3 selected · p") {
+		t.Errorf("width 16:\n%s", view(m))
+	}
+}
+
+// The status line joined with the message is truncated to the width like
+// the other lines.
+func TestOverviewTruncatesTheStatusLine(t *testing.T) {
+	t.Parallel()
+	var m tea.Model = newOv().WithMessage(strings.Repeat("x", 100))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 30, Height: 24})
+	for _, l := range strings.Split(view(m), "\n") {
+		if w := lipgloss.Width(l); w > 30 {
+			t.Errorf("line of width %d: %q", w, l)
+		}
+	}
+	if !strings.Contains(view(m), "0/3 selected · xxx") {
+		t.Errorf("view:\n%s", view(m))
 	}
 }

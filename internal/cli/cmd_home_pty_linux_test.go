@@ -183,13 +183,13 @@ func TestHomeOnPTYOverviewOnAlternateScreen(t *testing.T) {
 	e, _, feat, _, _ := homeBundle(t)
 	s := startPTYShell(t, e.cwd, `B=$(stty -g); echo before-sheaf; "$SHEAF"`+sttyCheck, 0)
 	// overviewShown tells whether the alternate screen shows the overview
-	// from its top, with the message line message unless empty, and the
-	// normal screen no part of it.
+	// from its top, with the message message on its status line unless
+	// empty, and the normal screen no part of it.
 	overviewShown := func(message string) func(vt *vtScreen) bool {
 		return func(vt *vtScreen) bool {
 			alt, normal := vt.altLines(), strings.Join(vt.normalLines(), "\n")
 			return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf: ") &&
-				strings.Count(strings.Join(alt, "\n"), "STATE") == 1 && (message == "" || slices.Contains(alt, message)) &&
+				strings.Count(strings.Join(alt, "\n"), "STATE") == 1 && (message == "" || slices.ContainsFunc(alt, func(l string) bool { return overviewMessage(l) == message })) &&
 				strings.Contains(normal, "before-sheaf") && !strings.Contains(normal, "STATE")
 		}
 	}
@@ -245,7 +245,7 @@ func TestHomeOnPTYFailureShowsReportView(t *testing.T) {
 			waitScreenState(t, s, "the overview with the failure", func(vt *vtScreen) bool {
 				alt := vt.altLines()
 				return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf: ") &&
-					slices.ContainsFunc(alt, func(l string) bool { return strings.HasPrefix(l, "add failed: ") })
+					slices.ContainsFunc(alt, func(l string) bool { return strings.HasPrefix(overviewMessage(l), "add failed: ") })
 			})
 			s.write("q")
 		}
@@ -281,7 +281,7 @@ func TestHomeOnPTYTypeAheadDoesNotSkipReport(t *testing.T) {
 	}
 	s.write("x")
 	waitScreenState(t, s, "the overview with the failure", func(vt *vtScreen) bool {
-		return vt.altActive() && slices.ContainsFunc(vt.altLines(), func(l string) bool { return strings.HasPrefix(l, "add failed: ") })
+		return vt.altActive() && slices.ContainsFunc(vt.altLines(), func(l string) bool { return strings.HasPrefix(overviewMessage(l), "add failed: ") })
 	})
 	s.write("q")
 	wantTerminalRestored(t, s, "0")
@@ -408,6 +408,19 @@ var (
 
 func isDoctorLine(l string) bool { return doctorLine.MatchString(l) }
 
+// overviewStatus matches the status line of an overview (filtered and
+// scrolled or not) followed by a message.
+var overviewStatus = regexp.MustCompile(`^\d+/\d+ selected(?: · \d+ shown)?(?: · rows \d+-\d+ of \d+)? · (.+)$`)
+
+// overviewMessage returns the message of the overview status line l, ""
+// when l is not such a line.
+func overviewMessage(l string) string {
+	if m := overviewStatus.FindStringSubmatch(l); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
 // doctorView waits until the 10-row terminal of s shows the report view of
 // doctor (bundle root) with a status line, and ok accepts its status line
 // (submatches of reportStatus) and its report lines; it returns the
@@ -463,7 +476,7 @@ func TestHomeOnPTYDoctorReportScrolls(t *testing.T) {
 	s.write("x")
 	waitScreenStateRows(t, s, 10, "the overview after doctor", func(vt *vtScreen) bool {
 		alt := vt.altLines()
-		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf: ") && slices.Contains(alt, "doctor: done")
+		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf: ") && slices.ContainsFunc(alt, func(l string) bool { return overviewMessage(l) == "doctor: done" })
 	})
 	s.write("q")
 	wantTerminalRestored(t, s, "0")
@@ -475,7 +488,7 @@ func TestHomeOnPTYDoctorReportScrolls(t *testing.T) {
 }
 
 // Scrolling the report view line by line gives the same screen whatever the
-// way: j j k and home j both show lines 2-8.
+// way: j j k and home j both show lines 2-6.
 func TestHomeOnPTYReportScrollsLineByLine(t *testing.T) {
 	e, _, _, _, _ := homeBundle(t)
 	s := doctorReport(t, e)
@@ -496,8 +509,8 @@ func TestHomeOnPTYReportScrollsLineByLine(t *testing.T) {
 	if strings.Join(a, "\n") != strings.Join(b, "\n") {
 		t.Errorf("j j k and home j show different screens:\n%s\n---\n%s", strings.Join(a, "\n"), strings.Join(b, "\n"))
 	}
-	if !slices.ContainsFunc(a, func(l string) bool { return strings.HasPrefix(l, "lines 2-8 of ") }) {
-		t.Errorf("no status line \"lines 2-8 of ...\":\n%s", strings.Join(a, "\n"))
+	if !slices.ContainsFunc(a, func(l string) bool { return strings.HasPrefix(l, "lines 2-6 of ") }) {
+		t.Errorf("no status line \"lines 2-6 of ...\":\n%s", strings.Join(a, "\n"))
 	}
 	s.write("\x03")
 	wantTerminalRestored(t, s, "130")

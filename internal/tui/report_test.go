@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -70,7 +71,7 @@ func TestReportScrolls(t *testing.T) {
 	t.Parallel()
 	m0, _ := newTestReport(30)
 	var m tea.Model = m0
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 10}) // title, status, help: 7 lines
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 12}) // title, blanks, status, help: 7 lines
 	for _, step := range []struct {
 		keys     []string
 		from, to int
@@ -96,8 +97,8 @@ func TestReportScrolls(t *testing.T) {
 		if want := fmt.Sprintf("lines %d-%d of 30", step.from, step.to); !strings.Contains(view(m), want) {
 			t.Fatalf("after %v: no status %q\n%s", step.keys, want, view(m))
 		}
-		if n := strings.Count(view(m), "\n") + 1; n > 10 {
-			t.Fatalf("after %v: %d lines in a window of 10", step.keys, n)
+		if n := strings.Count(view(m), "\n") + 1; n > 12 {
+			t.Fatalf("after %v: %d lines in a window of 12", step.keys, n)
 		}
 	}
 	// A report that fits has no status line.
@@ -193,5 +194,90 @@ func TestReportExpandsTabs(t *testing.T) {
 	want := []string{"        new.txt", "M       file.txt", "ab      c       d"}
 	if !slices.Equal(lines[1:4], want) {
 		t.Errorf("lines %q, want %q", lines[1:4], want)
+	}
+}
+
+// reportShape classifies the lines of a report view from newTestReport:
+// T title, L report line, S status line, K key help, ? other.
+func reportShape(m tea.Model) string {
+	status := regexp.MustCompile(`^lines \d+-\d+ of \d+$`)
+	return shape(view(m), func(l string) string {
+		switch {
+		case l == "sheaf doctor: /b":
+			return "T"
+		case strings.HasPrefix(l, "line "):
+			return "L"
+		case status.MatchString(l):
+			return "S"
+		case strings.Contains(l, "any other key"):
+			return "K"
+		}
+		return "?"
+	})
+}
+
+// A blank line separates the report lines from the status line (shown when
+// they do not fit), and another one separates it from the key help.
+func TestReportSpacesTheFooter(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		n    int
+		size tea.Msg
+		want string
+	}{
+		{3, nil, "T L L L _ K"},
+		{3, tea.WindowSizeMsg{Width: 80, Height: 10}, "T L L L _ K"},
+		{7, tea.WindowSizeMsg{Width: 80, Height: 10}, "T L L L L L L L _ K"},
+		{30, tea.WindowSizeMsg{Width: 80, Height: 12}, "T L L L L L L L _ S _ K"},
+	} {
+		var m tea.Model
+		m, _ = newTestReport(c.n)
+		if c.size != nil {
+			m, _ = m.Update(c.size)
+		}
+		if got := reportShape(m); got != c.want {
+			t.Errorf("%d lines, size %v: shape %q, want %q:\n%s", c.n, c.size, got, c.want, view(m))
+		}
+	}
+}
+
+// On a short terminal the blank lines go first (the one above the help
+// first), then the help, title and status lines as before.
+func TestReportShortTerminalDropsSpacingFirst(t *testing.T) {
+	t.Parallel()
+	want := map[int]string{
+		7: "T L L _ S _ K",
+		6: "T L _ S _ K",
+		5: "T L _ S K",
+		4: "T L S K",
+		3: "T L S",
+		2: "L S",
+		1: "L",
+	}
+	for h := 1; h <= 7; h++ {
+		r, _ := newTestReport(30)
+		m, _ := r.Update(tea.WindowSizeMsg{Width: 80, Height: h})
+		if got := reportShape(m); got != want[h] || lineCount(view(m)) > h {
+			t.Errorf("height %d: shape %q, want %q:\n%s", h, got, want[h], view(m))
+		}
+	}
+}
+
+// A report that fits without some of the blank lines drops them (the one
+// above the help first) rather than scroll, and then needs no status line;
+// one that scrolls anyway keeps them.
+func TestReportDropsSpacingToFitWithoutScrolling(t *testing.T) {
+	t.Parallel()
+	want := map[int]string{
+		6: "T L L L _ K",
+		5: "T L L L K",
+		4: "T L S K",
+	}
+	for h := 4; h <= 6; h++ {
+		r, _ := newTestReport(3)
+		m, _ := r.Update(tea.WindowSizeMsg{Width: 80, Height: h})
+		if got := reportShape(m); got != want[h] || lineCount(view(m)) > h {
+			t.Errorf("3 lines, height %d: shape %q, want %q:\n%s", h, got, want[h], view(m))
+		}
 	}
 }

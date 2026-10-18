@@ -92,3 +92,17 @@ func lineCount(v string) int { return strings.Count(v, "\n") + 1 }
 func hasLine(v, want string) bool {
 	return slices.Contains(strings.Split(v, "\n"), want)
 }
+
+// shape returns the classes of the lines of v (see classify), separated by
+// spaces, e.g. "T R R _ S _ K"; blank lines are "_".
+func shape(v string, classify func(line string) string) string {
+	var c []string
+	for _, l := range strings.Split(v, "\n") {
+		if l == "" {
+			c = append(c, "_")
+		} else {
+			c = append(c, classify(l))
+		}
+	}
+	return strings.Join(c, " ")
+}

@@ -157,23 +157,37 @@ func (m Report) wrapped() []string {
 // how many fit.
 type reportLayout struct {
 	title, status, help bool
+	gaps                int // blank lines of the footer, see footer
 	rows                int
 }
 
-// layout fits the view into the window height: the status line is shown
-// when the lines do not fit. When the window is too small for at least one
-// line, the help, title and status lines are dropped in that order. With
-// an unknown height every line is shown.
+// layout fits the view into the window height: the blank lines of the
+// footer are dropped (the one above the help first) when that lets every
+// line fit (see fitGaps), and the status line is shown when the lines do
+// not fit. When the window is too small for at least one line, the blank
+// lines, then the help, title and status lines are dropped in that order.
+// With an unknown height every line is shown.
 func (m Report) layout() reportLayout {
 	n := len(m.wrapped())
-	l := reportLayout{title: true, help: true}
 	if m.height <= 0 {
-		l.rows = max(1, n)
-		return l
+		return reportLayout{title: true, help: true, gaps: 1, rows: max(1, n)}
 	}
-	l.status = n > m.height-2
+	l := m.fit(false)
+	if n > l.rows {
+		l = m.fit(true)
+	}
+	return l
+}
+
+// fit fits the view into the window height, with or without the status
+// line (see layout).
+func (m Report) fit(status bool) reportLayout {
+	l := reportLayout{title: true, status: status, help: true, gaps: 1}
+	if status {
+		l.gaps = 2
+	}
 	chrome := func() int {
-		c := 0
+		c := l.gaps
 		for _, shown := range []bool{l.title, l.status, l.help} {
 			if shown {
 				c++
@@ -181,6 +195,7 @@ func (m Report) layout() reportLayout {
 		}
 		return c
 	}
+	l.gaps = fitGaps(l.gaps, m.height, chrome()-l.gaps, len(m.wrapped()))
 	for _, line := range []*bool{&l.help, &l.title, &l.status} {
 		if m.height-chrome() >= 1 {
 			break
@@ -207,15 +222,17 @@ func (m Report) View() tea.View {
 	}
 	end := min(m.offset+l.rows, len(all))
 	lines = append(lines, all[m.offset:end]...)
+	var status, help []string
 	if l.status {
-		lines = append(lines, st.Status.Render(fmt.Sprintf("lines %d-%d of %d", m.offset+1, end, len(all))))
+		status = []string{st.Status.Render(fmt.Sprintf("lines %d-%d of %d", m.offset+1, end, len(all)))}
 	}
 	if l.help {
-		lines = append(lines, m.help.ShortHelpView([]key.Binding{
+		help = []string{m.help.ShortHelpView([]key.Binding{
 			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll")),
 			key.NewBinding(key.WithKeys(""), key.WithHelp("any other key:", m.back)),
-		}))
+		})}
 	}
+	lines = append(lines, footer(l.gaps, status, help)...)
 	if m.width > 0 {
 		trunc := lipgloss.NewStyle().MaxWidth(m.width)
 		for i, line := range lines {

@@ -339,20 +339,24 @@ func (m *MultiSelect) applyFilter() {
 // item rows fit.
 type layout struct {
 	title, filter, status, help bool
+	gaps                        int // blank lines of the footer, see footer
 	rows                        int
 }
 
-// layout fits the view into the window height. When the window is too small
-// for at least one item row, the help, title, status and filter lines are
-// dropped in that order. With an unknown height every visible item is shown.
+// layout fits the view into the window height. The blank lines of the
+// footer are dropped (the one above the help first) when that lets every
+// visible item fit (see fitGaps). When the window is too small for at least
+// one item row, the blank lines, then the help, title, status and filter
+// lines are dropped in that order. With an unknown height every visible
+// item is shown.
 func (m MultiSelect) layout() layout {
-	l := layout{title: true, filter: m.filtering || m.filter != "", status: true, help: true}
+	l := layout{title: true, filter: m.filtering || m.filter != "", status: true, help: true, gaps: 2}
 	if m.height <= 0 {
 		l.rows = max(1, len(m.visible))
 		return l
 	}
 	chrome := func() int {
-		n := 0
+		n := l.gaps
 		for _, shown := range []bool{l.title, l.filter, l.status, l.help} {
 			if shown {
 				n++
@@ -360,6 +364,7 @@ func (m MultiSelect) layout() layout {
 		}
 		return n
 	}
+	l.gaps = fitGaps(l.gaps, m.height, chrome()-l.gaps, max(1, len(m.visible)))
 	for _, line := range []*bool{&l.help, &l.title, &l.status, &l.filter} {
 		if m.height-chrome() >= 1 {
 			break
@@ -368,6 +373,52 @@ func (m MultiSelect) layout() layout {
 	}
 	l.rows = max(1, m.height-chrome())
 	return l
+}
+
+// fitGaps returns how many of the gaps blank lines of a footer a view of
+// height keeps, with lines other lines and n rows to show: all of them when
+// the rows fit, as many as let every row fit otherwise (the rows then do
+// not scroll), and when they scroll anyway, as many as leave room for a
+// row.
+func fitGaps(gaps, height, lines, n int) int {
+	room := height - lines
+	switch {
+	case room-gaps >= n:
+	case room >= n:
+		gaps = room - n
+	default:
+		gaps = max(0, min(gaps, room-1))
+	}
+	return gaps
+}
+
+// footer returns the lines below the rows of a list view: its sections
+// (e.g. the status line, the key help) without the empty ones, the first
+// gaps of them preceded by a blank line.
+func footer(gaps int, sections ...[]string) []string {
+	var lines []string
+	for _, s := range sections {
+		if len(s) == 0 {
+			continue
+		}
+		if gaps > 0 {
+			lines = append(lines, "")
+			gaps--
+		}
+		lines = append(lines, s...)
+	}
+	return lines
+}
+
+// joinStatus joins the non-empty parts of a status line with " · ".
+func joinStatus(parts ...string) string {
+	var kept []string
+	for _, p := range parts {
+		if p != "" {
+			kept = append(kept, p)
+		}
+	}
+	return strings.Join(kept, " · ")
 }
 
 // listHeight is the number of item rows that fit in the view.
@@ -415,19 +466,21 @@ func (m MultiSelect) View() tea.View {
 		}
 	}
 
+	var status, help []string
 	if l.status {
-		lines = append(lines, st.Status.Render(m.status()))
+		status = []string{st.Status.Render(m.status())}
 	}
 	switch {
 	case !l.help:
 	case m.filtering:
-		lines = append(lines, m.help.ShortHelpView([]key.Binding{m.keys.ApplyFilter, m.keys.ClearFilter}))
+		help = []string{m.help.ShortHelpView([]key.Binding{m.keys.ApplyFilter, m.keys.ClearFilter})}
 	default:
-		lines = append(lines, m.help.ShortHelpView([]key.Binding{
+		help = []string{m.help.ShortHelpView([]key.Binding{
 			m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.All, m.keys.None,
 			m.keys.Filter, m.keys.Confirm, m.keys.Cancel,
-		}))
+		})}
 	}
+	lines = append(lines, footer(l.gaps, status, help)...)
 
 	if m.width > 0 {
 		trunc := lipgloss.NewStyle().MaxWidth(m.width)
