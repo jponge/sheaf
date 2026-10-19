@@ -583,6 +583,26 @@ func TestProgressSpacesTheHeader(t *testing.T) {
 	}
 }
 
+// A question declined before any row (aside rows apart) finished ends the
+// view cancelled (B52 U2 review: a declined prune ended "finished"); a
+// question answered yes does not.
+func TestProgressFinishAfterDeclinedQuestion(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ key, want string }{
+		{"n", "Checking prune candidates: cancelled after 0s\n"},
+		{"y", "Checking prune candidates: finished in 0s\n"},
+	} {
+		p, _ := newTestProgress("Checking prune candidates")
+		m, _ := feed(p.WithAside("fetch"),
+			RowUpdate{Key: "a", Label: "a (fetch)", State: RowDone, Aside: true},
+			AskMsg{Question: "Prune 1 candidate?", Reply: make(chan bool, 1)},
+			keyMsg(c.key), FinishMsg{})
+		if v := view(m); v != c.want {
+			t.Errorf("%s: final view %q, want %q", c.key, v, c.want)
+		}
+	}
+}
+
 // The final view of an interrupted progress says so (B52 B2), whatever
 // its rows.
 func TestProgressFinishAfterInterruption(t *testing.T) {

@@ -636,13 +636,18 @@ func TestTUIPruneHeaderCountsTheFetch(t *testing.T) {
 	addWorktree(t, primary, "feat", "feat")
 	testutil.Git(t, o.Path, "branch", "-D", "feat") // gone upstream
 	var out syncBuffer
-	in := newScript(t, true, []key{{keys: "n", wait: waitOutput(t, &out, "[y/N]")}})
+	// The second key keeps the input open until the final view.
+	in := newScript(t, true, []key{{keys: "n", wait: waitOutput(t, &out, "[y/N]")}, {keys: "x", wait: waitScreen(t, &out, "Checking prune candidates: ")}})
 	errs, code := e.runTUI(t, in, &out, "prune")
 	if code != 1 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 	if asking := out.String()[:strings.Index(out.String(), "[y/N]")]; !strings.Contains(asking, "Checking prune candidates · fetch 1/1 · 0 running, 0 done, 0 skipped, 0 failed ·") {
 		t.Errorf("header while asking does not count the fetch:\n%s", asking)
+	}
+	// Declined: the view ends cancelled, like the command.
+	if !strings.Contains(screenText(out.String()), "Checking prune candidates: cancelled after ") {
+		t.Errorf("final view does not say cancelled:\n%s", screenText(out.String()))
 	}
 }
 

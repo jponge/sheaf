@@ -54,7 +54,8 @@ type TitleMsg struct{ Title string }
 // FinishMsg ends a Progress: it quits the program, and its final view is
 // the title only, with how it ended and the elapsed time frozen: "<title>:
 // finished in 1.2s", "interrupted after", or "cancelled after" when every
-// row was cancelled. It has no counts: the caller prints the summary of
+// row was cancelled, or a question was answered no before any row (aside
+// rows apart) finished. It has no counts: the caller prints the summary of
 // the results itself, which they would repeat or contradict. Pending
 // questions are answered no.
 type FinishMsg struct{}
@@ -127,6 +128,7 @@ type Progress struct {
 	start, ended time.Time
 	interrupt    func()
 	interrupts   int
+	declined     bool // a question was answered no (ctrl+c aside)
 	finished     bool
 
 	width, height    int
@@ -328,6 +330,7 @@ func (m Progress) answer(k tea.KeyPressMsg) Progress {
 		return m
 	}
 	reply(m.asks[0], m.ask.Confirmed())
+	m.declined = m.declined || !m.ask.Confirmed()
 	m.asks = m.asks[1:]
 	if len(m.asks) > 0 {
 		m.showAsk()
@@ -386,7 +389,7 @@ func (m Progress) header(aside, counted bool) string {
 		switch {
 		case m.interrupts > 0:
 			end = "interrupted after"
-		case cancelled > 0 && running+done+skipped+failed+interrupted == 0:
+		case (cancelled > 0 || m.declined) && running+done+skipped+failed+interrupted == 0:
 			end = "cancelled after"
 		}
 		return m.styles.Title.Render(sanitize(m.title)) + fmt.Sprintf(": %s %v", end, m.elapsed())
