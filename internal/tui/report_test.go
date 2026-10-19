@@ -163,7 +163,7 @@ func TestReportIndentsContinuationLines(t *testing.T) {
 	}
 	t.Parallel()
 	words := func(prefix string) string { return longText(prefix, 300) }
-	path := "/tmp/claude-1000/-workspace/ee492ed2-d823-4c5a-bd77-f9f9e4e66f12/scratchpad/u4/scr/b/work/web/local-only"
+	path := "/private/var/folders/x9/-tmp-sheaf-tests-ee492ed2-d823-4c5a-bd77-f9f9e4e66f12/T/bundle/work/web/local-only"
 	cases := []struct {
 		line   string
 		indent int
