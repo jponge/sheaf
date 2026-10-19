@@ -191,12 +191,13 @@ type reportLayout struct {
 // title first) when that lets every line fit (see fitGaps and splitGaps),
 // and the status line is shown when the lines do not fit. When the window
 // is too small for at least one line, the blank lines, then the help,
-// title and status lines are dropped in that order.
-// With an unknown height every line is shown.
+// title and status lines are dropped in that order. An empty report has
+// no blank line below the title: it would be next to the one above the
+// help. With an unknown height every line is shown.
 func (m Report) layout() reportLayout {
 	n := len(m.wrapped())
 	if m.height <= 0 {
-		return reportLayout{title: true, help: true, gaps: 2, rows: max(1, n)}
+		return reportLayout{title: true, help: true, gaps: min(2, 1+n), rows: max(1, n)}
 	}
 	l := m.fit(false)
 	if n > l.rows {
@@ -208,7 +209,7 @@ func (m Report) layout() reportLayout {
 // fit fits the view into the window height, with or without the status
 // line (see layout).
 func (m Report) fit(status bool) reportLayout {
-	l := reportLayout{title: true, status: status, help: true, gaps: 2}
+	l := reportLayout{title: true, status: status, help: true, gaps: min(2, 1+len(m.wrapped()))}
 	if status {
 		l.gaps = 3
 	}

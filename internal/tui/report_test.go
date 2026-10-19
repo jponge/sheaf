@@ -71,7 +71,7 @@ func TestReportScrolls(t *testing.T) {
 	t.Parallel()
 	m0, _ := newTestReport(30)
 	var m tea.Model = m0
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 13}) // title, blanks, status, help: 7 lines
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 13}) // 7 report lines below the title, blanks, status and help
 	for _, step := range []struct {
 		keys     []string
 		from, to int
@@ -284,6 +284,22 @@ func TestReportDropsSpacingToFitWithoutScrolling(t *testing.T) {
 		m, _ := r.Update(tea.WindowSizeMsg{Width: 80, Height: h})
 		if got := reportShape(m); got != want[h] || lineCount(view(m)) > h {
 			t.Errorf("3 lines, height %d: shape %q, want %q:\n%s", h, got, want[h], view(m))
+		}
+	}
+}
+
+// An empty report has no blank line below the title next to the one above
+// the key help: a single blank line separates them, as before B41.
+func TestReportEmptyHasNoAdjacentBlankLines(t *testing.T) {
+	t.Parallel()
+	for _, size := range []tea.Msg{nil, tea.WindowSizeMsg{Width: 80, Height: 4}, tea.WindowSizeMsg{Width: 80, Height: 5}, tea.WindowSizeMsg{Width: 80, Height: 24}} {
+		var m tea.Model
+		m, _ = newTestReport(0)
+		if size != nil {
+			m, _ = m.Update(size)
+		}
+		if got := reportShape(m); got != "T _ K" {
+			t.Errorf("size %v: shape %q, want %q:\n%s", size, got, "T _ K", view(m))
 		}
 	}
 }
