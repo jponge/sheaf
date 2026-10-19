@@ -59,13 +59,13 @@ func installHome(root *cobra.Command, d Deps) {
 // browse (whose outcome is the overview's message), shown in
 // a scrollable report view on the alternate screen until q, esc or enter
 // is pressed (keys typed ahead are ignored, see tui.Report); the overview
-// then comes back. Enter on a checkout ends sheaf: the path of the checkout is
-// written to the file named by $SHEAF_CD_FILE, set by the shell function
-// of shell-init, which then changes the directory; without it the path is
-// printed, with a hint to add the shell function (the key help then says
-// "print path" rather than "cd"). On a terminal, the programs of the home screen and of its
-// actions set the window title (see homeTitle); bubbletea clears it when
-// each program ends.
+// then comes back. Enter on a checkout ends sheaf: the path of the
+// checkout is written to the file named by $SHEAF_CD_FILE, set by the shell
+// function of shell-init, which then changes the directory; without it the
+// path is printed, with a hint to add the shell function (the key help
+// then says "print path" rather than "cd"). On a terminal, the programs of
+// the home screen and of its actions set the window title (see homeTitle);
+// bubbletea clears it when each program ends.
 func runHome(c *cobra.Command, d Deps) error {
 	if !d.tuiMode(c) {
 		return c.Help()
