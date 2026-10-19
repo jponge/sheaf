@@ -2,11 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 )
 
 // fakeClock is a settable clock for elapsed-time assertions.
@@ -333,6 +336,113 @@ func TestProgressCancelledRowAndTitleChange(t *testing.T) {
 	m, _ = feed(m, FinishMsg{})
 	if v := view(m); !strings.HasPrefix(v, "Removing alpha: 0 done, 0 skipped, 0 failed, 1 cancelled in ") {
 		t.Errorf("final view:\n%s", v)
+	}
+}
+
+// plannedProgress returns a progress view of 4 planned rows (B48): one
+// running, then one done, one skipped and one failed.
+func plannedProgress(t *testing.T, msgs ...tea.Msg) tea.Model {
+	t.Helper()
+	p, _ := newTestProgress("Updating")
+	m, _ := feed(p, append([]tea.Msg{
+		PlannedMsg{Units: 3}, PlannedMsg{Units: 1},
+		RowUpdate{Key: "a", Label: "alpha", State: RowRunning},
+		RowUpdate{Key: "b", Label: "beta", State: RowDone},
+		RowUpdate{Key: "c", Label: "gamma", State: RowSkipped},
+		RowUpdate{Key: "d", Label: "delta", State: RowFailed},
+		RowUpdate{Key: "e", Label: "e (fetch)", State: RowDone, Aside: true},
+	}, msgs...)...)
+	return m
+}
+
+// barCells matches the cells of the progress bar of the header.
+var barCells = regexp.MustCompile(`[█▌░]+`)
+
+// Once the number of rows is planned (PlannedMsg, cumulative), the header
+// shows a progress bar of the finished rows (done, skipped, failed; aside
+// rows not counted) over the planned ones, with the percentage, after the
+// status line; none before (unknown total) nor in the final view.
+func TestProgressHeaderBar(t *testing.T) {
+	t.Parallel()
+	p, _ := newTestProgress("Updating")
+	m, _ := feed(p, RowUpdate{Key: "a", Label: "alpha", State: RowDone}, tea.WindowSizeMsg{Width: 120, Height: 20})
+	if h := strings.Split(view(m), "\n")[0]; strings.Contains(h, "%") || barCells.MatchString(h) {
+		t.Fatalf("header %q has a bar before the total is known", h)
+	}
+	m = plannedProgress(t, tea.WindowSizeMsg{Width: 120, Height: 20})
+	h := strings.Split(view(m), "\n")[0]
+	if !strings.HasPrefix(h, "Updating · 1 running, 1 done, 1 skipped, 1 failed · 0s  ") || !strings.HasSuffix(h, " 75%") {
+		t.Fatalf("header %q, want the status line, then a bar at 75%%", h)
+	}
+	if cells := barCells.FindString(h); lipgloss.Width(cells)+len("  75%") != barMax {
+		t.Errorf("bar %q: %d cells, want %d with the percentage", cells, lipgloss.Width(cells), barMax)
+	}
+	m, _ = m.Update(FinishMsg{})
+	if v := view(m); strings.Contains(v, "%") || barCells.MatchString(v) {
+		t.Errorf("final view %q has a bar", v)
+	}
+	// More finished rows than planned (rows of unplanned work) is 100%.
+	m, _ = feed(p, PlannedMsg{Units: 1}, RowUpdate{Key: "a", Label: "alpha", State: RowDone}, RowUpdate{Key: "b", Label: "beta", State: RowDone})
+	if h := strings.Split(view(m), "\n")[0]; !strings.HasSuffix(h, " 100%") || lipgloss.Width(barCells.FindString(h))+len(" 100%") != barMax {
+		t.Errorf("header %q, want a full bar at 100%%", h)
+	}
+}
+
+// The bar narrows to the room left on the header line, and is dropped
+// first, before the status line is cut, when less than barMin columns are
+// left.
+func TestProgressHeaderBarFitsWidth(t *testing.T) {
+	t.Parallel()
+	status := "Updating · 1 running, 1 done, 1 skipped, 1 failed · 0s"
+	w := lipgloss.Width(status)
+	h := strings.Split(view(plannedProgress(t, tea.WindowSizeMsg{Width: w + 2 + 20, Height: 20})), "\n")[0]
+	if !strings.HasPrefix(h, status+"  ") || lipgloss.Width(h) != w+2+20 || !strings.HasSuffix(h, " 75%") {
+		t.Errorf("header %q, want a 20-column bar", h)
+	}
+	for _, width := range []int{w + 2 + barMin - 1, w, w - 5} {
+		h := strings.Split(view(plannedProgress(t, tea.WindowSizeMsg{Width: width, Height: 20})), "\n")[0]
+		if strings.Contains(h, "%") || barCells.MatchString(h) {
+			t.Errorf("width %d: header %q has a bar", width, h)
+		}
+		if !strings.HasPrefix(status, h) || lipgloss.Width(h) != min(w, width) {
+			t.Errorf("width %d: header %q, want %q cut to the width only", width, h, status)
+		}
+	}
+	m := plannedProgress(t, tea.WindowSizeMsg{Width: w + 2 + barMin, Height: 20})
+	if h := strings.Split(view(m), "\n")[0]; !strings.HasSuffix(h, " 75%") {
+		t.Errorf("header %q, want a bar of barMin columns", h)
+	}
+}
+
+// The bar is a gradient only with 256 colors or more; with fewer colors (and
+// under NO_COLOR, which limits the profile to ASCII) it is solid, of full
+// blocks.
+func TestProgressHeaderBarFollowsColorProfile(t *testing.T) {
+	t.Parallel()
+	truecolor := regexp.MustCompile(`\x1b\[[0-9;:]*38;2;[0-9;:]+m`)
+	for _, c := range []struct {
+		profile  colorprofile.Profile
+		gradient bool
+	}{
+		{colorprofile.TrueColor, true},
+		{colorprofile.ANSI256, true},
+		{colorprofile.ANSI, false},
+		{colorprofile.ASCII, false},
+		{colorprofile.Unknown, false},
+	} {
+		m := plannedProgress(t, tea.WindowSizeMsg{Width: 120, Height: 20}, tea.ColorProfileMsg{Profile: c.profile})
+		raw := strings.Split(m.View().Content, "\n")[0]
+		colors := map[string]bool{}
+		for _, s := range truecolor.FindAllString(raw, -1) {
+			colors[s] = true
+		}
+		h := strings.Split(view(m), "\n")[0]
+		if c.gradient && (len(colors) < 3 || !strings.Contains(h, "▌")) {
+			t.Errorf("%v: %d colors in %q, want a gradient of half blocks", c.profile, len(colors), raw)
+		}
+		if !c.gradient && (strings.Contains(h, "▌") || !strings.Contains(h, "███")) {
+			t.Errorf("%v: header %q, want a solid bar of full blocks", c.profile, h)
+		}
 	}
 }
 

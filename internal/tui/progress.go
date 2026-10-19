@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 )
 
 // RowState is the state of a Progress row.
@@ -57,6 +59,15 @@ type AskMsg struct {
 	Reply    chan<- bool
 }
 
+// PlannedMsg announces Units more rows to a Progress, aside rows excluded
+// (see ops.Planner): the progress bars show the finished rows over the
+// planned ones. Until the first one, the total is unknown.
+type PlannedMsg struct{ Units int }
+
+// barMin and barMax bound the width of the progress bar of the header,
+// percentage included.
+const barMin, barMax = 12, 30
+
 // InterruptedMsg tells a Progress that the command was interrupted Count
 // times in all (signals included); the view shows the corresponding note.
 // Counts lower than the presses already seen are ignored.
@@ -72,7 +83,8 @@ type progressRow struct {
 // Progress is a bubbletea model displaying one row per unit of work (a
 // repository, a checkout) fed by RowUpdate messages: a spinner while
 // running, then a final marker (✓ done, - skipped or cancelled, ✗ failed)
-// and a short message. The header shows the counts and the elapsed time.
+// and a short message. The header shows the counts and the elapsed time,
+// then, once the rows are planned (PlannedMsg), a progress bar.
 //
 // ctrl+c does not quit: each press runs the interrupt function given to
 // WithInterrupt in a command (outside the event loop), and the view tells
@@ -91,6 +103,8 @@ type Progress struct {
 	asks []AskMsg // asks[0] is displayed
 	ask  Confirm
 
+	planned int // rows announced by PlannedMsg; 0: unknown
+
 	now          func() time.Time
 	start, ended time.Time
 	interrupt    func()
@@ -98,6 +112,7 @@ type Progress struct {
 	finished     bool
 
 	width, height int
+	profile       colorprofile.Profile
 
 	spin   spinner.Model
 	styles Styles
@@ -176,6 +191,10 @@ func (m Progress) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+	case tea.ColorProfileMsg:
+		m.profile = msg.Profile
+	case PlannedMsg:
+		m.planned += msg.Units
 	case InterruptedMsg:
 		m.interrupts = max(m.interrupts, msg.Count)
 	case spinner.TickMsg:
@@ -317,11 +336,75 @@ func (m Progress) header() string {
 		fmt.Sprintf(" · %d running, %s · %v", running, counts, m.elapsed()))
 }
 
+// ratio returns the finished rows (aside rows excluded) over the planned
+// ones, at most 1, and false when no row was planned.
+func (m Progress) ratio() (float64, bool) {
+	if m.planned <= 0 {
+		return 0, false
+	}
+	finished := 0
+	for _, r := range m.rows {
+		if !r.aside && r.state != RowRunning {
+			finished++
+		}
+	}
+	return min(1, float64(finished)/float64(m.planned)), true
+}
+
+// headerLine returns the header followed, while running with planned rows,
+// by a progress bar of the ratio, in the room left on the line (at most
+// barMax columns); the bar is dropped when less than barMin are left. It
+// is a gradient with 256 colors or more, else solid (full blocks).
+func (m Progress) headerLine() string {
+	h := m.header()
+	r, ok := m.ratio()
+	if !ok || m.finished {
+		return h
+	}
+	w := barMax
+	if m.width > 0 {
+		w = min(w, m.width-lipgloss.Width(h)-2)
+	}
+	if w < barMin {
+		return h
+	}
+	return h + "  " + m.bar(w, r)
+}
+
+// Colors of the progress bar of the header: those of bubbles' progress bar
+// (its default blend and empty color).
+var (
+	barBlendStart = lipgloss.Color("#5A56E0")
+	barBlendEnd   = lipgloss.Color("#EE6FF8")
+	barEmpty      = lipgloss.Color("#606060")
+)
+
+// bar renders a progress bar of w columns at ratio r, the percentage
+// included, as bubbles' progress.Model.ViewAs does (that package needs a
+// module sheaf does not depend on): a gradient of half blocks with 256
+// colors or more, else solid full blocks of a basic ANSI color.
+func (m Progress) bar(w int, r float64) string {
+	pct := fmt.Sprintf(" %3.0f%%", r*100)
+	cells := max(0, w-len(pct))
+	fill := min(cells, int(math.Round(float64(cells)*r)))
+	var b strings.Builder
+	if m.profile >= colorprofile.ANSI256 {
+		blend := lipgloss.Blend1D(cells*2, barBlendStart, barBlendEnd)
+		for i := range fill {
+			b.WriteString(lipgloss.NewStyle().Foreground(blend[2*i]).Background(blend[2*i+1]).Render("▌"))
+		}
+	} else {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(strings.Repeat("█", fill)))
+	}
+	b.WriteString(lipgloss.NewStyle().Foreground(barEmpty).Render(strings.Repeat("░", cells-fill)))
+	return b.String() + pct
+}
+
 // View implements tea.Model.
 func (m Progress) View() tea.View { return tea.NewView(m.render()) }
 
 func (m Progress) render() string {
-	lines := []string{m.header()}
+	lines := []string{m.headerLine()}
 	if m.finished {
 		// bubbletea erases the last line of the final frame on exit: keep
 		// the header above it.

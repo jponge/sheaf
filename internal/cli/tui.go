@@ -244,7 +244,8 @@ type askFunc func(question string, details []string) bool
 
 // progressOpts configures progress: events of the Aside phase go to rows
 // that are not counted (see eventRow); with Single set, every event goes to
-// one row labelled Single (an operation on one repository); Confirmed, if
+// one row labelled Single (an operation on one repository), which is all
+// the planned work; Confirmed, if
 // set, replaces the title once a question is answered yes (e.g. "Checking
 // alpha for removal" becomes "Removing alpha").
 type progressOpts struct {
@@ -252,7 +253,9 @@ type progressOpts struct {
 }
 
 // progress runs work in a goroutine while a tui.Progress view displays the
-// events it reports, and returns once work has returned. Notices (see
+// events it reports, and returns once work has returned. The reporter is
+// an ops.Planner: the units of work it announces are the rows the view
+// expects (see tui.PlannedMsg). Notices (see
 // isNotice) are then printed on stderr in CLI format, followed by a hint
 // when git failed for lack of a terminal to prompt in (see
 // looksLikeCredentialFailure). Reporting never blocks
@@ -272,6 +275,9 @@ func (s *tuiSession) progress(title string, o progressOpts, work func(ctx contex
 	flush(s.errw) // the program owns the terminal
 	s.spin.hold() // the work may start a phase (see spinHosting)
 	q := &msgQueue{wake: make(chan struct{}, 1)}
+	if o.Single != "" {
+		q.push(tui.PlannedMsg{Units: 1})
+	}
 	programDone := make(chan struct{})
 	ask := func(question string, details []string) bool {
 		reply := make(chan bool, 1)
@@ -292,7 +298,7 @@ func (s *tuiSession) progress(title string, o progressOpts, work func(ctx contex
 	go func() {
 		defer close(workDone)
 		defer q.close()
-		work(s.ctx, ops.ReporterFunc(func(e ops.Event) { q.push(e) }), ask)
+		work(s.ctx, queueReporter{q, o.Single != ""}, ask)
 	}()
 	pumpDone := make(chan struct{})
 	var notices []ops.Event // written by the pump, read after pumpDone
@@ -323,7 +329,7 @@ func (s *tuiSession) progress(title string, o progressOpts, work func(ctx contex
 						u.Key, u.Label = o.Single, o.Single
 					}
 					p.Send(u)
-				case tui.AskMsg, tui.TitleMsg:
+				case tui.AskMsg, tui.TitleMsg, tui.PlannedMsg:
 					p.Send(v)
 				}
 			}
@@ -357,6 +363,22 @@ func (s *tuiSession) progress(title string, o progressOpts, work func(ctx contex
 		fmt.Fprintln(s.errw, credentialHint)
 	}
 	flush(s.errw)
+}
+
+// queueReporter is the reporter of progress: events and announced units of
+// work (tui.PlannedMsg) go to q; with single, the units are ignored (the
+// one row is all the work).
+type queueReporter struct {
+	q      *msgQueue
+	single bool
+}
+
+func (r queueReporter) Report(e ops.Event) { r.q.push(e) }
+
+func (r queueReporter) Plan(units int) {
+	if !r.single {
+		r.q.push(tui.PlannedMsg{Units: units})
+	}
 }
 
 // msgQueue is an unbounded FIFO between the goroutines of progress.

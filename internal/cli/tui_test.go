@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/testutil"
 	"github.com/spf13/cobra"
 )
@@ -244,6 +246,38 @@ func TestTUIReplaysWarningsLikeCLI(t *testing.T) {
 			norm := func(s, root string) string { return strings.ReplaceAll(s, root, "<root>") }
 			wantSameWarnings(t, norm(cliErr, e.cwd), norm(tuiErr, e2.cwd))
 		})
+	}
+}
+
+// The reporter of a progress view is an ops.Planner: the view's header bar
+// shows the finished rows over the planned ones. With Single, the one row
+// is the whole work: plans are ignored.
+func TestTUIProgressPlansRows(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		single, want string
+	}{
+		{"", " 50%"},
+		{"alpha", "100%"},
+	} {
+		var out syncBuffer
+		s := &tuiSession{ctx: context.Background(), ctl: newInterruptCtl(), out: &out, errw: io.Discard}
+		planned := false
+		s.progress("t", progressOpts{Single: c.single}, func(_ context.Context, rep ops.Reporter, _ askFunc) {
+			p, ok := rep.(ops.Planner)
+			if planned = ok; !ok {
+				return
+			}
+			p.Plan(2)
+			rep.Report(ops.Event{Repo: "alpha", Phase: "p", Kind: ops.KindStart})
+			rep.Report(ops.Event{Repo: "alpha", Phase: "p", Kind: ops.KindDone})
+			waitScreen(t, &out, c.want)()
+			rep.Report(ops.Event{Repo: "beta", Phase: "p", Kind: ops.KindStart})
+			rep.Report(ops.Event{Repo: "beta", Phase: "p", Kind: ops.KindDone})
+		})
+		if !planned {
+			t.Errorf("single %q: the reporter is not an ops.Planner", c.single)
+		}
 	}
 }
 
