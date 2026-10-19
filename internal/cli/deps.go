@@ -63,6 +63,9 @@ type Deps struct {
 	// environ replaces os.Environ for the color decisions (see leveled);
 	// tests only.
 	environ func() []string
+	// spin is the working indicator on standard error, nil when it is not
+	// a terminal (see NewRootCmdWithDeps).
+	spin *spinner
 }
 
 // reportUnchanged tells d.unchanged, if set, that the command changed
@@ -87,11 +90,19 @@ func (d Deps) getenv(k string) string {
 	return os.Getenv(k)
 }
 
+// hosting returns the hosting service; its gh default repository calls
+// show the working indicator (see spinHosting).
 func (d Deps) hosting() hosting.Hosting {
+	var h hosting.Hosting
 	if d.Hosting != nil {
-		return d.Hosting()
+		h = d.Hosting()
+	} else {
+		h = hosting.NewGH(hosting.GHOptions{})
 	}
-	return hosting.NewGH(hosting.GHOptions{})
+	if d.spin != nil {
+		h = spinHosting{h, d.spin}
+	}
+	return h
 }
 
 func (d Deps) getwd() (string, error) {

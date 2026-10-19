@@ -602,6 +602,14 @@ green, INFO faint, WARN yellow, FAIL red: `OK`, `INFO`, `WARN`, `FAIL` of
 The report view of the home screen colours them the same way. `--json`
 output is never coloured.
 
+**Working indicator.** When standard error is a terminal, a spinner line
+shows there during phases that print nothing for more than 200 ms: the
+listing of `sync` and `add --org`, the fetches of `wt add`, the gh default
+repository calls of `add`, `adopt` and `sync`. It is erased as soon as
+something is printed and when the phase ends. It is not shown while git
+may prompt on the terminal (interactive git, e.g. `wt add` with standard
+input on a terminal), nor during a progress view.
+
 **Terminal access for git.** git normally runs in its own session without
 the terminal, so it cannot prompt: use an SSH agent or a credential helper.
 In plain mode with standard input on a terminal, git keeps the terminal

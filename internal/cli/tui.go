@@ -157,6 +157,7 @@ type tuiSession struct {
 	ctl       *interruptCtl
 	in        io.Reader
 	out, errw io.Writer
+	spin      *spinner // held while a program runs
 }
 
 func newTUISession(c *cobra.Command, d Deps) *tuiSession {
@@ -173,7 +174,7 @@ func newTUISession(c *cobra.Command, d Deps) *tuiSession {
 		// bubbletea needs the terminal itself to know its size.
 		out = p.w
 	}
-	return &tuiSession{ctx: ctx, ctl: ctl, in: c.InOrStdin(), out: out, errw: d.leveled(c, c.ErrOrStderr())}
+	return &tuiSession{ctx: ctx, ctl: ctl, in: c.InOrStdin(), out: out, errw: d.leveled(c, c.ErrOrStderr()), spin: d.spin}
 }
 
 // run runs a menu or confirmation program. An interruption (signal) kills
@@ -186,7 +187,9 @@ func (s *tuiSession) runModel(m tea.Model) (tea.Model, error) {
 	if err := s.ctx.Err(); err != nil {
 		return nil, err
 	}
+	s.spin.hold()
 	final, err := tui.Run(m, s.in, s.out, tea.WithContext(s.ctx), tea.WithoutSignalHandler())
+	s.spin.release()
 	if cerr := s.ctx.Err(); cerr != nil {
 		return nil, cerr
 	}
@@ -265,6 +268,7 @@ func (s *tuiSession) progress(title string, o progressOpts, work func(ctx contex
 		work(s.ctx, plain, func(string, []string) bool { return false })
 		return
 	}
+	s.spin.hold() // the work may start a phase (see spinHosting)
 	q := &msgQueue{wake: make(chan struct{}, 1)}
 	programDone := make(chan struct{})
 	ask := func(question string, details []string) bool {
@@ -337,6 +341,7 @@ func (s *tuiSession) progress(title string, o progressOpts, work func(ctx contex
 		}
 	})
 	_, _ = p.Run()
+	s.spin.release()
 	s.ctl.setRelease(nil)
 	s.ctl.setNotify(nil)
 	close(runDone)
@@ -504,6 +509,21 @@ func terminalOf(w io.Writer) io.Writer {
 		return terminalOf(v.w)
 	case teeWriter:
 		return terminalOf(v.term)
+	case *spinWriter:
+		return terminalOf(v.w)
 	}
 	return w
+}
+
+// spinnerOf returns the spinner whose writer w writes through, if any.
+func spinnerOf(w io.Writer) *spinner {
+	switch v := w.(type) {
+	case *pipeWatch:
+		return spinnerOf(v.w)
+	case teeWriter:
+		return spinnerOf(v.term)
+	case *spinWriter:
+		return v.s
+	}
+	return nil
 }

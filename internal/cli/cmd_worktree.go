@@ -55,6 +55,25 @@ func eventSink(c *cobra.Command, repo, phase string) func(ops.Event) {
 	}
 }
 
+// spinFetches returns emit, which also runs each fetch it reports (an event
+// of the fetch phase, e.g. "fetching origin") as a phase of the working
+// indicator until the next event, and the function ending the last one.
+// Not when git is interactive: it may prompt on the terminal, where the
+// indicator would overwrite the prompt.
+func (d Deps) spinFetches(emit func(ops.Event), interactive bool) (func(ops.Event), func()) {
+	stop := func() {}
+	if interactive || d.spin == nil {
+		return emit, stop
+	}
+	return func(e ops.Event) {
+		stop()
+		emit(e)
+		if e.Phase == ops.PhaseFetch {
+			stop = d.spin.start(e.Message)
+		}
+	}, func() { stop() }
+}
+
 // singleArgHelp documents how [<repo>] <target> arguments are read.
 const singleArgHelp = "With two arguments the first one is the repository. With one argument: inside a\n" +
 	"checkout of the bundle it names a branch or directory of that checkout's repository;\n" +
@@ -144,7 +163,9 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 					return err
 				}
 				opts.Interactive = d.singleRepoInteractiveGit(c)
-				res, err := ops.AddTagWorktree(c.Context(), w, repo, target.Name, opts, eventSink(c, repo, ops.PhaseWorktree))
+				emit, stop := d.spinFetches(eventSink(c, repo, ops.PhaseWorktree), opts.Interactive)
+				res, err := ops.AddTagWorktree(c.Context(), w, repo, target.Name, opts, emit)
+				stop()
 				if err != nil {
 					return err
 				}
@@ -156,7 +177,9 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 				return err
 			}
 			opts.Interactive = d.singleRepoInteractiveGit(c)
-			res, err := ops.AddWorktree(c.Context(), w, repo, branch.Name, opts, eventSink(c, repo, ops.PhaseWorktree))
+			emit, stop := d.spinFetches(eventSink(c, repo, ops.PhaseWorktree), opts.Interactive)
+			res, err := ops.AddWorktree(c.Context(), w, repo, branch.Name, opts, emit)
+			stop()
 			if err != nil {
 				return err
 			}

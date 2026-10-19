@@ -67,8 +67,20 @@ or with --no-tui, it prints this help.`,
 	if s.Out != nil {
 		root.SetOut(s.Out)
 	}
-	if s.Err != nil {
-		root.SetErr(s.Err)
+	errw := s.Err
+	if errw == nil {
+		errw = os.Stderr
+	}
+	// The working indicator draws on standard error when it is a terminal;
+	// the commands of the home screen share the home screen's.
+	if sp := spinnerOf(errw); sp != nil {
+		d.spin = sp
+	} else if f, ok := terminalOf(errw).(*os.File); ok && isTerminal(f) {
+		d.spin = newSpinner(f)
+		errw = d.spin.writer(errw)
+	}
+	if s.Err != nil || d.spin != nil {
+		root.SetErr(errw)
 	}
 	pf := root.PersistentFlags()
 	pf.String("bundle", "", "bundle directory (default: nearest parent containing sheaf.yaml)")

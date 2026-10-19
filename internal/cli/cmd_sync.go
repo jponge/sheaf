@@ -110,19 +110,23 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 	}
 	ctx, interactive := c.Context(), d.interactiveGit(c)
 	menu := !(fl.addNew || fl.removeGone || len(fl.exclude) > 0) && !fl.asJSON && d.tuiMode(c)
-	if menu {
-		// The listing may take a while before the menu: say so, as add --org.
-		orgs := fl.orgs
-		if len(orgs) == 0 {
-			for _, src := range w.Bundle().Sources {
-				orgs = append(orgs, src.Org)
-			}
-		}
-		if len(orgs) > 0 {
-			fmt.Fprintf(c.ErrOrStderr(), "listing repositories of %s...\n", strings.Join(orgs, ", "))
+	orgs := fl.orgs
+	if len(orgs) == 0 {
+		for _, src := range w.Bundle().Sources {
+			orgs = append(orgs, src.Org)
 		}
 	}
+	if menu && len(orgs) > 0 {
+		// The listing may take a while before the menu: say so, as add --org.
+		fmt.Fprintf(c.ErrOrStderr(), "listing repositories of %s...\n", strings.Join(orgs, ", "))
+	}
+	label := "listing repositories"
+	if len(orgs) > 0 {
+		label += " of " + strings.Join(orgs, ", ")
+	}
+	stop := d.spin.start(label)
 	rep, err := ops.Sync(ctx, w, d.hosting(), ops.SyncOptions{Orgs: fl.orgs, IncludeArchived: fl.includeArchived})
+	stop()
 	if err != nil {
 		return err
 	}

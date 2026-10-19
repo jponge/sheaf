@@ -27,7 +27,9 @@ func tuiAdd(c *cobra.Command, d Deps, w *ops.Workspace, h hosting.Hosting, req o
 	out := d.leveled(c, c.OutOrStdout())
 	if req.Org != "" && !req.All && len(req.Repos) == 0 {
 		fmt.Fprintf(c.ErrOrStderr(), "listing repositories of %s...\n", req.Org)
+		stop := d.spin.start("listing repositories of " + req.Org)
 		_, err := ops.Add(s.ctx, w, h, req, jobs, ops.Discard)
+		stop()
 		var sel *ops.SelectionRequiredError
 		if !errors.As(err, &sel) || len(sel.Available) == 0 {
 			return err
