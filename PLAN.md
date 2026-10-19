@@ -221,6 +221,14 @@ What to do differently
 | B27 | Home screen: doctor pauses only on warnings/failures; user (2026-10-18) wants its output shown inside the TUI and a key to return | done; chosen (amended same day): every action's textual result (doctor report, summaries, errors) in a scrollable report view on the alternate screen, a key returns to the overview (replaces the pause); interactive parts stay on the normal screen; review (user): output also live on the normal screen, kept visible on exit 130, report after a cancel that printed something, empty sync selection = cancel |
 | B28 | TUI footer (status, message, key help) glued to the rows (user, 2026-10-18, overview screenshot) | done; chosen: blank line after the rows and before the key help, status and message on one line (`0/7 selected · prune: nothing to prune`); spacing kept unless dropping it lets the whole list fit (review, user); overview, selection menus and report view |
 | B29 | MultiSelect key help is cut with "…" at 80 columns ("esc/q cancel" lost); pre-existing, found in B28 | open (recorded) |
+| B30 | staticcheck (pinned tool via go run, not a module dependency) in `make vet` and CI; fix what it reports (user, 2026-10-19) | open: step 1 |
+| B31 | Small leftovers: B29, dangling separators on narrow status lines (`· N shown`, `· rows a-b of n`), PLAN B24 row status (user, 2026-10-19) | open: step 1 |
+| B32 | Colored levels (OK green, WARN yellow, FAIL red, INFO dim) in the report view and summaries; NO_COLOR respected (user, 2026-10-19) | open: step 2 |
+| B33 | Overview STATE column colored by severity (user, 2026-10-19) | open: step 2 |
+| B34 | Working indicator: spinner line on stderr, TTY only, during silent phases over ~200 ms (sync gh listing, wt add fetch, gh default calls), erased when output resumes; plain/non-TTY output unchanged (user, 2026-10-19) | open: step 2 |
+| B35 | Overview groups by repository: repository name blank on rows repeating the previous row's repository; rows, selection, filter unchanged (user, 2026-10-19) | open: step 3 |
+| B36 | Overview: ahead/behind arrows in STATE (`↑2 ↓1`, local refs only) and an AGE column (last commit age) (user, 2026-10-19) | open: step 3 |
+| B37 | Home screen key `#`: prompt for a PR number, check it out with `wt pr` (user, 2026-10-19) | open: step 4 |
 
 Order for the high-priority items: B3 → B6 (review sees the merged code) → B2 → B1 (docs describe the final behaviour).
 - Decisions 2026-10-16 (user) for B2: bare `sheaf` in a bundle with a TTY opens an overview (checkouts table from local status, no network at open; multi-select, filter) with actions update/fetch/wt add/wt rm/prune/doctor/sync reusing the per-command TUIs and returning to the overview; enter on a row cds there through the shell-init wrapper (prints the path without it). Outside a bundle: help plus a create/init hint. --no-tui or non-TTY: help, unchanged.
