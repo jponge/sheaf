@@ -329,7 +329,9 @@ func TestHomeAge(t *testing.T) {
 		{7 * day, "1w"},
 		{30*day - time.Second, "4w"},
 		{30 * day, "1mo"},
-		{365*day - time.Second, "12mo"},
+		{360*day - time.Second, "11mo"},
+		{360 * day, "1y"},
+		{365*day - time.Second, "1y"},
 		{365 * day, "1y"},
 		{800 * day, "2y"},
 	} {

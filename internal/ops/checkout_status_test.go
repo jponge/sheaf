@@ -84,7 +84,7 @@ func TestCollectStatusFetchesOnlyWithFetchOption(t *testing.T) {
 	}
 }
 
-// With HeadTimes, each checkout has the committer date of its HEAD,
+// With HeadTimes, each checkout has the author date of its HEAD,
 // detached or not; without it, none.
 func TestCollectStatusHeadTimes(t *testing.T) {
 	t.Parallel()
@@ -124,6 +124,63 @@ func TestCollectStatusHeadTimes(t *testing.T) {
 	for _, c := range r.Checkouts {
 		if !c.HeadTime.IsZero() {
 			t.Errorf("%s: head time %v without HeadTimes", c.Name(), c.HeadTime)
+		}
+	}
+}
+
+// An unreadable HEAD commit (here removed between the status and the
+// dates, as when HEAD moves and the old commit is pruned meanwhile) only
+// loses the date of its own checkout, not those of the other checkouts of
+// the repository. A checkout whose HEAD commit is already missing has a
+// failed status (git status needs it), hence no date either.
+func TestHeadTimesKeepsSiblingsOfAnUnreadableCommit(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	_, alpha := addRepoWith(t, f, "alpha", "feat")
+	feat := addWorktree(t, alpha, "feat", "feat", true)
+	gone := addWorktree(t, alpha, "gone", "gone", false)
+	t1 := time.Date(2020, 5, 17, 10, 30, 0, 0, time.UTC)
+	t2 := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	testutil.CommitAt(t, alpha, "one", t1)
+	testutil.CommitAt(t, feat, "two", t2)
+	lost := testutil.CommitAt(t, gone, "three", time.Date(2025, 7, 8, 9, 10, 11, 0, time.UTC))
+	removeObject := func() {
+		t.Helper()
+		if err := os.Remove(filepath.Join(alpha, ".git", "objects", lost[:2], lost[2:])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	sets, _, err := enumerate(ctx, f.w, CheckoutFilter{}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cs []CheckoutStatus
+	for _, s := range sets {
+		for _, c := range s.checkouts {
+			st, err := gitx.Status(ctx, c.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cs = append(cs, CheckoutStatus{Checkout: c, Status: st})
+		}
+	}
+	removeObject()
+	headTimes(ctx, sets, cs, 1)
+	want := map[string]time.Time{"alpha/main": t1, "alpha/feat": t2, "alpha/gone": {}}
+	for _, c := range cs {
+		if w, ok := want[c.Name()]; !ok || !c.HeadTime.Equal(w) {
+			t.Errorf("%s: head time %v, want %v", c.Name(), c.HeadTime, w)
+		}
+	}
+
+	r, err := CollectStatus(ctx, f.w, StatusOptions{Jobs: 1, HeadTimes: true}, Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range r.Checkouts {
+		if w := want[c.Name()]; !c.HeadTime.Equal(w) || (c.Name() == "alpha/gone") != (c.Err != nil) {
+			t.Errorf("CollectStatus: %s: head time %v, error %v; want %v", c.Name(), c.HeadTime, c.Err, w)
 		}
 	}
 }

@@ -64,11 +64,11 @@ func TestCommitAt(t *testing.T) {
 	Git(t, dir, "init")
 	when := time.Date(2020, 5, 17, 10, 30, 0, 0, time.UTC)
 	id := CommitAt(t, dir, "dated", when)
-	if got := Git(t, dir, "log", "-1", "--format=%H %ct %s"); got != fmt.Sprintf("%s %d dated", id, when.Unix()) {
-		t.Fatalf("commit = %q, want id %s committed at %d", got, id, when.Unix())
+	if got := Git(t, dir, "log", "-1", "--format=%H %at %s"); got != fmt.Sprintf("%s %d dated", id, when.Unix()) {
+		t.Fatalf("commit = %q, want id %s authored at %d", got, id, when.Unix())
 	}
-	if got := Git(t, dir, "log", "-1", "--format=%at"); got == fmt.Sprint(when.Unix()) {
-		t.Fatalf("author date = %s, want the current time", got)
+	if got := Git(t, dir, "log", "-1", "--format=%ct"); got == fmt.Sprint(when.Unix()) {
+		t.Fatalf("committer date = %s, want the current time", got)
 	}
 }
 

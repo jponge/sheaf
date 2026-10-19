@@ -147,12 +147,13 @@ func CommitFile(t *testing.T, repoDir, path, content, msg string) {
 	Git(t, repoDir, "commit", "-q", "-m", msg)
 }
 
-// CommitAt makes an empty commit with msg in repoDir whose committer date
-// is committed (the author date is the current time) and returns its id.
-func CommitAt(t *testing.T, repoDir, msg string, committed time.Time) string {
+// CommitAt makes an empty commit with msg in repoDir whose author date is
+// authored (the committer date is the current time, so that tests tell the
+// two apart) and returns its id.
+func CommitAt(t *testing.T, repoDir, msg string, authored time.Time) string {
 	t.Helper()
 	requireMain(t, "CommitAt")
-	env := append(os.Environ(), fmt.Sprintf("GIT_COMMITTER_DATE=@%d +0000", committed.Unix()))
+	env := append(os.Environ(), fmt.Sprintf("GIT_AUTHOR_DATE=@%d +0000", authored.Unix()))
 	if _, err := gitEnv(env, repoDir, "commit", "-q", "--allow-empty", "-m", msg); err != nil {
 		t.Fatal(err)
 	}

@@ -79,19 +79,31 @@ func status(ctx context.Context, dir string, extra ...string) (*RepoStatus, erro
 	return st, nil
 }
 
-// CommitTimes returns the committer dates of the commits oids (full commit
-// ids) of the repository containing dir, by commit id, starting one git
-// process at most (none without oids). It fails when one of them is not a
-// commit of the repository.
+// CommitTimes returns the author dates (what git log shows) of the commits
+// oids (full lowercase hex ids) of the repository containing dir, by commit
+// id, starting one git process at most (none without oids). The id of an
+// annotated tag is peeled: the date is then under the id of its commit. It
+// fails, without starting git, when an id is not a full hex id, and when
+// one of them is not an object of the repository (e.g. a missing or
+// corrupt object).
 func CommitTimes(ctx context.Context, dir string, oids []string) (map[string]time.Time, error) {
 	times := map[string]time.Time{}
 	if len(oids) == 0 {
 		return times, nil
 	}
+	var in strings.Builder
+	for _, id := range oids {
+		if !isObjectID(id) {
+			return nil, fmt.Errorf("gitx: commit times in %s: invalid object id %q", dir, id)
+		}
+		in.WriteString(id + "\n")
+	}
 	// rev-list is plumbing: unlike log, configuration such as
-	// log.showSignature does not change its output.
-	args := append([]string{"rev-list", "--no-walk=unsorted", "--no-commit-header", "--format=%H %ct", "--end-of-options"}, oids...)
-	out, err := Run(ctx, dir, append(args, "--")...)
+	// log.showSignature does not change its output. The ids go on standard
+	// input, which has no length limit (Windows limits a command line to
+	// 32K characters); --no-walk prints each commit once.
+	out, err := run(ctx, runOpts{stdin: strings.NewReader(in.String())}, dir,
+		"rev-list", "--stdin", "--no-walk=unsorted", "--no-commit-header", "--format=%H %at")
 	if err != nil {
 		return nil, err
 	}
@@ -104,6 +116,20 @@ func CommitTimes(ctx context.Context, dir string, oids []string) (map[string]tim
 		times[oid] = time.Unix(secs, 0)
 	}
 	return times, nil
+}
+
+// isObjectID reports whether id is a full lowercase hex object id (SHA-1 or
+// SHA-256), as git status prints them.
+func isObjectID(id string) bool {
+	if len(id) != 40 && len(id) != 64 {
+		return false
+	}
+	for _, c := range id {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // parseStatus parses NUL-separated porcelain v2 output. Paths are never

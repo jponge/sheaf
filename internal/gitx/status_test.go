@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -264,7 +265,7 @@ func TestStatusSubmoduleWithOnlyUntrackedContent(t *testing.T) {
 	wantCounts(t, mustStatus(t, dir), 0, 1, 0, 0, true)
 }
 
-// CommitTimes returns the committer dates (not the author dates) of the
+// CommitTimes returns the author dates (not the committer dates) of the
 // given commits with a single git process, and none without commits.
 func TestCommitTimes(t *testing.T) {
 	t.Parallel()
@@ -290,5 +291,45 @@ func TestCommitTimes(t *testing.T) {
 	}
 	if _, err := CommitTimes(context.Background(), dir, []string{strings.Repeat("e", len(c1))}); err == nil {
 		t.Error("no error for a missing commit")
+	}
+}
+
+// CommitTimes passes the ids on standard input, not as arguments (no
+// command-line length limit), and refuses anything but full lowercase hex
+// ids without starting git (on standard input, rev-list also takes
+// pseudo-options such as --all).
+func TestCommitTimesValidatesIDsAndUsesStdin(t *testing.T) {
+	t.Parallel()
+	_, dir := cloneOrigin(t, testutil.OriginOpts{})
+	c1 := testutil.CommitAt(t, dir, "one", time.Date(2020, 5, 17, 10, 30, 0, 0, time.UTC))
+	ctx, counter := WithCallCounter(context.Background())
+	if _, err := CommitTimes(ctx, dir, []string{c1}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range counter.Calls() {
+		if slices.Contains(c.Args, c1) {
+			t.Errorf("id passed as an argument: %q", c.Args)
+		}
+	}
+	for _, id := range []string{"--all", "HEAD", c1[:12], strings.ToUpper(c1), c1 + "\n" + c1, ""} {
+		ctx, counter := WithCallCounter(context.Background())
+		if _, err := CommitTimes(ctx, dir, []string{c1, id}); err == nil || len(counter.Calls()) != 0 {
+			t.Errorf("id %q: error %v, %d git processes", id, err, len(counter.Calls()))
+		}
+	}
+}
+
+// The id of an annotated tag is peeled: the result has the date under the
+// id of its commit, not under the tag's.
+func TestCommitTimesPeelsTags(t *testing.T) {
+	t.Parallel()
+	_, dir := cloneOrigin(t, testutil.OriginOpts{})
+	t1 := time.Date(2020, 5, 17, 10, 30, 0, 0, time.UTC)
+	c1 := testutil.CommitAt(t, dir, "one", t1)
+	testutil.Git(t, dir, "tag", "-a", "-m", "t", "v1", c1)
+	tag := testutil.Git(t, dir, "rev-parse", "v1")
+	got, err := CommitTimes(context.Background(), dir, []string{tag})
+	if err != nil || len(got) != 1 || !got[c1].Equal(t1) {
+		t.Errorf("CommitTimes(tag) = %v, %v; want %s: %s", got, err, c1, t1)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -38,9 +39,9 @@ type CheckoutStatus struct {
 	Checkout
 	Status *gitx.RepoStatus // nil when Err is set
 	Err    error
-	// HeadTime is the committer date of HEAD, with StatusOptions.HeadTimes;
-	// zero when unknown (no commit yet, or the status or the date could not
-	// be read).
+	// HeadTime is the author date of HEAD (what git log shows), with
+	// StatusOptions.HeadTimes; zero when unknown (no commit yet, or the
+	// status or the commit could not be read).
 	HeadTime time.Time
 }
 
@@ -145,7 +146,10 @@ func CollectStatus(ctx context.Context, w *Workspace, opts StatusOptions, rep Re
 
 // headTimes sets the HeadTime of cs, the checkouts of sets in order, with
 // one gitx.CommitTimes per repository, up to jobs at a time. The dates are
-// best effort: when they cannot be read, they stay unknown.
+// best effort: when they cannot be read, they stay unknown. When the call
+// of a repository fails (e.g. a HEAD commit pruned since its status was
+// read), each commit is asked for alone, so that only the unreadable ones
+// lose their date.
 func headTimes(ctx context.Context, sets []*repoCheckouts, cs []CheckoutStatus, jobs int) {
 	starts := make([]int, len(sets))
 	n := 0
@@ -163,7 +167,15 @@ func headTimes(ctx context.Context, sets []*repoCheckouts, cs []CheckoutStatus, 
 		}
 		times, err := gitx.CommitTimes(ctx, sets[i].primary, oids)
 		if err != nil {
-			return
+			if ctx.Err() != nil {
+				return
+			}
+			times = map[string]time.Time{}
+			for _, id := range oids {
+				if one, err := gitx.CommitTimes(ctx, sets[i].primary, []string{id}); err == nil {
+					maps.Copy(times, one)
+				}
+			}
 		}
 		for j := range repo {
 			if repo[j].Status != nil {

@@ -280,7 +280,8 @@ func homeState(c ops.CheckoutStatus) string {
 // "now" under a minute (and for a date in the future, e.g. clock skew),
 // then the whole number of minutes ("5m") under an hour, hours ("3h")
 // under a day, days ("2d") under a week, weeks ("4w") under 30 days,
-// months of 30 days ("11mo") under 365 days and years of 365 days ("2y");
+// months of 30 days ("11mo") under 12 such months (360 days), then years
+// of 365 days ("2y"), at least 1 (360 to 364 days are "1y");
 // empty for a zero t (unknown).
 func homeAge(now, t time.Time) string {
 	if t.IsZero() {
@@ -299,13 +300,13 @@ func homeAge(now, t time.Time) string {
 		{time.Hour, day, "h"},
 		{day, 7 * day, "d"},
 		{7 * day, 30 * day, "w"},
-		{30 * day, 365 * day, "mo"},
+		{30 * day, 360 * day, "mo"},
 	} {
 		if d < u.below {
 			return strconv.Itoa(int(d/u.unit)) + u.suffix
 		}
 	}
-	return strconv.Itoa(int(d/(365*day))) + "y"
+	return strconv.Itoa(max(1, int(d/(365*day)))) + "y"
 }
 
 // actions are the actions of the overview.
