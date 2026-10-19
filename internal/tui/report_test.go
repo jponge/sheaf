@@ -178,7 +178,7 @@ func TestReportIndentsContinuationLines(t *testing.T) {
 		{"sheaf: removing worktree local-only of web needs confirmation (sheaf never prompts in CLI mode); run: sheaf wt rm --force --dir local-only -- web", len("sheaf: ")},
 		{"skipped  web/feat-div  diverged from origin/feat-div (1 ahead, 1 behind): run: sheaf --bundle " + path + " update --repo web-x", len("skipped  ")},
 		{"      hint: cd " + path + " && gh repo set-default acme/web", len("      hint: ")},
-		{"failed   web/main  " + path + "      ", len("failed   ")}, // trailing spaces
+		{"failed   web/main  " + path + "      ", len("failed   ")},                  // trailing spaces
 		{strings.ReplaceAll(words("INFO  delta: note"), " w", "  w"), len("INFO  ")}, // double spaces
 	}
 	var lines []string
