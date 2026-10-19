@@ -214,6 +214,40 @@ func TestReportIndentsContinuationLines(t *testing.T) {
 	}
 }
 
+// The key help wraps to the width rather than being cut, so that the key
+// returning to the overview stays visible (B52 D1); the wrapped lines
+// count in the layout: the view never exceeds the height.
+func TestReportKeyHelpWrapsToWidth(t *testing.T) {
+	t.Parallel()
+	keys := []string{"↑/↓ scroll", "space/b page", "g/G top/bottom", "q/enter back to the overview"}
+	for w := 20; w <= 200; w++ {
+		for _, h := range []int{6, 24} {
+			r, _ := newTestReport(30)
+			m, _ := r.Update(tea.WindowSizeMsg{Width: w, Height: h})
+			v := view(m)
+			if lineCount(v) > h {
+				t.Fatalf("width %d, height %d: %d lines:\n%s", w, h, lineCount(v), v)
+			}
+			for _, l := range strings.Split(v, "\n") {
+				if lipgloss.Width(l) > w {
+					t.Fatalf("width %d: line %q", w, l)
+				}
+			}
+			if w < len("q/enter back to the overview") || h < 24 {
+				continue
+			}
+			for _, k := range keys {
+				if !strings.Contains(v, k) {
+					t.Fatalf("width %d: key help %q missing:\n%s", w, k, v)
+				}
+			}
+			if !slices.Equal(shownLines(m)[:1], []int{1}) {
+				t.Fatalf("width %d: no report line:\n%s", w, v)
+			}
+		}
+	}
+}
+
 // q, esc and enter end a Report after the grace period, ctrl+c as an
 // interruption; its view is then empty, still on the alternate screen.
 // During the grace period they are ignored, except ctrl+c.

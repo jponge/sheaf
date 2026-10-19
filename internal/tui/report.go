@@ -290,10 +290,13 @@ func (m Report) fit(status bool) reportLayout {
 	}
 	chrome := func() int {
 		c := l.gaps
-		for _, shown := range []bool{l.title, l.status, l.help} {
+		for _, shown := range []bool{l.title, l.status} {
 			if shown {
 				c++
 			}
+		}
+		if l.help {
+			c += len(m.helpLines())
 		}
 		return c
 	}
@@ -306,6 +309,17 @@ func (m Report) fit(status bool) reportLayout {
 	}
 	l.rows = max(1, m.height-chrome())
 	return l
+}
+
+// helpLines renders the key help, wrapped to the width so that no key is
+// cut off (the one ending the report included).
+func (m Report) helpLines() []string {
+	return wrapHelp(m.help, m.width, []key.Binding{
+		key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll")),
+		key.NewBinding(key.WithKeys("space", "b"), key.WithHelp("space/b", "page")),
+		key.NewBinding(key.WithKeys("g", "G"), key.WithHelp("g/G", "top/bottom")),
+		key.NewBinding(key.WithKeys("q", "enter"), key.WithHelp("q/enter", m.back)),
+	})
 }
 
 // View implements tea.Model.
@@ -333,12 +347,7 @@ func (m Report) View() tea.View {
 		status = []string{st.Status.Render(fmt.Sprintf("lines %d-%d of %d", m.offset+1, end, len(all)))}
 	}
 	if l.help {
-		help = []string{m.help.ShortHelpView([]key.Binding{
-			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll")),
-			key.NewBinding(key.WithKeys("space", "b"), key.WithHelp("space/b", "page")),
-			key.NewBinding(key.WithKeys("g", "G"), key.WithHelp("g/G", "top/bottom")),
-			key.NewBinding(key.WithKeys("q", "enter"), key.WithHelp("q/enter", m.back)),
-		})}
+		help = m.helpLines()
 	}
 	lines = append(lines, footer(gaps, status, help)...)
 	cutLines(lines, m.width)
