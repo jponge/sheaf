@@ -938,98 +938,185 @@ func (e *WorktreeRefusedError) command(force, forceDelete, offline bool) string 
 // the directory is gone.
 func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt WorktreeTarget, opts WorktreeRemoveOptions, emit func(Event)) (string, error) {
 	ctx = withCommandCache(ctx)
+	x, err := locateWorktreeRemoval(ctx, w, repo, tgt, opts, emit)
+	if err != nil {
+		return "", err
+	}
+	var f removalFetch
+	switch {
+	case opts.Offline:
+		f = offlineRemovalFetch(x.r, x.ev)
+	case !opts.originFetched:
+		if f, err = fetchForRemoval(ctx, gitx.Net{Interactive: opts.Interactive}, x.primary, x.r, x.ev); err != nil {
+			return "", err
+		}
+	default:
+		f.distrust = opts.forkDistrust
+	}
+	x.useFetch(f, opts)
+	if err := x.planFirst(ctx); err != nil {
+		return "", err
+	}
+	if x.plan.Refused(opts) {
+		return "", x.refusal(ctx, opts)
+	}
+	if opts.Confirm == nil || !opts.Confirm(x.plan) {
+		return "", fmt.Errorf("%w: worktree %s", ErrNotConfirmed, x.wt.Path)
+	}
+	return x.apply(ctx, w, opts)
+}
+
+// worktreeRemoval is a worktree removal of RemoveWorktree or
+// RemoveWorktrees between its steps: located (locateWorktreeRemoval), its
+// remote state known (useFetch), planned (planFirst), then applied.
+type worktreeRemoval struct {
+	r                        bundle.Repository
+	primary, common, repoDir string
+	wt                       WorktreeInfo
+	deleteBr                 bool
+	wd                       string
+	ev                       func(phase, msg string)
+	fetchMsg                 string
+	distrust                 forkDistrust
+	fetchNested              func(context.Context, string) error
+	plan                     WorktreeRemovePlan
+}
+
+// locateWorktreeRemoval finds the worktree of repo named by tgt and refuses
+// what is never removed as a worktree: the primary checkout, and a branch
+// deletion of a tag worktree. Its events go to emit.
+func locateWorktreeRemoval(ctx context.Context, w *Workspace, repo string, tgt WorktreeTarget, opts WorktreeRemoveOptions, emit func(Event)) (*worktreeRemoval, error) {
 	b := w.Bundle()
 	r, err := repoNamed(b, repo)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	primary, common, prob := checkPrimary(ctx, w.Root, r)
 	if prob != nil {
-		return "", fmt.Errorf("%s: %s: %w", r.Name, prob.Path, prob.Err)
+		return nil, fmt.Errorf("%s: %s: %w", r.Name, prob.Path, prob.Err)
 	}
 	infos, repoDir, err := listCheckedRepo(ctx, r, primary, common, true)
 	if err != nil {
-		return "", fmt.Errorf("%s: %w", r.Name, err)
+		return nil, fmt.Errorf("%s: %w", r.Name, err)
 	}
 	wt, err := findWorktree(infos, r.Name, tgt)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if wt.Primary {
-		return "", fmt.Errorf("%s (%s) is the primary checkout of %s and cannot be removed as a worktree; to remove the repository, run: %s", describe(wt), wt.Path, r.Name, CommandLine(ctx, "remove", "--", r.Name))
+		return nil, fmt.Errorf("%s (%s) is the primary checkout of %s and cannot be removed as a worktree; to remove the repository, run: %s", describe(wt), wt.Path, r.Name, CommandLine(ctx, "remove", "--", r.Name))
 	}
 	deleteBr := opts.DeleteBranch || opts.ForceDeleteBranch
 	if deleteBr && wt.Tag != "" {
-		return "", fmt.Errorf("%s is pinned at tag %s: -d/-D do not apply (a tag worktree has no branch to delete, and the tag is kept)", describe(wt), wt.Tag)
+		return nil, fmt.Errorf("%s is pinned at tag %s: -d/-D do not apply (a tag worktree has no branch to delete, and the tag is kept)", describe(wt), wt.Tag)
 	}
 	wd := opts.WorkingDir
 	if wd == "" {
 		wd, _ = os.Getwd()
 	}
-	ev := func(phase, msg string) {
+	x := &worktreeRemoval{r: r, primary: primary, common: common, repoDir: repoDir, wt: wt, deleteBr: deleteBr, wd: wd}
+	x.ev = func(phase, msg string) {
 		emit(Event{Repo: r.Name, Worktree: wt.Dir, Phase: phase, Kind: KindProgress, Message: msg})
 	}
-	fetchMsg := ""
+	return x, nil
+}
+
+// removalFetch is the remote state of a repository for worktree removals:
+// the problem of a failed fetch (a hard problem of each removal), and the
+// verdict on the fork's remote-tracking refs.
+type removalFetch struct {
+	msg      string
+	distrust forkDistrust
+}
+
+// offlineRemovalFetch is the remote state of r with --offline (nothing is
+// fetched), announced with ev.
+func offlineRemovalFetch(r bundle.Repository, ev func(phase, msg string)) removalFetch {
+	var f removalFetch
+	ev(PhaseFetch, "offline: not fetching; the remote state may be stale")
+	if rs := RemotesOf(r); rs.Forked() {
+		f.distrust = offlineForkDistrust(rs.Fork)
+	}
+	return f
+}
+
+// fetchForRemoval fetches the reference remote of r in primary, then its
+// fork (see RemoveWorktree), announced with ev. The error is only set when
+// ctx ends.
+func fetchForRemoval(ctx context.Context, net gitx.Net, primary string, r bundle.Repository, ev func(phase, msg string)) (removalFetch, error) {
+	var f removalFetch
 	rs := RemotesOf(r)
-	net := gitx.Net{Interactive: opts.Interactive}
-	var distrust forkDistrust
-	var fetchNested func(context.Context, string) error
+	ev(PhaseFetch, "fetching "+rs.String())
+	if err := net.FetchRemote(ctx, primary, rs.Reference); err != nil {
+		if ctx.Err() != nil {
+			return f, ctx.Err()
+		}
+		f.msg = fetchProblem(err)
+	} else if rs.Forked() {
+		gone, err := fetchForkRemote(ctx, net, primary, rs.Fork)
+		switch {
+		case ctx.Err() != nil:
+			return f, ctx.Err()
+		case gone:
+			f.distrust = goneForkDistrust(rs.Fork)
+			ev(PhaseFetch, f.distrust.why+": its remote-tracking refs are not trusted")
+		case err != nil:
+			f.msg = fetchProblem(&remoteFetchError{Remote: rs.Fork, Err: err})
+		}
+	}
+	return f, nil
+}
+
+// useFetch records the remote state f of the repository; unless
+// opts.Offline, nested repositories are fetched (once each) before they
+// are assessed.
+func (x *worktreeRemoval) useFetch(f removalFetch, opts WorktreeRemoveOptions) {
+	x.fetchMsg, x.distrust = f.msg, f.distrust
 	if opts.Offline {
-		ev(PhaseFetch, "offline: not fetching; the remote state may be stale")
-		if rs.Forked() {
-			distrust = offlineForkDistrust(rs.Fork)
-		}
-	} else {
-		if !opts.originFetched {
-			ev(PhaseFetch, "fetching "+rs.String())
-			if err := net.FetchRemote(ctx, primary, rs.Reference); err != nil {
-				if ctx.Err() != nil {
-					return "", ctx.Err()
-				}
-				fetchMsg = fetchProblem(err)
-			} else if rs.Forked() {
-				gone, err := fetchForkRemote(ctx, net, primary, rs.Fork)
-				switch {
-				case ctx.Err() != nil:
-					return "", ctx.Err()
-				case gone:
-					distrust = goneForkDistrust(rs.Fork)
-					ev(PhaseFetch, distrust.why+": its remote-tracking refs are not trusted")
-				case err != nil:
-					fetchMsg = fetchProblem(&remoteFetchError{Remote: rs.Fork, Err: err})
-				}
-			}
-		} else {
-			distrust = opts.forkDistrust
-		}
-		fetched := map[string]error{}
-		fetchNested = func(ctx context.Context, dir string) error {
-			if err, ok := fetched[dir]; ok {
-				return err
-			}
-			ev(PhaseFetch, "fetching nested repository "+dir)
-			err := net.FetchAll(ctx, dir)
-			if ctx.Err() == nil {
-				fetched[dir] = err
-			}
+		return
+	}
+	net := gitx.Net{Interactive: opts.Interactive}
+	fetched := map[string]error{}
+	x.fetchNested = func(ctx context.Context, dir string) error {
+		if err, ok := fetched[dir]; ok {
 			return err
 		}
+		x.ev(PhaseFetch, "fetching nested repository "+dir)
+		err := net.FetchAll(ctx, dir)
+		if ctx.Err() == nil {
+			fetched[dir] = err
+		}
+		return err
 	}
-	mkPlan := func() (WorktreeRemovePlan, error) {
-		return planWorktreeRemoval(ctx, r, repoDir, primary, wt, deleteBr, wd, fetchMsg, fetchNested, distrust)
-	}
-	ev(PhaseCheck, "checking for data at risk")
-	plan, err := mkPlan()
+}
+
+func (x *worktreeRemoval) mkPlan(ctx context.Context) (WorktreeRemovePlan, error) {
+	return planWorktreeRemoval(ctx, x.r, x.repoDir, x.primary, x.wt, x.deleteBr, x.wd, x.fetchMsg, x.fetchNested, x.distrust)
+}
+
+// planFirst plans the removal: the plan to confirm, which apply checks
+// again.
+func (x *worktreeRemoval) planFirst(ctx context.Context) error {
+	x.ev(PhaseCheck, "checking for data at risk")
+	plan, err := x.mkPlan(ctx)
 	if err != nil {
-		return "", err
+		return err
 	}
-	if plan.Refused(opts) {
-		return "", &WorktreeRefusedError{Plan: plan, Force: opts.Force, ForceDeleteBranch: opts.ForceDeleteBranch,
-			DeleteBranch: opts.DeleteBranch, Offline: opts.Offline, bundle: hintBundle(ctx)}
-	}
-	if opts.Confirm == nil || !opts.Confirm(plan) {
-		return "", fmt.Errorf("%w: worktree %s", ErrNotConfirmed, wt.Path)
-	}
+	x.plan = plan
+	return nil
+}
+
+// refusal is the error of a plan refused with opts.
+func (x *worktreeRemoval) refusal(ctx context.Context, opts WorktreeRemoveOptions) *WorktreeRefusedError {
+	return &WorktreeRefusedError{Plan: x.plan, Force: opts.Force, ForceDeleteBranch: opts.ForceDeleteBranch,
+		DeleteBranch: opts.DeleteBranch, Offline: opts.Offline, bundle: hintBundle(ctx)}
+}
+
+// apply removes the confirmed worktree (see RemoveWorktree): under the
+// bundle lock, with fresh reads, it must still be the same linked
+// worktree with the same plan.
+func (x *worktreeRemoval) apply(ctx context.Context, w *Workspace, opts WorktreeRemoveOptions) (string, error) {
+	r, wt, plan, ev := x.r, x.wt, x.plan, x.ev
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -1046,18 +1133,18 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 	}
 	defer unlock()
 	// The directory may have been replaced while waiting for confirmation.
-	if wt.unusable = verifyLinked(ctx, wt.Path, primary, common, true); wt.unusable != nil {
+	if wt.unusable = verifyLinked(ctx, wt.Path, x.primary, x.common, true); wt.unusable != nil {
 		_, err := usableWorktree(wt, r.Name)
 		return "", err
 	}
-	again, err := mkPlan()
+	again, err := x.mkPlan(ctx)
 	if err != nil {
 		return "", err
 	}
 	if !reflect.DeepEqual(worktreeBlockingView(again), worktreeBlockingView(plan)) {
 		return "", fmt.Errorf("worktree %s changed while waiting for confirmation; nothing was removed, run the command again", describe(wt))
 	}
-	if err := checkContained(repoDir, wt); err != nil {
+	if err := checkContained(x.repoDir, wt); err != nil {
 		return "", err
 	}
 	// git refuses worktrees with submodules without --force: nested
@@ -1065,7 +1152,7 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 	// blocking ones were overridden with Force), so --force is safe there.
 	force := opts.Force && len(plan.Blocking()) > 0 || hasNested(plan.Risks)
 	ev(PhaseRemove, "removing worktree "+describe(wt)+" at "+wt.Path)
-	if err := gitx.WorktreeRemove(ctx, primary, wt.Path, force); err != nil {
+	if err := gitx.WorktreeRemove(ctx, x.primary, wt.Path, force); err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
@@ -1078,11 +1165,11 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 		testHookAfterWorktreeRemove()
 	}
 	msg := "removed worktree " + describe(wt) + " at " + wt.Path
-	if !deleteBr {
+	if !x.deleteBr {
 		return msg, nil
 	}
 	ev(PhaseRemove, "deleting branch "+wt.Branch)
-	if reason := deleteBranchIfUnchanged(ctx, primary, wt.Branch, plan.branchOID); reason != "" {
+	if reason := deleteBranchIfUnchanged(ctx, x.primary, wt.Branch, plan.branchOID); reason != "" {
 		ev(PhaseRemove, "warning: kept branch "+wt.Branch+": "+reason)
 		return msg + "; kept branch " + wt.Branch + ": " + reason, nil
 	}
