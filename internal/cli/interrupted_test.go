@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jponge/sheaf/internal/gitx"
@@ -79,6 +81,38 @@ func TestPrintPruneInterrupted(t *testing.T) {
 	want := "a/feat: removed\na/feat: interrupted: not started\n1 removed, 0 kept, 0 failed, 1 interrupted\n"
 	if b.String() != want {
 		t.Errorf("printPrune =\n%s\nwant\n%s", b.String(), want)
+	}
+}
+
+// An interrupted run counts its commands stopped or not started by the
+// interruption apart, without "context canceled" (B52 U2 review).
+func TestRunSummaryInterrupted(t *testing.T) {
+	t.Parallel()
+	co := func(repo string) ops.Checkout { return ops.Checkout{Repo: repo, Dir: "main", Branch: "main"} }
+	r := ops.RunReport{Results: []ops.RunResult{
+		{Checkout: co("a"), Started: true},
+		{Checkout: co("b"), Started: true, ExitCode: 3},
+		{Checkout: co("c"), Started: true, ExitCode: -1, Err: fmt.Errorf("%w (%v)", context.Canceled, errors.New("signal: terminated"))},
+		{Checkout: co("d"), ExitCode: -1, Err: context.Canceled},
+	}}
+	var b bytes.Buffer
+	err := printRunSummary(&b, r)
+	want := "1 succeeded, 1 failed, 2 interrupted\nfailed: b/main (exit status 3)\ninterrupted: c/main\ninterrupted: d/main (not started)\n"
+	if b.String() != want {
+		t.Errorf("printRunSummary =\n%s\nwant\n%s", b.String(), want)
+	}
+	if err == nil {
+		t.Error("no error")
+	}
+	b.Reset()
+	if err := printRunSummary(&b, ops.RunReport{Results: r.Results[3:]}); err == nil || b.String() != "0 succeeded, 0 failed, 1 interrupted\ninterrupted: d/main (not started)\n" {
+		t.Errorf("only interrupted: %v\n%s", err, b.String())
+	}
+	if got := runFailure(r.Results[2]); got != "interrupted" {
+		t.Errorf("runFailure(stopped) = %q, want interrupted", got)
+	}
+	if got := runFailure(r.Results[3]); got != "not started (interrupted)" {
+		t.Errorf("runFailure(not started) = %q", got)
 	}
 }
 

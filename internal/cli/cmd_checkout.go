@@ -552,10 +552,14 @@ func (s *blockSink) End(r ops.RunResult) {
 	fmt.Fprintln(s.w)
 }
 
+// runFailure says why the command of r failed: an interruption (see
+// interruptedErr) without its error, else the error or the exit status.
 func runFailure(r ops.RunResult) string {
 	switch {
-	case !r.Started && r.Err != nil && errors.Is(r.Err, context.Canceled):
+	case !r.Started && interruptedErr(r.Err):
 		return "not started (interrupted)"
+	case interruptedErr(r.Err):
+		return "interrupted"
 	case r.Err != nil:
 		return errorText(r.Err)
 	default:
@@ -563,21 +567,39 @@ func runFailure(r ops.RunResult) string {
 	}
 }
 
+// printRunSummary prints the counts and the failed commands of r, those
+// stopped or not started by an interruption (see interruptedErr) apart.
 func printRunSummary(out io.Writer, r ops.RunReport) error {
-	var failed []ops.RunResult
+	var failed, interrupted []ops.RunResult
 	for _, res := range r.Results {
-		if res.Failed() {
+		switch {
+		case interruptedErr(res.Err):
+			interrupted = append(interrupted, res)
+		case res.Failed():
 			failed = append(failed, res)
 		}
 	}
-	fmt.Fprintf(out, "%d succeeded, %d failed\n", len(r.Results)-len(failed), len(failed))
+	fmt.Fprintf(out, "%d succeeded, %d failed", len(r.Results)-len(failed)-len(interrupted), len(failed))
+	if len(interrupted) > 0 {
+		fmt.Fprintf(out, ", %d interrupted", len(interrupted))
+	}
+	fmt.Fprintln(out)
 	for _, res := range failed {
 		fmt.Fprintf(out, "failed: %s (%s)\n", displayName(res.Checkout), runFailure(res))
+	}
+	for _, res := range interrupted {
+		fmt.Fprintf(out, "interrupted: %s", displayName(res.Checkout))
+		if !res.Started {
+			fmt.Fprint(out, " (not started)")
+		}
+		fmt.Fprintln(out)
 	}
 	writeProblems(out, r.Problems, nil)
 	switch {
 	case len(failed) > 0:
 		return fmt.Errorf("%d of %d commands failed", len(failed), len(r.Results))
+	case len(interrupted) > 0:
+		return fmt.Errorf("%d of %d commands interrupted", len(interrupted), len(r.Results))
 	case len(r.Problems) > 0:
 		return problemsErr(len(r.Problems))
 	}
