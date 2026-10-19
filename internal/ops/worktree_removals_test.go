@@ -488,3 +488,67 @@ func TestRemoveWorktreePlanNamesUnpushedBranchesWhenDeletingABranch(t *testing.T
 		}
 	}
 }
+
+// removalsLog records events and planned units.
+type removalsLog struct {
+	units  int
+	events []Event
+}
+
+func (l *removalsLog) Report(e Event) { l.events = append(l.events, e) }
+func (l *removalsLog) Plan(units int) { l.units += units }
+
+// finals returns the final events by worktree ("repo/dir": kind).
+func (l *removalsLog) finals() map[string]Kind {
+	out := map[string]Kind{}
+	for _, e := range l.events {
+		if e.Kind == KindDone || e.Kind == KindSkipped || e.Kind == KindFailed {
+			out[e.Repo+"/"+e.Worktree] = e.Kind
+		}
+	}
+	return out
+}
+
+// One unit of work and one final event per worktree, every event on the
+// row of a worktree (the fetch of its repository included); when the
+// confirmation is declined every worktree is reported as not confirmed,
+// the refused ones too.
+func TestRemoveWorktreesEvents(t *testing.T) {
+	t.Parallel()
+	for _, accept := range []bool{true, false} {
+		e := newRemovalsEnv(t)
+		e.f.mustAddWT(t, "a", "x")
+		dirty := e.f.mustAddWT(t, "a", "dirty").Path
+		writeFile(t, filepath.Join(dirty, "u.txt"), "u\n")
+		var log removalsLog
+		RemoveWorktrees(context.Background(), e.f.w, []WorktreeRemoval{target("a", "x"), target("a", "dirty"), target("b", "comp")}, WorktreeRemoveOptions{WorkingDir: e.root},
+			func([]WorktreeRemovalResult) bool { return accept }, &log)
+		if log.units != 3 {
+			t.Errorf("accept %v: %d units, want 3", accept, log.units)
+		}
+		fetches := 0
+		for _, ev := range log.events {
+			if ev.Worktree == "" {
+				t.Errorf("accept %v: event without worktree: %+v", accept, ev)
+			}
+			if strings.HasPrefix(ev.Message, "fetching origin") {
+				fetches++
+			}
+		}
+		if fetches != 3 {
+			t.Errorf("accept %v: %d fetch events, want one per worktree", accept, fetches)
+		}
+		want := map[string]Kind{"a/x": KindDone, "a/dirty": KindFailed, "b/comp": KindDone}
+		if !accept {
+			want = map[string]Kind{"a/x": KindSkipped, "a/dirty": KindSkipped, "b/comp": KindSkipped}
+		}
+		if got := log.finals(); !reflect.DeepEqual(got, want) {
+			t.Errorf("accept %v: final events %v, want %v", accept, got, want)
+		}
+		for _, ev := range log.events {
+			if ev.Kind == KindSkipped && !errors.Is(ev.Err, ErrNotConfirmed) {
+				t.Errorf("accept %v: skipped without ErrNotConfirmed: %+v", accept, ev)
+			}
+		}
+	}
+}

@@ -43,14 +43,17 @@ type WorktreeRemovalResult struct {
 // each is checked again under the bundle lock, with fresh reads, and kept
 // if it changed since its plan.
 //
-// rep is told the units of work (a row per repository, for its fetch, and
-// per worktree, see Planner) and receives the progress events, then one
-// final event per worktree (KindDone with its message, KindSkipped with
-// ErrNotConfirmed, KindFailed); a refusal is reported before confirm is
-// called.
+// rep is told the units of work, one per worktree (see Planner), and
+// receives the events of each worktree as RemoveWorktree emits them (those
+// of the fetch of its repository included), then its final event: KindDone
+// with its message, KindFailed, or KindSkipped with ErrNotConfirmed when
+// the confirmation was declined (also for the worktrees refused or that
+// could not be planned, the Err of their result being unchanged: nothing
+// was attempted).
 func RemoveWorktrees(ctx context.Context, w *Workspace, items []WorktreeRemoval, opts WorktreeRemoveOptions, confirm func([]WorktreeRemovalResult) bool, rep Reporter) []WorktreeRemovalResult {
 	ctx = withCommandCache(ctx)
 	report := serialize(rep)
+	plan(rep, len(items))
 	opts.Confirm, opts.originFetched, opts.forkDistrust = nil, false, forkDistrust{}
 	out := make([]WorktreeRemovalResult, len(items))
 	xs := make([]*worktreeRemoval, len(items))
@@ -67,63 +70,29 @@ func RemoveWorktrees(ctx context.Context, w *Workspace, items []WorktreeRemoval,
 			repos = append(repos, x.r.Name)
 		}
 	}
-	plan(rep, len(repos)+len(items))
-	final := func(i int) {
-		e := Event{Repo: items[i].Repo, Phase: PhaseWorktree, Message: out[i].Message}
-		if x := xs[i]; x != nil {
-			e.Repo, e.Worktree = x.r.Name, x.wt.Dir
-		} else {
-			e.Worktree = items[i].Target.Name
-		}
-		switch {
-		case out[i].Err == nil:
-			e.Kind = KindDone
-		case errors.Is(out[i].Err, ErrNotConfirmed):
-			e.Kind, e.Err = KindSkipped, out[i].Err
-		default:
-			e.Kind, e.Err = KindFailed, out[i].Err
-		}
-		report(e)
-	}
-	for i := range items {
-		if xs[i] == nil {
-			final(i)
-		}
-	}
 	// One fetch per repository, before its worktrees are planned.
 	for _, name := range repos {
-		var first *worktreeRemoval
-		for _, x := range xs {
+		var those []int
+		for i, x := range xs {
 			if x != nil && x.r.Name == name {
-				first = x
-				break
+				those = append(those, i)
 			}
 		}
-		ev := func(kind Kind) func(phase, msg string) {
-			return func(phase, msg string) { report(Event{Repo: name, Phase: phase, Kind: kind, Message: msg}) }
+		first := xs[those[0]]
+		ev := func(phase, msg string) {
+			for _, i := range those {
+				xs[i].ev(phase, msg)
+			}
 		}
 		var f removalFetch
 		var err error
 		if opts.Offline {
-			f = offlineRemovalFetch(first.r, ev(KindDone))
+			f = offlineRemovalFetch(first.r, ev)
 		} else {
-			report(Event{Repo: name, Phase: PhaseFetch, Kind: KindStart})
-			f, err = fetchForRemoval(ctx, gitx.Net{Interactive: opts.Interactive}, first.primary, first.r, ev(KindProgress))
-			switch {
-			case err != nil:
-				report(Event{Repo: name, Phase: PhaseFetch, Kind: KindFailed, Err: err})
-			case f.msg != "":
-				report(Event{Repo: name, Phase: PhaseFetch, Kind: KindFailed, Err: errors.New(f.msg)})
-			case f.distrust.gone:
-				report(Event{Repo: name, Phase: PhaseFetch, Kind: KindDone, Message: "fetched " + RemotesOf(first.r).Reference + "; " + f.distrust.why + ": its remote-tracking refs are not trusted"})
-			default:
-				report(Event{Repo: name, Phase: PhaseFetch, Kind: KindDone, Message: "fetched " + RemotesOf(first.r).String()})
-			}
+			f, err = fetchForRemoval(ctx, gitx.Net{Interactive: opts.Interactive}, first.primary, first.r, ev)
 		}
-		for i, x := range xs {
-			if x == nil || x.r.Name != name {
-				continue
-			}
+		for _, i := range those {
+			x := xs[i]
 			if err != nil {
 				out[i].Err = err
 				continue
@@ -142,26 +111,38 @@ func RemoveWorktrees(ctx context.Context, w *Workspace, items []WorktreeRemoval,
 	}
 	var confirmed []int
 	for i := range items {
-		switch {
-		case xs[i] == nil:
-		case out[i].Err != nil:
-			final(i)
-		default:
+		if out[i].Err == nil {
 			confirmed = append(confirmed, i)
 		}
 	}
-	if len(confirmed) == 0 {
-		return out
-	}
-	if confirm == nil || !confirm(append([]WorktreeRemovalResult(nil), out...)) {
+	declined := false
+	if len(confirmed) > 0 && (confirm == nil || !confirm(append([]WorktreeRemovalResult(nil), out...))) {
+		declined = true
 		for _, i := range confirmed {
 			out[i].Err = fmt.Errorf("%w: worktree %s", ErrNotConfirmed, xs[i].wt.Path)
-			final(i)
 		}
-		return out
 	}
-	for _, i := range confirmed {
-		out[i].Message, out[i].Err = xs[i].apply(ctx, w, opts)
+	final := func(i int) {
+		e := Event{Repo: items[i].Repo, Worktree: items[i].Target.Name, Phase: PhaseWorktree, Message: out[i].Message}
+		if x := xs[i]; x != nil {
+			e.Repo, e.Worktree = x.r.Name, x.wt.Dir
+		}
+		switch {
+		case out[i].Err == nil:
+			e.Kind = KindDone
+		case errors.Is(out[i].Err, ErrNotConfirmed):
+			e.Kind, e.Err = KindSkipped, out[i].Err
+		case declined:
+			e.Kind, e.Err = KindSkipped, errors.Join(ErrNotConfirmed, out[i].Err)
+		default:
+			e.Kind, e.Err = KindFailed, out[i].Err
+		}
+		report(e)
+	}
+	for i := range items {
+		if !declined && slices.Contains(confirmed, i) {
+			out[i].Message, out[i].Err = xs[i].apply(ctx, w, opts)
+		}
 		final(i)
 	}
 	return out
