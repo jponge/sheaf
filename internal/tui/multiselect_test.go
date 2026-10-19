@@ -263,7 +263,7 @@ func TestMultiSelectViewRendersRows(t *testing.T) {
 	items[0].Tags = []string{"fork", "archived"}
 	items[1].Selected = true
 	v := view(NewMultiSelect("Pick repositories", items))
-	for _, s := range []string{"Pick repositories", "> [ ] alpha", "first letter", "[fork]", "[archived]", "[x] bravo", "1/3 selected", "space", "toggle", "enter", "filter"} {
+	for _, s := range []string{"Pick repositories", "> [ ] alpha", "first letter", "[fork]", "[archived]", "[x] bravo", "1/3 selected", "space", "toggle", "enter", "more"} {
 		if !strings.Contains(v, s) {
 			t.Fatalf("view lacks %q:\n%s", s, v)
 		}
@@ -706,7 +706,7 @@ func TestMultiSelectKeyHelpWrapsToWidth(t *testing.T) {
 // cancel; ? toggles the full list ("? less"), and back. In filter mode ?
 // is typed into the filter.
 func TestMultiSelectCompactHelpTogglesWithQuestionMark(t *testing.T) {
-	const short = "space toggle • enter confirm • / filter • ? more • esc/q cancel"
+	const short = "space toggle • a all • n none • enter confirm • ? more • esc/q cancel"
 	var m tea.Model = NewMultiSelect("Pick", abc())
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	if got := msShape(m); got != "T _ R R R _ S _ K" || !hasLine(view(m), short) {
@@ -735,7 +735,7 @@ func TestMultiSelectCompactHelpTogglesWithQuestionMark(t *testing.T) {
 		var m tea.Model = NewMultiSelect("Pick", abc())
 		m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 24})
 		v := view(m)
-		for _, k := range []string{"space toggle", "enter confirm", "/ filter", "? more", "esc/q cancel"} {
+		for _, k := range []string{"space toggle", "a all", "n none", "enter confirm", "? more", "esc/q cancel"} {
 			if !strings.Contains(v, k) {
 				t.Errorf("width %d: compact help lacks %q:\n%s", w, k, v)
 			}
@@ -743,6 +743,19 @@ func TestMultiSelectCompactHelpTogglesWithQuestionMark(t *testing.T) {
 		for _, l := range strings.Split(v, "\n") {
 			if lipgloss.Width(l) > w || strings.Contains(l, "…") {
 				t.Errorf("width %d: line %q", w, l)
+			}
+		}
+	}
+	// Toggling the help keeps the cursor row shown, also on a short and
+	// narrow terminal where the help lines take more rows.
+	for h := 5; h <= 16; h++ {
+		var m tea.Model = NewMultiSelect("Pick", manyItems(20))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 30, Height: h})
+		m, _ = press(m, "end")
+		for i := 1; i <= 2; i++ {
+			m, _ = press(m, "?")
+			if v := view(m); lineCount(v) > h || !strings.Contains(v, "> [ ] item19") {
+				t.Errorf("width 30, height %d, ? pressed %d times: cursor row hidden:\n%s", h, i, v)
 			}
 		}
 	}

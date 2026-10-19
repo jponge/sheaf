@@ -275,12 +275,12 @@ lines that still do not fit are cut at the right.
 | q, esc | quit with status 0 (esc first clears an applied filter) |
 | ctrl+c | exit with status 130 |
 
-The key help below the table is one short line (`space toggle • enter cd •
-u update • f fetch • / filter • ? more • q quit`); `?` shows the full list,
-and the next overviews keep that choice until `?` is pressed again. The
-selection menus of the commands (e.g. `sync`, `init`) work the same way:
-their short line lists space, enter, `/`, `? more` and esc/q, and `?` shows
-the others (`a`/`n` to select or deselect every visible item, movement).
+The key help below the table is one short line (`space toggle • a/n
+all/none • enter cd • u update • f fetch • ? more • q quit`); `?` shows the
+full list (with `/`, movement and every action), and the next overviews keep
+that choice until `?` is pressed again. The selection menus of the commands
+(e.g. `sync`, `init`) work the same way: their short line lists space, `a`,
+`n`, enter, `? more` and esc/q, and `?` shows the others (`/`, movement).
 
 To receive the mouse wheel, the overview and the report view turn on the
 terminal's mouse reporting (clicks are ignored), which is off again in the

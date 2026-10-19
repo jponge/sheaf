@@ -828,7 +828,7 @@ func hasAllLines(v string, want []string) bool {
 // "? less"), and back. In filter mode ? is typed into the filter.
 func TestOverviewCompactHelpTogglesWithQuestionMark(t *testing.T) {
 	t.Parallel()
-	const short = "space toggle • enter cd • u update • / filter • ? more • q quit"
+	const short = "space toggle • a/n all/none • enter cd • u update • ? more • q quit"
 	var m tea.Model = newOv()
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	helpOf := func(m tea.Model) []string {
@@ -863,6 +863,14 @@ func TestOverviewCompactHelpTogglesWithQuestionMark(t *testing.T) {
 	m, _ = press(m, "/", "?")
 	if o := asOv(t, m); o.Filter() != "?" || o.FullHelp() {
 		t.Errorf("filter mode: filter %q, full help %v", o.Filter(), o.FullHelp())
+	}
+	// With three Short actions (as the home screen) it still fits 80
+	// columns on one line.
+	three := append(ovActions(), OverviewAction{Key: "f", Name: "fetch", Help: "fetch", Short: true})
+	var h tea.Model = NewOverview("t", []string{"REPO"}, ovRows(), three)
+	h, _ = h.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if got, want := helpOf(h), "space toggle • a/n all/none • enter cd • u update • f fetch • ? more • q quit"; !slices.Equal(got, []string{want}) {
+		t.Errorf("compact help with three Short actions at 80 columns: %q, want %q", got, want)
 	}
 	// WithFullHelp sets the state, e.g. that of a previous overview.
 	if o := newOv().WithFullHelp(true); !o.FullHelp() || !strings.Contains(view(o), "? less") {
@@ -903,7 +911,7 @@ func TestOverviewCompactHelpLayout(t *testing.T) {
 		var m tea.Model = newOv()
 		m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 30})
 		v := view(m)
-		for _, k := range []string{"space toggle", "enter cd", "u update", "/ filter", "? more", "q quit"} {
+		for _, k := range []string{"space toggle", "a/n all/none", "enter cd", "u update", "? more", "q quit"} {
 			if !strings.Contains(v, k) {
 				t.Errorf("width %d: compact help lacks %q:\n%s", w, k, v)
 			}

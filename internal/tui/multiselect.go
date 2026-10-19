@@ -559,14 +559,14 @@ func (m MultiSelect) View() tea.View {
 
 // helpLines renders the key help, wrapped to the width so that no key is
 // cut off: in filter mode the filter keys; otherwise the compact help
-// (toggle, confirm, filter, ? more, cancel), or with the full help (?
+// (toggle, all, none, confirm, ? more, cancel), or with the full help (?
 // toggles it) every key and ? less.
 func (m MultiSelect) helpLines() []string {
 	if m.filtering {
 		return wrapHelp(m.help, m.width, []key.Binding{m.keys.ApplyFilter, m.keys.ClearFilter})
 	}
 	if !m.fullHelp {
-		return wrapHelp(m.help, m.width, []key.Binding{m.keys.Toggle, m.keys.Confirm, m.keys.Filter, m.keys.More, m.keys.Cancel})
+		return wrapHelp(m.help, m.width, []key.Binding{m.keys.Toggle, m.keys.All, m.keys.None, m.keys.Confirm, m.keys.More, m.keys.Cancel})
 	}
 	return wrapHelp(m.help, m.width, []key.Binding{
 		m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.All, m.keys.None,

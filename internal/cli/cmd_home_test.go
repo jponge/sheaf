@@ -809,7 +809,7 @@ func TestHomeCompactHelpAndKeptToggle(t *testing.T) {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 	text := ansi.Strip(out.String())
-	if short := "space toggle • enter cd • u update • f fetch • / filter • ? more • q quit"; strings.Count(text, short) != 1 {
+	if short := "space toggle • a/n all/none • enter cd • u update • f fetch • ? more • q quit"; strings.Count(text, short) != 1 {
 		t.Errorf("want the compact help %q once (first overview):\n%s", short, text)
 	}
 	if n := strings.Count(text, "? less"); n != 2 {

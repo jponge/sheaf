@@ -679,7 +679,7 @@ func (m Overview) View() tea.View {
 
 // helpLines renders the key help, wrapped to the width so that no key is
 // cut off: in filter mode the filter keys; otherwise the compact help
-// (toggle, the Short actions, filter, ? more, quit), or with the full help
+// (toggle, a/n, the Short actions, ? more, quit), or with the full help
 // the movement keys and quit, then every action and ? less.
 func (m Overview) helpLines() []string {
 	if m.filtering {
@@ -689,14 +689,16 @@ func (m Overview) helpLines() []string {
 		return key.NewBinding(key.WithKeys(a.Key), key.WithHelp(a.Key, a.Help))
 	}
 	if !m.fullHelp {
-		short := []key.Binding{m.keys.Toggle}
+		// a and n share one entry, to fit 80 columns.
+		allNone := key.NewBinding(key.WithKeys("a", "n"), key.WithHelp("a/n", "all/none"))
+		short := []key.Binding{m.keys.Toggle, allNone}
 		for _, a := range m.actions {
 			if a.Short {
 				short = append(short, binding(a))
 			}
 		}
 		quit := key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit"))
-		return wrapHelp(m.help, m.width, append(short, m.keys.Filter, m.keys.More, quit))
+		return wrapHelp(m.help, m.width, append(short, m.keys.More, quit))
 	}
 	lines := wrapHelp(m.help, m.width, []key.Binding{m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.All, m.keys.None, m.keys.Filter, m.keys.Cancel})
 	var actions []key.Binding
