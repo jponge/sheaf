@@ -89,7 +89,7 @@ Sleep 1.2s
 Type@90ms "feat/search"
 Sleep 600ms
 Enter
-Wait+Screen /sheaf add:/
+Wait+Screen /sheaf wt add:/
 Sleep 2.5s
 Escape
 Wait+Screen /REPO/
