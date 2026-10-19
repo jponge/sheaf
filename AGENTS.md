@@ -109,9 +109,11 @@ them:
 - Hints that tell the user what to run print the complete command
   (`ops.CommandLine`, shell-quoted, `--bundle` when it was given), and the
   command must do exactly what the message says.
-- Colors and terminal control sequences (window title, progress indicator,
-  clipboard, mouse) only on a terminal that supports them: respect `NO_COLOR`,
-  `CLICOLOR=0`, `TERM=dumb`, `--no-tui` and `--json`.
+- Colors only on a terminal, never with `NO_COLOR`, `CLICOLOR=0`, `--no-tui` or
+  `--json` (bold and faint are kept). Terminal control sequences (window title,
+  progress indicator, clipboard, mouse, hyperlinks) only on a terminal with
+  `TERM` other than `dumb`, never with `--no-tui` or `--json`; `NO_COLOR` does
+  not disable them.
 - The home screen runs its actions as in-process commands; their output goes
   live to the normal screen and into the report view.
 - List views share the layout rules in `internal/tui` (blank-line gaps that
