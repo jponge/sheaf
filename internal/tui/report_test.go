@@ -147,11 +147,23 @@ func TestReportWrapsAndFitsSmallWindows(t *testing.T) {
 // words): after the level word marked by WithLevels and its padding, else
 // after the line's indentation and a first word ending with ":" (a label,
 // e.g. "hint:" or "sheaf:") or followed by two spaces or more (a padded
-// column), and at least 2 columns; at most half the width. Nothing is lost, and no line is wider than the window, at every
-// width from 20 to 200.
+// column), and at least 2 columns; at most half the width. Lines break at
+// spaces only, never inside a token (paths and options contain "-"), unless
+// a token is wider than the room, which is then broken at the width;
+// nothing is cut ("…") and the trailing spaces of a line do not wrap. At
+// every width from 20 to 200, no line is wider than the window and the
+// text is kept.
 func TestReportIndentsContinuationLines(t *testing.T) {
+	// firstToken returns the indentation and first word of l (at most 10
+	// bytes), which start its first wrapped line.
+	firstToken := func(l string) string {
+		rest := strings.TrimLeft(l, " ")
+		tok := l[:len(l)-len(rest)] + strings.Fields(rest)[0]
+		return tok[:min(len(tok), 10)]
+	}
 	t.Parallel()
 	words := func(prefix string) string { return longText(prefix, 300) }
+	path := "/tmp/claude-1000/-workspace/ee492ed2-d823-4c5a-bd77-f9f9e4e66f12/scratchpad/u4/scr/b/work/web/local-only"
 	cases := []struct {
 		line   string
 		indent int
@@ -162,14 +174,19 @@ func TestReportIndentsContinuationLines(t *testing.T) {
 		{words("      hint: cd /tmp/b/alpha/main &&"), len("      hint: ")},
 		{words("sheaf: wt add failed:"), len("sheaf: ")},
 		{words("removed /tmp/b/alpha"), 2},
-		{"/tmp/" + strings.Repeat("abcdefghij", 30), 2}, // one word: cut inside it
+		{"/tmp/" + strings.Repeat("abcdefghij", 30), 2}, // one token: broken at the width
+		{"sheaf: removing worktree local-only of web needs confirmation (sheaf never prompts in CLI mode); run: sheaf wt rm --force --dir local-only -- web", len("sheaf: ")},
+		{"skipped  web/feat-div  diverged from origin/feat-div (1 ahead, 1 behind): run: sheaf --bundle " + path + " update --repo web-x", len("skipped  ")},
+		{"      hint: cd " + path + " && gh repo set-default acme/web", len("      hint: ")},
+		{"failed   web/main  " + path + "      ", len("failed   ")}, // trailing spaces
+		{strings.ReplaceAll(words("INFO  delta: note"), " w", "  w"), len("INFO  ")}, // double spaces
 	}
 	var lines []string
 	for _, c := range cases {
 		lines = append(lines, c.line)
 	}
 	classify := func(l string) Mark {
-		for _, w := range []string{"done", "WARN", "up to date"} {
+		for _, w := range []string{"done", "WARN", "up to date", "skipped", "failed", "INFO"} {
 			if strings.HasPrefix(l, w+" ") {
 				return Mark{Start: 0, End: len(w), Level: LevelWarn}
 			}
@@ -184,14 +201,17 @@ func TestReportIndentsContinuationLines(t *testing.T) {
 		i := 0
 		for k, c := range cases {
 			indent := min(c.indent, w/2)
-			var joined []string
+			var segs []string
+			if k := classify(c.line); k.Level != LevelNone && i < len(got) && !strings.HasPrefix(got[i], m0.styles.Level(k.Level).Render(c.line[:k.End])) {
+				t.Fatalf("width %d: mark not styled: %q", w, got[i])
+			}
 			for n := 0; i < len(got); n++ {
 				l := ansi.Strip(got[i])
-				if n > 0 && k+1 < len(cases) && strings.HasPrefix(l, cases[k+1].line[:10]) {
+				if n > 0 && k+1 < len(cases) && strings.HasPrefix(l, firstToken(cases[k+1].line)) {
 					break // the next case
 				}
-				if lipgloss.Width(l) > w {
-					t.Fatalf("width %d: line of width %d: %q", w, lipgloss.Width(l), l)
+				if lipgloss.Width(l) > w || strings.HasSuffix(l, "…") || strings.TrimSpace(l) == "" {
+					t.Fatalf("width %d: line %q (width %d) of %q", w, l, lipgloss.Width(l), c.line)
 				}
 				if n > 0 && (!strings.HasPrefix(l, strings.Repeat(" ", indent)) || len(l) <= indent || l[indent] == ' ') {
 					t.Fatalf("width %d: continuation of %q not indented by %d: %q", w, c.line[:20], indent, l)
@@ -199,18 +219,43 @@ func TestReportIndentsContinuationLines(t *testing.T) {
 				if n > 0 {
 					l = l[indent:]
 				}
-				joined = append(joined, l)
+				segs = append(segs, l)
 				i++
 			}
-			// The words are kept, and a word cut at the width is cut, not
-			// split by a space.
-			if got := strings.Join(joined, ""); strings.Join(strings.Fields(got), "") != strings.Join(strings.Fields(c.line), "") {
-				t.Fatalf("width %d: line %q wrapped as %q", w, c.line, joined)
+			// The text is kept: its tokens, each whole unless wider than
+			// the room left by the indentation (then broken, not cut).
+			long := false
+			for _, tok := range strings.Fields(c.line) {
+				long = long || lipgloss.Width(tok) > w-indent
+			}
+			if got, want := strings.Fields(strings.Join(segs, " ")), strings.Fields(c.line); !long && !slices.Equal(got, want) {
+				t.Fatalf("width %d: line %q wrapped as %q", w, c.line, segs)
+			}
+			if got := strings.Join(segs, ""); strings.Join(strings.Fields(got), "") != strings.Join(strings.Fields(c.line), "") {
+				t.Fatalf("width %d: line %q wrapped as %q", w, c.line, segs)
 			}
 		}
 		if i != len(got) {
 			t.Fatalf("width %d: %d wrapped lines, %d matched:\n%s", w, len(got), i, strings.Join(got, "\n"))
 		}
+	}
+}
+
+// A mark wider than the first wrapped line of its line (a narrow window)
+// is styled as far as that line goes.
+func TestReportStylesMarksCutByTheWidth(t *testing.T) {
+	t.Parallel()
+	r := NewReport("t", []string{"up to date  alpha/main"}, "back").WithLevels(func(string) Mark { return Mark{Start: 0, End: 10, Level: LevelOK} })
+	r.width = 4
+	got := r.wrapped()
+	if got[0] != r.styles.Level(LevelOK).Render("up") || ansi.Strip(strings.Join(got, "|")) != "up|  to|  da|  te|  al|  ph|  a/|  ma|  in" {
+		t.Errorf("wrapped %q", got)
+	}
+	// A mark starting beyond the first wrapped line.
+	r = NewReport("t", []string{"sheaf: warning: x"}, "back").WithLevels(func(string) Mark { return Mark{Start: 7, End: 15, Level: LevelWarn} })
+	r.width = 4
+	if got := r.wrapped(); got[0] != "shea" {
+		t.Errorf("wrapped %q", got)
 	}
 }
 

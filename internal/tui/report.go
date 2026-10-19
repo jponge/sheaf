@@ -36,9 +36,11 @@ const ReportGrace = 250 * time.Millisecond
 // U+FFFD.
 type Report struct {
 	title string
-	lines []string
-	// indents are the text columns of lines, to which their continuation
-	// lines are indented (see wrapped).
+	lines []string // as displayed, without the styles of marks
+	// marks are the marks of lines (see WithLevels), styled once wrapped,
+	// and indents their text columns, to which their continuation lines
+	// are indented (see wrapped).
+	marks   []Mark
 	indents []int
 	back    string
 	now     func() time.Time
@@ -82,6 +84,7 @@ func NewReport(title string, lines []string, back string) Report {
 	for _, l := range lines {
 		l = sanitize(expandTabs(l))
 		m.lines = append(m.lines, l)
+		m.marks = append(m.marks, Mark{})
 		m.indents = append(m.indents, textColumn(l))
 	}
 	m.start = m.now()
@@ -102,17 +105,26 @@ type Mark struct {
 // the line's bounds, displays it unstyled. The text column of a marked
 // line follows the mark and the spaces after it.
 func (m Report) WithLevels(classify func(line string) Mark) Report {
-	lines := make([]string, len(m.lines))
-	indents := slices.Clone(m.indents)
+	marks, indents := slices.Clone(m.marks), slices.Clone(m.indents)
 	for i, l := range m.lines {
-		lines[i] = l
 		if k := classify(l); k.Level != LevelNone && 0 <= k.Start && k.Start < k.End && k.End <= len(l) {
-			lines[i] = l[:k.Start] + m.styles.Level(k.Level).Render(l[k.Start:k.End]) + l[k.End:]
+			marks[i] = k
 			indents[i] = ansi.StringWidth(l[:k.End]) + len(l[k.End:]) - len(strings.TrimLeft(l[k.End:], " "))
 		}
 	}
-	m.lines, m.indents = lines, indents
+	m.marks, m.indents = marks, indents
 	return m
+}
+
+// styled returns s, a prefix of line i (e.g. its first wrapped line), with
+// the part of the mark of the line it contains styled.
+func (m Report) styled(i int, s string) string {
+	k := m.marks[i]
+	if k.Level == LevelNone || k.Start >= len(s) {
+		return s
+	}
+	end := min(k.End, len(s))
+	return s[:k.Start] + m.styles.Level(k.Level).Render(s[k.Start:end]) + s[end:]
 }
 
 // textColumn returns the column at which the text of line l starts: after
@@ -226,27 +238,25 @@ func (m *Report) scroll(n int) {
 }
 
 // wrapped returns the lines wrapped to the width, if known, their
-// continuation lines indented to their text column (see Report).
+// continuation lines indented to their text column (see Report): broken at
+// spaces only (see wrap), a token being broken only when wider than the
+// room; the marks are styled afterwards (see styled).
 func (m Report) wrapped() []string {
-	if m.width <= 0 {
-		return m.lines
-	}
 	var out []string
 	for i, l := range m.lines {
-		if ansi.StringWidth(l) <= m.width {
-			out = append(out, l)
+		if m.width <= 0 || ansi.StringWidth(l) <= m.width {
+			out = append(out, m.styled(i, l))
 			continue
 		}
-		head, _, _ := strings.Cut(ansi.Wrap(l, m.width, ""), "\n")
-		out = append(out, head)
-		// The rest of the line, without the spaces it starts with (the
-		// cut may keep escape sequences before them).
-		rest := ansi.Cut(l, ansi.StringWidth(head), ansi.StringWidth(l))
-		plain := ansi.Strip(rest)
-		rest = ansi.Cut(rest, len(plain)-len(strings.TrimLeft(plain, " ")), ansi.StringWidth(rest))
+		head := wrap(l, m.width)[0]
+		out = append(out, m.styled(i, head))
 		indent := min(max(m.indents[i], 2), m.width/2)
-		for _, c := range strings.Split(ansi.Wrap(rest, m.width-indent, ""), "\n") {
-			out = append(out, strings.Repeat(" ", indent)+c)
+		for _, c := range wrap(l[len(head):], m.width-indent) {
+			// Spaces at a break (e.g. trailing spaces) are not shown, nor
+			// is a line of spaces only.
+			if c = strings.TrimLeft(c, " "); c != "" {
+				out = append(out, strings.Repeat(" ", indent)+c)
+			}
 		}
 	}
 	return out
