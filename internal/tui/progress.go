@@ -359,7 +359,10 @@ func roundElapsed(d time.Duration) time.Duration {
 	return d.Round(time.Second)
 }
 
-func (m Progress) header() string {
+// header returns the header: the title, then while running the aside
+// counts (see WithAside) if aside, the counts of the other rows if counts,
+// and the elapsed time; once finished, how it ended (see FinishMsg).
+func (m Progress) header(aside, counted bool) string {
 	running, done, skipped, failed := m.Counts()
 	counts := fmt.Sprintf("%d done, %d skipped, %d failed", done, skipped, failed)
 	cancelled, interrupted := 0, 0
@@ -388,8 +391,14 @@ func (m Progress) header() string {
 		}
 		return m.styles.Title.Render(sanitize(m.title)) + fmt.Sprintf(": %s %v", end, m.elapsed())
 	}
-	return m.styles.Title.Render(sanitize(m.title)) + m.styles.Status.Render(
-		fmt.Sprintf(" · %s%d running, %s · %v", m.asideCounts(), running, counts, m.elapsed()))
+	status := " · "
+	if aside {
+		status += m.asideCounts()
+	}
+	if counted {
+		status += fmt.Sprintf("%d running, %s · ", running, counts)
+	}
+	return m.styles.Title.Render(sanitize(m.title)) + m.styles.Status.Render(status+fmt.Sprint(m.elapsed()))
 }
 
 // asideCounts returns the aside rows counted apart in the header, followed
@@ -432,9 +441,19 @@ func (m Progress) ratio() (float64, bool) {
 // headerLine returns the header followed, while running with planned rows,
 // by a progress bar of the ratio, in the room left on the line (at most
 // barMax columns); the bar is dropped when less than barMin are left. It
-// is a gradient with 256 colors or more, else solid (full blocks).
+// is a gradient with 256 colors or more, else solid (full blocks). When
+// the header itself is wider than the terminal, there is no bar, and its
+// aside counts are dropped, then its other counts: the title and the
+// elapsed time stay (the title is cut last, see truncate).
 func (m Progress) headerLine() string {
-	h := m.header()
+	h := m.header(true, true)
+	if m.width > 0 && lipgloss.Width(h) > m.width {
+		// The bar went first.
+		if h = m.header(false, true); lipgloss.Width(h) > m.width {
+			h = m.header(false, false)
+		}
+		return h
+	}
 	r, ok := m.ratio()
 	if !ok || m.finished {
 		return h

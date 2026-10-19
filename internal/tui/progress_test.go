@@ -399,18 +399,52 @@ func TestProgressHeaderBarFitsWidth(t *testing.T) {
 	if !strings.HasPrefix(h, status+"  ") || lipgloss.Width(h) != w+2+20 || !strings.HasSuffix(h, " 75%") {
 		t.Errorf("header %q, want a 20-column bar", h)
 	}
-	for _, width := range []int{w + 2 + barMin - 1, w, w - 5} {
+	for _, width := range []int{w + 2 + barMin - 1, w} {
 		h := strings.Split(view(plannedProgress(t, tea.WindowSizeMsg{Width: width, Height: 20})), "\n")[0]
 		if strings.Contains(h, "%") || barCells.MatchString(h) {
 			t.Errorf("width %d: header %q has a bar", width, h)
 		}
-		if !strings.HasPrefix(status, h) || lipgloss.Width(h) != min(w, width) {
-			t.Errorf("width %d: header %q, want %q cut to the width only", width, h, status)
+		if h != status {
+			t.Errorf("width %d: header %q, want %q", width, h, status)
 		}
 	}
 	m := plannedProgress(t, tea.WindowSizeMsg{Width: w + 2 + barMin, Height: 20})
 	if h := strings.Split(view(m), "\n")[0]; !strings.HasSuffix(h, " 75%") {
 		t.Errorf("header %q, want a bar of barMin columns", h)
+	}
+}
+
+// On a narrow terminal the parts of the header are dropped in this order,
+// so that the title and the elapsed time stay (B52 U2 review): the bar
+// (see TestProgressHeaderBarFitsWidth), the aside counts, then the other
+// counts; the title is cut last.
+func TestProgressHeaderDropOrder(t *testing.T) {
+	t.Parallel()
+	full := "Updating · fetch 1/1 · 1 running, 1 done, 1 skipped, 1 failed · 0s"
+	noAside := "Updating · 1 running, 1 done, 1 skipped, 1 failed · 0s"
+	short := "Updating · 0s"
+	for _, c := range []struct {
+		width int
+		want  string
+	}{
+		{lipgloss.Width(full), full},
+		{lipgloss.Width(full) - 1, noAside},
+		{lipgloss.Width(noAside), noAside},
+		{lipgloss.Width(noAside) - 1, short},
+		{lipgloss.Width(short), short},
+		{5, "Updat"},
+	} {
+		p, _ := newTestProgress("Updating")
+		m, _ := feed(p.WithAside("fetch"), AsidePlannedMsg{Units: 1}, PlannedMsg{Units: 4},
+			RowUpdate{Key: "a", Label: "alpha", State: RowRunning},
+			RowUpdate{Key: "b", Label: "beta", State: RowDone},
+			RowUpdate{Key: "c", Label: "gamma", State: RowSkipped},
+			RowUpdate{Key: "d", Label: "delta", State: RowFailed},
+			RowUpdate{Key: "e", Label: "e (fetch)", State: RowDone, Aside: true},
+			tea.WindowSizeMsg{Width: c.width, Height: 20})
+		if h := strings.Split(view(m), "\n")[0]; h != c.want {
+			t.Errorf("width %d: header %q, want %q", c.width, h, c.want)
+		}
 	}
 }
 
