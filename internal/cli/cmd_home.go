@@ -520,13 +520,13 @@ func (h *home) cd(r homeRow) error {
 
 // cdHint tells how to add the shell function that makes enter change the
 // directory, for shell, the path of the user's shell ($SHELL): the line to
-// add to the startup file of bash, zsh or fish; otherwise where the README
-// explains it.
+// add to the startup file of bash (login shells on macOS read
+// ~/.bash_profile), zsh or fish; otherwise where the README explains it.
 func cdHint(shell string) string {
 	const add = "to cd on enter, add the shell function to "
 	switch filepath.Base(shell) {
 	case "bash":
-		return add + `~/.bashrc: eval "$(sheaf shell-init bash)"`
+		return add + `~/.bashrc (~/.bash_profile on macOS): eval "$(sheaf shell-init bash)"`
 	case "zsh":
 		return add + `~/.zshrc: eval "$(sheaf shell-init zsh)"`
 	case "fish":

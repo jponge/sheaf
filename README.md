@@ -323,11 +323,11 @@ selected rows that succeeded.
 
 Enter writes the checkout's path to the file named by `SHEAF_CD_FILE`, which
 the `sheaf` shell function defined by `sheaf shell-init` creates and then
-`cd`s into. Without the shell function the path is printed on standard
-output, alone (scripts may read it), followed on standard error by a hint
-to add the shell function (the line for the startup file of the shell of
-`$SHELL`: bash, zsh or fish); the key help then says `enter path`
-rather than `enter cd`. sheaf removes `SHEAF_CD_FILE` from its environment at startup, so
+`cd`s into. Without the shell function the path is printed alone on
+standard output, and a hint on standard error gives the line that adds
+the shell function to the startup file of the shell of `$SHELL` (bash,
+zsh or fish); the key help then says `enter path` rather than
+`enter cd`. sheaf removes `SHEAF_CD_FILE` from its environment at startup, so
 the processes it starts (git, hooks, `sheaf run` commands) never see it.
 
 Outside a bundle, bare `sheaf` prints the help and a hint to run

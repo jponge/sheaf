@@ -431,15 +431,15 @@ func TestHomeEnterPrintsPath(t *testing.T) {
 }
 
 // Without the shell function (no SHEAF_CD_FILE), the key help labels enter
-// "path", and after the path, alone on standard output (scripts may
-// read it), a hint on standard error tells how to add the shell function
-// for the shell of $SHELL (bash, zsh, fish), else where to read about it
-// (B52 D2).
+// "path"; the path is printed alone on standard output and a hint on
+// standard error tells how to add the shell function for the shell of
+// $SHELL (bash, with the startup file of macOS login shells; zsh; fish),
+// else where to read about it (B52 D2).
 func TestHomeEnterWithoutShellFunction(t *testing.T) {
 	t.Parallel()
 	e, _, feat, _, _ := homeBundle(t)
 	for _, tc := range []struct{ shell, hint string }{
-		{"/bin/bash", `sheaf: to cd on enter, add the shell function to ~/.bashrc: eval "$(sheaf shell-init bash)"`},
+		{"/bin/bash", `sheaf: to cd on enter, add the shell function to ~/.bashrc (~/.bash_profile on macOS): eval "$(sheaf shell-init bash)"`},
 		{"/usr/bin/zsh", `sheaf: to cd on enter, add the shell function to ~/.zshrc: eval "$(sheaf shell-init zsh)"`},
 		{"/opt/homebrew/bin/fish", `sheaf: to cd on enter, add the shell function to ~/.config/fish/config.fish: sheaf shell-init fish | source`},
 		{"/bin/tcsh", `sheaf: to cd on enter, add the sheaf shell function (see "Shell integration" in the README)`},
