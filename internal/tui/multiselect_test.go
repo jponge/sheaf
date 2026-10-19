@@ -47,6 +47,12 @@ func assertKeys(t *testing.T, m tea.Model, want ...string) {
 	}
 }
 
+// itemRow reports whether l is an item row of a MultiSelect view (which
+// ends with "…" when cut, see renderRow).
+func itemRow(l string) bool {
+	return strings.HasPrefix(l, "> [") || strings.HasPrefix(l, "  [")
+}
+
 // currentLine returns the View line carrying the cursor marker.
 func currentLine(t *testing.T, m tea.Model) string {
 	t.Helper()
@@ -263,7 +269,7 @@ func TestMultiSelectViewRendersRows(t *testing.T) {
 	items[0].Tags = []string{"fork", "archived"}
 	items[1].Selected = true
 	v := view(NewMultiSelect("Pick repositories", items))
-	for _, s := range []string{"Pick repositories", "> [ ] alpha", "first letter", "[fork]", "[archived]", "[x] bravo", "1/3 selected", "space", "toggle", "enter", "more"} {
+	for _, s := range []string{"Pick repositories", "> [ ] [fork] [archived] alpha first letter", "[x]        bravo", "1/3 selected", "space", "toggle", "enter", "more"} {
 		if !strings.Contains(v, s) {
 			t.Fatalf("view lacks %q:\n%s", s, v)
 		}
@@ -664,7 +670,7 @@ func TestMultiSelectKeyHelpWrapsToWidth(t *testing.T) {
 				}
 			}
 			for _, l := range strings.Split(v, "\n") {
-				if lipgloss.Width(l) > w || strings.Contains(l, "…") {
+				if lipgloss.Width(l) > w || strings.Contains(l, "…") && !itemRow(l) {
 					t.Errorf("width %d, %s mode: line %q", w, mode.name, l)
 				}
 			}
@@ -741,7 +747,7 @@ func TestMultiSelectCompactHelpTogglesWithQuestionMark(t *testing.T) {
 			}
 		}
 		for _, l := range strings.Split(v, "\n") {
-			if lipgloss.Width(l) > w || strings.Contains(l, "…") {
+			if lipgloss.Width(l) > w || strings.Contains(l, "…") && !itemRow(l) {
 				t.Errorf("width %d: line %q", w, l)
 			}
 		}
@@ -857,5 +863,49 @@ func TestMultiSelectStatusPartsAreShownWholeOrNotAtAll(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// The tags of a row come first, in a column as wide as the widest first
+// tag, so that the kind of an item (e.g. "gone", "new") stays visible on a
+// narrow window; a row wider than the window ends with "…" (B52 A1).
+func TestMultiSelectTagsFirstAndEllipsis(t *testing.T) {
+	items := []Item{
+		{Key: "gone:acme/old", Label: "old", Detail: "acme/old: no longer listed in acme: deleted, transferred or renamed (archived repositories are listed)", Tags: []string{"gone"}},
+		{Key: "new:acme/newsvc", Label: "newsvc", Detail: "acme/newsvc: a new service", Tags: []string{"new", "fork"}},
+		{Key: "plain", Label: "plain", Detail: "no tag"},
+	}
+	m, _ := NewMultiSelect("Choose", items).Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	v := view(m)
+	for _, want := range []string{"> [ ] [gone] old acme/old: no longer listed", "  [ ] [new]  [fork] newsvc acme/newsvc", "  [ ]        plain no tag"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("view lacks %q:\n%s", want, v)
+		}
+	}
+	gone := currentLine(t, m)
+	if w := lipgloss.Width(gone); w != 80 || !strings.HasSuffix(gone, "…") {
+		t.Errorf("cut row = %q (%d cells), want 80 cells ending with …", gone, w)
+	}
+	for _, l := range strings.Split(v, "\n") {
+		if strings.Contains(l, "newsvc") && strings.Contains(l, "…") {
+			t.Errorf("row that fits has an ellipsis: %q", l)
+		}
+	}
+}
+
+// An item with a level has its tags and label in the style of the level
+// (e.g. a repository about to be removed as a warning); others do not.
+func TestMultiSelectItemLevel(t *testing.T) {
+	items := []Item{
+		{Key: "g", Label: "old", Tags: []string{"gone"}, Level: LevelWarn},
+		{Key: "n", Label: "fresh", Tags: []string{"new"}},
+	}
+	m, _ := press(NewMultiSelect("Choose", items), "down") // the cursor off the warned row
+	raw := m.View().Content
+	if !strings.Contains(raw, sgrYellow+"old") {
+		t.Errorf("warned label not yellow:\n%q", raw)
+	}
+	if strings.Contains(raw, sgrYellow+"fresh") {
+		t.Errorf("plain label yellow:\n%q", raw)
 	}
 }

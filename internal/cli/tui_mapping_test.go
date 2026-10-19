@@ -38,6 +38,7 @@ func TestProposalItems(t *testing.T) {
 		{Key: "new:o/b", Kind: ops.ProposalNew, Org: "o", Name: "b", Slug: "o/b", Repo: hosting.Repo{Owner: "o", Name: "b", Description: "bee", Fork: true}},
 		{Key: "new:o/c", Kind: ops.ProposalNew, Org: "o", Name: "c", Slug: "o/c", Repo: hosting.Repo{Owner: "o", Name: "c"}, Note: "directory c already used"},
 		{Key: "gone:o/d", Kind: ops.ProposalGone, Org: "o", Name: "d", Slug: "o/d", MassRemoval: true},
+		{Key: "gone:o/g", Kind: ops.ProposalGone, Org: "o", Name: "g", Slug: "o/g", Note: "no longer listed in o"},
 		{Key: "moved:o/e", Kind: ops.ProposalMoved, Org: "o", Name: "e", Slug: "o/e", Repo: hosting.Repo{Owner: "p", Name: "e2"}},
 		{Key: "archived:o/f", Kind: ops.ProposalArchived, Org: "o", Name: "f", Slug: "o/f", Repo: hosting.Repo{Owner: "o", Name: "f", Archived: true}},
 	}
@@ -45,7 +46,8 @@ func TestProposalItems(t *testing.T) {
 	want := []tui.Item{
 		{Key: "new:o/b", Label: "b", Detail: "o/b: bee", Tags: []string{"new", "fork"}},
 		{Key: "new:o/c", Label: "c", Detail: "o/c: directory c already used", Tags: []string{"new"}},
-		{Key: "gone:o/d", Label: "d", Detail: "o/d", Tags: []string{"gone", "mass removal: refused"}, Disabled: true},
+		{Key: "gone:o/d", Label: "d", Detail: "o/d", Tags: []string{"gone", "mass removal: refused"}, Disabled: true, Level: tui.LevelWarn},
+		{Key: "gone:o/g", Label: "g", Detail: "o/g: no longer listed in o", Tags: []string{"gone"}, Level: tui.LevelWarn},
 		{Key: "moved:o/e", Label: "e", Detail: "o/e, now p/e2", Tags: []string{"moved"}, Disabled: true},
 		{Key: "archived:o/f", Label: "f", Detail: "o/f", Tags: []string{"archived"}, Disabled: true},
 	}

@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Item is one selectable row of a MultiSelect.
@@ -18,9 +19,10 @@ type Item struct {
 	Key      string   // returned by SelectedKeys; should be unique
 	Label    string   // main text, matched by the filter
 	Detail   string   // secondary text, matched by the filter
-	Tags     []string // short markers shown after the text, e.g. "fork", "archived"
+	Tags     []string // short markers shown before the label, e.g. "new", "fork"; the first one in a column
 	Selected bool     // initial selection state
 	Disabled bool     // cannot be toggled; its Selected state is kept as given
+	Level    Level    // its tags and label are rendered in the style of this level (e.g. LevelWarn)
 }
 
 // Text fields of an Item and the title are displayed with control characters
@@ -92,6 +94,8 @@ type MultiSelect struct {
 
 	lockedLabel string // see WithLockedLabel
 
+	tagWidth int // width of the column of the first tags (see renderRow)
+
 	keys   multiSelectKeys
 	help   help.Model
 	styles Styles
@@ -108,6 +112,11 @@ func NewMultiSelect(title string, items []Item) MultiSelect {
 		keys:   newMultiSelectKeys(),
 		help:   h,
 		styles: st,
+	}
+	for _, it := range m.items {
+		if len(it.Tags) > 0 {
+			m.tagWidth = max(m.tagWidth, lipgloss.Width("["+sanitize(it.Tags[0])+"]"))
+		}
 	}
 	m.applyFilter()
 	return m
@@ -602,20 +611,47 @@ func (m MultiSelect) renderRow(row int) string {
 	default:
 		box = st.Unchecked.Render("[ ]")
 	}
-	label := sanitize(it.Label)
-	if current {
-		label = style(st.CurrentRow, label)
+	// The tags go first, the first one padded to the column of the first
+	// tags, so that they stay visible when the row is cut; the tags and the
+	// label are in the style of the item's level, if any.
+	tagStyle, labelStyle := st.Tag, lipgloss.NewStyle()
+	if it.Level != LevelNone {
+		tagStyle, labelStyle = st.Level(it.Level), st.Level(it.Level)
 	}
-	parts := []string{box, label}
+	parts := []string{box}
+	if m.tagWidth > 0 {
+		first := ""
+		if len(it.Tags) > 0 {
+			first = "[" + sanitize(it.Tags[0]) + "]"
+		}
+		pad := strings.Repeat(" ", m.tagWidth-lipgloss.Width(first))
+		if first != "" {
+			first = style(tagStyle, first)
+		}
+		parts = append(parts, first+pad)
+	}
+	for _, t := range it.Tags[min(1, len(it.Tags)):] {
+		parts = append(parts, style(tagStyle, "["+sanitize(t)+"]"))
+	}
+	label := sanitize(it.Label)
+	switch {
+	case current:
+		label = style(st.CurrentRow.Inherit(labelStyle), label)
+	case it.Level != LevelNone:
+		label = style(labelStyle, label)
+	}
+	parts = append(parts, label)
 	if it.Detail != "" {
 		parts = append(parts, style(st.Detail, sanitize(it.Detail)))
-	}
-	for _, t := range it.Tags {
-		parts = append(parts, style(st.Tag, "["+sanitize(t)+"]"))
 	}
 	line := strings.Join(parts, " ")
 	if it.Disabled {
 		line = st.Disabled.Render(line)
+	}
+	if m.width > 0 {
+		// Cut with an ellipsis, rather than by View, so that a cut row
+		// says so.
+		return ansi.Truncate(cursor+line, m.width, "…")
 	}
 	return cursor + line
 }

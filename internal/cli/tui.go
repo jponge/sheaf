@@ -45,7 +45,8 @@ func orgRepoItems(avail []hosting.Repo, b *bundle.Bundle) []tui.Item {
 // proposalItems maps sync proposals to menu items as documented on
 // ops.Proposal: nothing preselected; new and gone proposals selectable,
 // moved and archived ones informational (disabled), as are gone ones
-// refused as a mass removal (the TUI never allows it).
+// refused as a mass removal (the TUI never allows it). Gone proposals are
+// warnings: selecting one removes the repository.
 func proposalItems(ps []ops.Proposal) []tui.Item {
 	items := make([]tui.Item, 0, len(ps))
 	for _, p := range ps {
@@ -66,6 +67,9 @@ func proposalItems(ps []ops.Proposal) []tui.Item {
 		}
 		if p.MassRemoval {
 			it.Tags = append(it.Tags, "mass removal: refused")
+		}
+		if p.Kind == ops.ProposalGone {
+			it.Level = tui.LevelWarn
 		}
 		it.Disabled = (p.Kind != ops.ProposalNew && p.Kind != ops.ProposalGone) || p.MassRemoval
 		items = append(items, it)
