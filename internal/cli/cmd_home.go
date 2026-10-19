@@ -525,15 +525,7 @@ func (h *home) run(name string, targets []string) string {
 		}
 		w, err := ops.OpenWorkspace(h.root)
 		if err == nil {
-			// As in command: what update prints is also captured, its TUI
-			// renders on the terminal only.
-			c := &cobra.Command{}
-			c.SetIn(h.c.InOrStdin())
-			c.SetOut(teeWriter{io.MultiWriter(h.c.OutOrStdout(), &h.output), h.c.OutOrStdout()})
-			c.SetErr(teeWriter{io.MultiWriter(h.c.ErrOrStderr(), &h.output), h.c.ErrOrStderr()})
-			c.SetContext(h.s.ctx)
-			d := h.d
-			d.ctl, d.term, d.windowTitle = h.s.ctl, h.s.out, homeTitle(name, h.root)
+			c, d := h.inline(name)
 			opts := ops.UpdateOptions{Filter: ops.CheckoutFilter{Repos: repos, Paths: paths}, Jobs: h.jobs}
 			err = tuiUpdate(c, d, w, opts, false)
 		}
@@ -552,18 +544,49 @@ func (h *home) run(name string, targets []string) string {
 		// As browse run in the checkout's directory.
 		return h.outcome(name, []error{h.commandIn(h.rows[targets[0]].checkout.Path, "browse")})
 	case "remove":
-		var errs []error
-		for _, k := range targets {
-			c := h.rows[k].checkout
-			errs = append(errs, h.command("wt", "rm", "--dir="+c.Dir, "--", c.Repo))
-			if h.s.ctx.Err() != nil {
-				break
-			}
+		if len(targets) == 1 {
+			c := h.rows[targets[0]].checkout
+			return h.outcome(name, []error{h.command("wt", "rm", "--dir="+c.Dir, "--", c.Repo)})
 		}
-		return h.outcome(name, errs)
+		return h.outcome(name, h.removeWorktrees(targets))
 	default: // prune, doctor, sync
 		return h.outcome(name, []error{h.command(name)})
 	}
+}
+
+// inline returns the command and dependencies to run the TUI of the
+// action name in this process: as in command, what it prints is also
+// captured, its TUI renders on the terminal only.
+func (h *home) inline(name string) (*cobra.Command, Deps) {
+	c := &cobra.Command{}
+	c.SetIn(h.c.InOrStdin())
+	c.SetOut(teeWriter{io.MultiWriter(h.c.OutOrStdout(), &h.output), h.c.OutOrStdout()})
+	c.SetErr(teeWriter{io.MultiWriter(h.c.ErrOrStderr(), &h.output), h.c.ErrOrStderr()})
+	c.SetContext(h.s.ctx)
+	d := h.d
+	d.ctl, d.term, d.windowTitle = h.s.ctl, h.s.out, homeTitle(name, h.root)
+	return c, d
+}
+
+// removeWorktrees removes the worktrees of the rows targets after one
+// confirmation, as `wt rm --dir=<dir> -- <repo>` would remove each one
+// (see tuiWorktreeRemoveMany), and returns the error of each.
+func (h *home) removeWorktrees(targets []string) []error {
+	w, err := ops.OpenWorkspace(h.root)
+	if err != nil {
+		return []error{err}
+	}
+	wd, err := h.d.getwd()
+	if err != nil {
+		return []error{err}
+	}
+	c, d := h.inline("remove")
+	var items []ops.WorktreeRemoval
+	for _, k := range targets {
+		cs := h.rows[k].checkout
+		items = append(items, ops.WorktreeRemoval{Repo: cs.Repo, Target: ops.WorktreeTarget{Name: cs.Dir, Kind: ops.TargetDir}})
+	}
+	return tuiWorktreeRemoveMany(c, d, w, items, ops.WorktreeRemoveOptions{WorkingDir: wd})
 }
 
 // add asks for a branch or a tag and adds the worktree with `wt add`.

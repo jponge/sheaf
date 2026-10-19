@@ -258,6 +258,68 @@ func tuiWorktreeRemove(c *cobra.Command, d Deps, w *ops.Workspace, repo string, 
 	return nil
 }
 
+// tuiWorktreeRemoveMany removes several worktrees with one progress view
+// and one dialog (default no) listing what will be removed, with the fate
+// of each branch, and the worktrees refused (see ops.RemoveWorktrees). It
+// prints the message of each removed worktree and returns the error of
+// each worktree that was not removed, or errCancelled alone when the
+// dialog was declined.
+func tuiWorktreeRemoveMany(c *cobra.Command, d Deps, w *ops.Workspace, items []ops.WorktreeRemoval, opts ops.WorktreeRemoveOptions) []error {
+	s := newTUISession(c, d)
+	var results []ops.WorktreeRemovalResult
+	declined := false
+	n := plural(len(items), "worktree")
+	s.progress("Checking "+n+" for removal", progressOpts{Confirmed: "Removing " + n}, func(ctx context.Context, rep ops.Reporter, ask askFunc) {
+		results = ops.RemoveWorktrees(ctx, w, items, opts, func(rs []ops.WorktreeRemovalResult) bool {
+			lines, removable := worktreeRemovalsLines(rs, opts.Force)
+			if !ask(fmt.Sprintf("Remove %s?", plural(removable, "worktree")), lines) {
+				declined = true
+				return false
+			}
+			return true
+		}, rep)
+	})
+	if declined {
+		return []error{errCancelled}
+	}
+	var errs []error
+	for _, r := range results {
+		if r.Err == nil {
+			fmt.Fprintln(c.OutOrStdout(), r.Message)
+		}
+		errs = append(errs, r.Err)
+	}
+	return errs
+}
+
+// worktreeRemovalsLines describes the plans of several worktree removals
+// (see ops.RemoveWorktrees): for each worktree to remove, a line saying
+// so, then the lines of its plan (see worktreeRemovePlanLines), indented;
+// for each worktree refused or that cannot be removed, why. It also
+// returns the number of worktrees to remove.
+func worktreeRemovalsLines(rs []ops.WorktreeRemovalResult, force bool) (lines []string, removable int) {
+	for _, r := range rs {
+		var refused *ops.WorktreeRefusedError
+		switch {
+		case r.Err == nil:
+			removable++
+			p := *r.Plan
+			lines = append(lines, fmt.Sprintf("will remove worktree %s/%s [%s] at %s", p.Repo, p.Worktree.Dir, branchLabel(p.Worktree), p.Worktree.Path))
+			for _, l := range worktreeRemovePlanLines(p, force) {
+				if l != worktreeRemoveLine(p) {
+					lines = append(lines, "  "+l)
+				}
+			}
+		case errors.As(r.Err, &refused):
+			lines = append(lines, refused.Summary())
+		default:
+			msg, _ := errorLine(r.Err)
+			lines = append(lines, "cannot remove "+r.Repo+"/"+r.Target.Name+": "+msg)
+		}
+	}
+	return lines, removable
+}
+
 // tuiPrune plans and, after confirmation (or with --yes), applies a prune
 // in one progress view.
 func tuiPrune(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.PruneOptions, yes bool) error {

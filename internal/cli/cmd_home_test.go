@@ -878,6 +878,104 @@ func TestHomeRemoveSkipsSelectedProblemRows(t *testing.T) {
 	}
 }
 
+// multiRemoveBundle is homeBundle with the clean worktrees alpha/x and
+// beta/y. The rows: alpha's primary, feat (refused: untracked file), x,
+// beta's primary, y.
+func multiRemoveBundle(t *testing.T) (e *env, feat, x, y string) {
+	t.Helper()
+	e, alpha, feat, beta, _ := homeBundle(t)
+	x = filepath.Join(filepath.Dir(alpha), "x")
+	testutil.Git(t, alpha, "worktree", "add", "-q", "-b", "x", x)
+	y = filepath.Join(filepath.Dir(beta), "y")
+	testutil.Git(t, beta, "worktree", "add", "-q", "-b", "y", y)
+	return e, feat, x, y
+}
+
+// acceptRemoval is declineRemoval answering yes: its last key waits until
+// the view shows the removal finished.
+func acceptRemoval(t *testing.T, out *syncBuffer) []key {
+	t.Helper()
+	return []key{{keys: "y", wait: waitOutput(t, out, "[y/N]")}, {keys: "x", wait: waitOutput(t, out, "finished in")}}
+}
+
+// selectFeatXY selects feat, x and y in the overview of multiRemoveBundle,
+// then presses r.
+func selectFeatXY(t *testing.T, out *syncBuffer) []key {
+	return ovKeys(t, out, "STATE", 1, "j", " ", "j", " ", "j", "j", " ", "r")
+}
+
+// r on several worktrees asks once (B52 C1): one dialog lists what will
+// be removed, with the fate of each branch, and the refused worktree;
+// the others are then removed and the refusal reported with its command.
+func TestHomeRemovesSelectedWorktreesAfterOneConfirmation(t *testing.T) {
+	t.Parallel()
+	e, feat, x, y := multiRemoveBundle(t)
+	var out syncBuffer
+	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "x"),
+		ovKeys(t, &out, "wt rm: 2 done, 0 cancelled, 1 failed", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 || exists(x) || exists(y) || !exists(filepath.Join(feat, "new.txt")) {
+		t.Fatalf("exit %d, x %v, y %v, feat %v\nstdout:\n%s\nstderr:\n%s", code, exists(x), exists(y), exists(feat), out.String(), errs)
+	}
+	o := ansi.Strip(out.String())
+	for _, want := range []string{
+		"Remove 2 worktrees?",
+		"will remove worktree alpha/x [x] at " + x, "branch x is kept",
+		"will remove worktree beta/y [y] at " + y, "branch y is kept",
+		"refusing to remove alpha/feat: 1 untracked file",
+		"run: sheaf wt rm --force --dir feat -- alpha",
+	} {
+		if !strings.Contains(o, want) {
+			t.Errorf("the output lacks %q:\n%s", want, o)
+		}
+	}
+	report := o[strings.Index(o, "sheaf wt rm: "):]
+	for _, want := range []string{"removed worktree x [x] at " + x, "removed worktree y [y] at " + y, "refusing to remove worktree feat [feat] of alpha:"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("the report lacks %q:\n%s", want, report)
+		}
+	}
+	for _, unwanted := range []string{"Remove worktree x of alpha?", "Remove worktree y of beta?", "unpushed"} {
+		if strings.Contains(o, unwanted) {
+			t.Errorf("the output shows %q:\n%s", unwanted, o)
+		}
+	}
+}
+
+// The hints of a removal of several worktrees name the bundle given with
+// --bundle to bare sheaf, as those of a single removal do (B52 U1).
+func TestHomeMultiRemoveHintsNameTheGivenBundle(t *testing.T) {
+	t.Parallel()
+	e, _, _, _ := multiRemoveBundle(t)
+	var out syncBuffer
+	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "x"),
+		ovKeys(t, &out, "wt rm: 2 done, 0 cancelled, 1 failed", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out, "--bundle", e.cwd)
+	if want := "run: sheaf --bundle " + e.cwd + " wt rm --force --dir feat -- alpha"; code != 0 || !strings.Contains(ansi.Strip(out.String()), want) {
+		t.Fatalf("exit %d, want %q\nstdout:\n%s\nstderr:\n%s", code, want, out.String(), errs)
+	}
+}
+
+// Declining the one confirmation keeps every worktree and the selection.
+func TestHomeMultiRemoveDeclinedKeepsAll(t *testing.T) {
+	t.Parallel()
+	e, feat, x, y := multiRemoveBundle(t)
+	var out syncBuffer
+	in := newScript(t, false, selectFeatXY(t, &out), declineRemoval(t, &out), ovKeys(t, &out, "wt rm: cancelled", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 || !exists(x) || !exists(y) || !exists(feat) {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	o := out.String()
+	cancelled := strings.Index(o, "wt rm: cancelled")
+	if frame := o[strings.LastIndex(o[:cancelled], "STATE"):cancelled]; !strings.Contains(frame, "3/5 selected") {
+		t.Errorf("selection lost after the cancelled removal:\n%s", o)
+	}
+	if n := strings.Count(o, "sheaf wt rm: "); n != 0 {
+		t.Errorf("%d report views after a cancellation, want none:\n%s", n, o)
+	}
+}
+
 // The key help of the overview is one short line (B45); ? shows the full
 // list, and the next overviews of the home screen (here after a fetch)
 // keep it.

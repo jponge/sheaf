@@ -269,7 +269,7 @@ lines that still do not fit are cut at the right.
 | w | add a worktree to the current row's repository: a prompt asks for a branch (an existing local or remote one, else a new branch from the default branch, as `wt add`), tab switches to a tag |
 | # | check out a pull request of the current row's repository (GitHub only): a prompt asks for its number (`#123` also accepted), then `wt pr` runs |
 | b | open the current row on GitHub, as `sheaf browse` run in its directory (the pull request of its branch, else the repository's home page); the outcome is the overview's message (`browse: opened o/r`, `browse failed: ...`), without a report view |
-| r | remove the selected worktrees (or the current one); not the primary |
+| r | remove the selected worktrees (or the current one); not the primary. Several worktrees are checked as `wt rm` checks each one (each repository fetched once) and confirmed in one dialog listing what will be removed, with the fate of each branch, and the worktrees refused |
 | p, d, s | `prune`, `doctor`, `sync` on the whole bundle |
 | ? | show every key in the key help, or only the main ones again |
 | q, esc | quit with status 0 (esc first clears an applied filter) |

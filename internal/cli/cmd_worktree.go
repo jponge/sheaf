@@ -478,7 +478,7 @@ func worktreeRemovePlanLines(p ops.WorktreeRemovePlan, force bool) []string {
 			lines = append(lines, fmt.Sprintf("%v will be lost (--force)", r))
 		}
 	}
-	lines = append(lines, fmt.Sprintf("will remove worktree %s [%s] at %s", p.Worktree.Dir, branchLabel(p.Worktree), p.Worktree.Path))
+	lines = append(lines, worktreeRemoveLine(p))
 	switch {
 	case p.MergedInto != "":
 		lines = append(lines, fmt.Sprintf("will delete branch %s (merged into %s)", p.Worktree.Branch, p.MergedInto))
@@ -493,6 +493,12 @@ func worktreeRemovePlanLines(p ops.WorktreeRemovePlan, force bool) []string {
 		lines = append(lines, "warning: "+p.BranchKept)
 	}
 	return lines
+}
+
+// worktreeRemoveLine is the line of worktreeRemovePlanLines saying which
+// worktree is removed.
+func worktreeRemoveLine(p ops.WorktreeRemovePlan) string {
+	return fmt.Sprintf("will remove worktree %s [%s] at %s", p.Worktree.Dir, branchLabel(p.Worktree), p.Worktree.Path)
 }
 
 func branchLabel(in ops.WorktreeInfo) string {
