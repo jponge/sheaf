@@ -115,12 +115,26 @@ const (
 
 // homeTitle returns the window title of the home screen on the bundle
 // root, "sheaf: <name of root>", or that of its action name, "sheaf
-// <name>: <name of root>" (see tuiSession).
+// <command>: <name of root>" with the command it runs (see homeCommand
+// and tuiSession).
 func homeTitle(name, root string) string {
 	if name != "" {
-		name = " " + name
+		name = " " + homeCommand(name)
 	}
 	return "sheaf" + name + ": " + filepath.Base(root)
+}
+
+// homeCommand returns the command that the action name of the home screen
+// runs, as its titles and messages name it: "wt add" for add, "wt pr" for
+// pr, "wt rm" for remove, the name itself otherwise.
+func homeCommand(name string) string {
+	switch name {
+	case "add", "pr":
+		return "wt " + name
+	case "remove":
+		return "wt rm"
+	}
+	return name
 }
 
 // home is the state of the home screen between two overviews.
@@ -598,10 +612,12 @@ func (h *home) commandIn(dir string, args ...string) error {
 
 // outcome prints the errors of an action to standard error and h.output
 // like execute does (cancellations excepted) and returns the message for
-// the overview: "<name>: done", "<name>: <note>" when the command changed
-// nothing (e.g. "prune: nothing to prune"), "<name>: cancelled", "<name>
+// the overview, with the command the action ran (see homeCommand):
+// "<command>: done", "<command>: <note>" when the command changed nothing
+// (e.g. "prune: nothing to prune"), "<command>: cancelled", "<command>
 // failed: <error>", or the counts when the action ran several times.
 func (h *home) outcome(name string, errs []error) string {
+	name = homeCommand(name)
 	var done, cancelled, failed int
 	var last error
 	for _, err := range errs {
@@ -633,11 +649,11 @@ func (h *home) outcome(name string, errs []error) string {
 }
 
 // homeReport returns the report view of the action name on the bundle
-// root, which printed output (see homeReportLines), with the level words
+// root, titled with the command it ran (see homeCommand), which printed output (see homeReportLines), with the level words
 // of its lines colored (see levelMark): the output is captured without
 // escape sequences.
 func homeReport(name, root, output, message string) tui.Report {
-	return tui.NewReport("sheaf "+name+": "+root, homeReportLines(output, message), "back to the overview").WithLevels(levelMark)
+	return tui.NewReport("sheaf "+homeCommand(name)+": "+root, homeReportLines(output, message), "back to the overview").WithLevels(levelMark)
 }
 
 // homeReportLines returns the lines of the report view of an action: those

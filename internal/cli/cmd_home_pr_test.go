@@ -34,7 +34,7 @@ func TestHomeChecksOutPullRequest(t *testing.T) {
 		ovKeys(t, &out, "STATE", 1, "#"),
 		[]key{{keys: "x", wait: waitScreen(t, &out, "Pull request of a")}, {keys: "\r"},
 			{keys: "\x15", wait: waitScreen(t, &out, `invalid pull request number "x"`)}, {keys: "7"}, {keys: "\r"}},
-		reportKey(t, &out, "pr", "x"), ovKeys(t, &out, "pr: done", 1, "q"))
+		reportKey(t, &out, "wt pr", "x"), ovKeys(t, &out, "wt pr: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -45,12 +45,12 @@ func TestHomeChecksOutPullRequest(t *testing.T) {
 	}
 	// The overview after the action lists the new worktree.
 	o := out.String()
-	if done := strings.Index(o, "pr: done"); done < 0 || !strings.Contains(o[:done], "pr-7") {
+	if done := strings.Index(o, "wt pr: done"); done < 0 || !strings.Contains(o[:done], "pr-7") {
 		t.Fatalf("overview without the new worktree:\n%s", o)
 	}
 	// esc cancels.
 	out = syncBuffer{}
-	errs, code = runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "#"), keys("3", "\x1b"), ovKeys(t, &out, "pr: cancelled", 1, "q")), &out)
+	errs, code = runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "#"), keys("3", "\x1b"), ovKeys(t, &out, "wt pr: cancelled", 1, "q")), &out)
 	if code != 0 || exists(filepath.Join(root, "a", "feat")) {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}

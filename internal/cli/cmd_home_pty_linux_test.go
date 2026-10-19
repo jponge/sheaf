@@ -244,7 +244,7 @@ func TestHomeOnPTYFailureShowsReportView(t *testing.T) {
 		waitScreenState(t, s, "the error in the report view", func(vt *vtScreen) bool {
 			alt := vt.altLines()
 			isError := func(l string) bool { return strings.HasPrefix(l, "sheaf: ") && !strings.HasPrefix(l, "sheaf: /") }
-			return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf add: ") && slices.ContainsFunc(alt, isError) &&
+			return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf wt add: ") && slices.ContainsFunc(alt, isError) &&
 				slices.ContainsFunc(vt.normalLines(), isError)
 		})
 		if tc.exit == "0" {
@@ -255,7 +255,7 @@ func TestHomeOnPTYFailureShowsReportView(t *testing.T) {
 			waitScreenState(t, s, "the overview with the failure", func(vt *vtScreen) bool {
 				alt := vt.altLines()
 				return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf: ") &&
-					slices.ContainsFunc(alt, func(l string) bool { return strings.HasPrefix(overviewMessage(l), "add failed: ") })
+					slices.ContainsFunc(alt, func(l string) bool { return strings.HasPrefix(overviewMessage(l), "wt add failed: ") })
 			})
 			s.write("q")
 		}
@@ -280,7 +280,7 @@ func TestHomeOnPTYTypeAheadDoesNotSkipReport(t *testing.T) {
 	s.write("x")
 	reportShown := func(vt *vtScreen) bool {
 		alt := vt.altLines()
-		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf add: ")
+		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf wt add: ")
 	}
 	waitScreenState(t, s, "the report view", reportShown)
 	time.Sleep(2 * tui.ReportGrace)
@@ -291,7 +291,7 @@ func TestHomeOnPTYTypeAheadDoesNotSkipReport(t *testing.T) {
 	}
 	s.write("x")
 	waitScreenState(t, s, "the overview with the failure", func(vt *vtScreen) bool {
-		return vt.altActive() && slices.ContainsFunc(vt.altLines(), func(l string) bool { return strings.HasPrefix(overviewMessage(l), "add failed: ") })
+		return vt.altActive() && slices.ContainsFunc(vt.altLines(), func(l string) bool { return strings.HasPrefix(overviewMessage(l), "wt add failed: ") })
 	})
 	s.write("q")
 	wantTerminalRestored(t, s, "0")
@@ -368,7 +368,7 @@ func TestHomeOnPTYLeavesNoStaleOverviews(t *testing.T) {
 	s.write("r")
 	waitCount("[y/N]", 1)
 	s.write("n")
-	waitCount("remove: cancelled", 1)
+	waitCount("wt rm: cancelled", 1)
 	s.write("f")
 	dismissReport(t, s, "fetch", 2)
 	waitCount("fetch: done", 2)
@@ -539,7 +539,7 @@ func TestHomeOnPTYAddProgressIsLive(t *testing.T) {
 	isProgress := func(l string) bool { return progress.MatchString(l) }
 	waitScreenState(t, s, "the progress lines on the normal screen and in the report view", func(vt *vtScreen) bool {
 		alt := vt.altLines()
-		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf add: ") && slices.ContainsFunc(alt, isProgress) &&
+		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf wt add: ") && slices.ContainsFunc(alt, isProgress) &&
 			slices.ContainsFunc(vt.normalLines(), isProgress)
 	})
 	s.write("\x03")
@@ -613,11 +613,11 @@ func TestHomeOnPTYSetsWindowTitle(t *testing.T) {
 	s.write("w")
 	s.waitFor(`New worktree of alpha`)
 	s.write("\x1b")
-	s.waitFor(`add: cancelled`)
+	s.waitFor(`wt add: cancelled`)
 	s.write("q")
 	wantTerminalRestored(t, s, "0")
 	titles := windowTitles(s.output())
-	for _, want := range []string{"sheaf: " + b, "sheaf fetch: " + b, "sheaf update: " + b, "sheaf add: " + b} {
+	for _, want := range []string{"sheaf: " + b, "sheaf fetch: " + b, "sheaf update: " + b, "sheaf wt add: " + b} {
 		if !slices.Contains(titles, want) {
 			t.Errorf("window titles %q lack %q", titles, want)
 		}
@@ -769,7 +769,7 @@ func TestHomeOnPTYWheelMovesTheCursor(t *testing.T) {
 		t.Errorf("mouse reporting on while the prompt is displayed:\n%q", out)
 	}
 	s.write("\x1b")
-	s.waitFor(`add: cancelled`)
+	s.waitFor(`wt add: cancelled`)
 	s.write("q")
 	wantTerminalRestored(t, s, "0")
 }

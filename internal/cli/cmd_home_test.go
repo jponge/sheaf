@@ -502,9 +502,9 @@ func TestHomeAddWorktreeForBranchAndTag(t *testing.T) {
 		return k
 	}
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "w"), hinted("an existing local or remote branch, else a new branch from the default branch", "t", "o", "p", "i", "c", "/", "y", "\r"), reportKey(t, &out, "add", "x"),
-		ovKeys(t, &out, "add: done", 1, "w"), append(keys("v", "1", "\t"), hinted("a tag: a detached worktree pinned at it", "\r")...), reportKey(t, &out, "add", "x"),
-		ovKeys(t, &out, "add: done", 2, "q"))
+		ovKeys(t, &out, "STATE", 1, "w"), hinted("an existing local or remote branch, else a new branch from the default branch", "t", "o", "p", "i", "c", "/", "y", "\r"), reportKey(t, &out, "wt add", "x"),
+		ovKeys(t, &out, "wt add: done", 1, "w"), append(keys("v", "1", "\t"), hinted("a tag: a detached worktree pinned at it", "\r")...), reportKey(t, &out, "wt add", "x"),
+		ovKeys(t, &out, "wt add: done", 2, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -517,15 +517,15 @@ func TestHomeAddWorktreeForBranchAndTag(t *testing.T) {
 		t.Errorf("branch %q", got)
 	}
 	o2 := out.String()
-	for _, want := range []string{"New worktree of alpha", filepath.Join(repo, "topic-y") + "\n", "(tag v1)", "add: done"} {
+	for _, want := range []string{"New worktree of alpha", filepath.Join(repo, "topic-y") + "\n", "(tag v1)", "wt add: done"} {
 		if !strings.Contains(o2, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, o2)
 		}
 	}
 	// esc in the prompt cancels and returns to the overview.
 	out = syncBuffer{}
-	errs, code = runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("x", "\x1b"), ovKeys(t, &out, "add: cancelled", 1, "q")), &out)
-	if code != 0 || !strings.Contains(out.String(), "add: cancelled") || exists(filepath.Join(repo, "x")) {
+	errs, code = runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("x", "\x1b"), ovKeys(t, &out, "wt add: cancelled", 1, "q")), &out)
+	if code != 0 || !strings.Contains(out.String(), "wt add: cancelled") || exists(filepath.Join(repo, "x")) {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 }
@@ -540,8 +540,8 @@ func TestHomeSelectAllAndNoneAndAddWithW(t *testing.T) {
 	in := newScript(t, false,
 		ovKeys(t, &out, "STATE", 1, "a", "f"), keys(), reportKey(t, &out, "fetch", "x"),
 		ovKeys(t, &out, "fetch: done", 1, "a", "n", "f"), keys(), reportKey(t, &out, "fetch", "x"),
-		ovKeys(t, &out, "fetch: done", 2, "w"), keys("t", "o", "p", "i", "c", "/", "z", "\r"), reportKey(t, &out, "add", "x"),
-		ovKeys(t, &out, "add: done", 1, "q"))
+		ovKeys(t, &out, "fetch: done", 2, "w"), keys("t", "o", "p", "i", "c", "/", "z", "\r"), reportKey(t, &out, "wt add", "x"),
+		ovKeys(t, &out, "wt add: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -566,11 +566,11 @@ func TestHomeScriptSegmentsBelongToTheirProgram(t *testing.T) {
 	e, alpha, _, _, _ := homeBundle(t)
 	var out syncBuffer
 	q := keys("q")
-	q[0].wait = waitOutput(t, &out, "add: done")
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("x", "y", "\r"), reportKey(t, &out, "add", "x"), q)
+	q[0].wait = waitOutput(t, &out, "wt add: done")
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("x", "y", "\r"), reportKey(t, &out, "wt add", "x"), q)
 	in.holdFirstEnd = true
 	errs, code := runHomeWith(t, e.deps(), in, &out)
-	if code != 0 || !strings.Contains(out.String(), "add: done") || !exists(filepath.Join(filepath.Dir(alpha), "xy", ".git")) {
+	if code != 0 || !strings.Contains(out.String(), "wt add: done") || !exists(filepath.Join(filepath.Dir(alpha), "xy", ".git")) {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 }
@@ -583,16 +583,16 @@ func TestHomeAddWorktreeFailureIsShownAndReturns(t *testing.T) {
 	var out syncBuffer
 	// main is the primary's branch: wt add refuses it.
 	errs, code := runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("m", "a", "i", "n", "\r"),
-		reportKey(t, &out, "add", "x"), ovKeys(t, &out, "add failed", 1, "q")), &out)
+		reportKey(t, &out, "wt add", "x"), ovKeys(t, &out, "wt add failed", 1, "q")), &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 	o := out.String()
-	if !strings.Contains(errs, "sheaf: ") || !strings.Contains(o, "add failed: ") {
+	if !strings.Contains(errs, "sheaf: ") || !strings.Contains(o, "wt add failed: ") {
 		t.Fatalf("failure not reported, or not on stderr\nstdout:\n%s\nstderr:\n%s", o, errs)
 	}
-	view, failed := strings.Index(o, "sheaf add: "), strings.Index(o, "add failed: ")
-	if strings.Count(o, "sheaf add: ") != 1 || view > failed || !strings.Contains(o[view:failed], "sheaf: ") {
+	view, failed := strings.Index(o, "sheaf wt add: "), strings.Index(o, "wt add failed: ")
+	if strings.Count(o, "sheaf wt add: ") != 1 || view > failed || !strings.Contains(o[view:failed], "sheaf: ") {
 		t.Fatalf("no report view with the error before the overview came back\nstdout:\n%s", o)
 	}
 }
@@ -605,14 +605,14 @@ func TestHomeFailureReportCtrlCAndEOF(t *testing.T) {
 	e, _, _, _, _ := homeBundle(t)
 	var out syncBuffer
 	errs, code := runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("m", "a", "i", "n", "\r"),
-		[]key{{keys: "\x03", wait: waitOutput(t, &out, "sheaf add: ")}}), &out)
-	if code != 130 || !strings.Contains(errs, "interrupted") || strings.Contains(out.String(), "add failed: ") {
+		[]key{{keys: "\x03", wait: waitOutput(t, &out, "sheaf wt add: ")}}), &out)
+	if code != 130 || !strings.Contains(errs, "interrupted") || strings.Contains(out.String(), "wt add failed: ") {
 		t.Fatalf("ctrl+c in the report view: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 	out = syncBuffer{}
 	errs, code = runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("m", "a", "i", "n", "\r"),
-		keys(), ovKeys(t, &out, "add failed", 1, "q")), &out)
-	if code != 0 || !strings.Contains(out.String(), "sheaf add: ") || !strings.Contains(out.String(), "add failed: ") {
+		keys(), ovKeys(t, &out, "wt add failed", 1, "q")), &out)
+	if code != 0 || !strings.Contains(out.String(), "sheaf wt add: ") || !strings.Contains(out.String(), "wt add failed: ") {
 		t.Fatalf("input ending in the report view: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 }
@@ -683,8 +683,8 @@ func TestHomeShowsReportAfterActionsThatRan(t *testing.T) {
 	in := newScript(t, false,
 		ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "x"),
 		ovKeys(t, &out, "fetch: done", 1, "w"), keys("x", "\x1b"),
-		ovKeys(t, &out, "add: cancelled", 1, "j", "r"), declineRemoval(t, &out),
-		ovKeys(t, &out, "remove: cancelled", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}}, reportKey(t, &out, "prune", "x"),
+		ovKeys(t, &out, "wt add: cancelled", 1, "j", "r"), declineRemoval(t, &out),
+		ovKeys(t, &out, "wt rm: cancelled", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}}, reportKey(t, &out, "prune", "x"),
 		ovKeys(t, &out, "prune: nothing to prune", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	o := out.String()
@@ -699,10 +699,10 @@ func TestHomeShowsReportAfterActionsThatRan(t *testing.T) {
 		t.Errorf("%d fetch report views, want one with the summary before the overview:\n%s", n, o)
 	}
 	prune := at("sheaf prune: ")
-	if n := strings.Count(o, "sheaf prune: "); n != 1 || prune < at("remove: cancelled") || !strings.Contains(o[prune:], "nothing to prune") || prune > at("prune: nothing to prune") {
+	if n := strings.Count(o, "sheaf prune: "); n != 1 || prune < at("wt rm: cancelled") || !strings.Contains(o[prune:], "nothing to prune") || prune > at("prune: nothing to prune") {
 		t.Errorf("%d prune report views, want one with its note after the cancelled actions:\n%s", n, o)
 	}
-	if strings.Contains(o, "sheaf add: ") || strings.Contains(o, "sheaf remove: ") {
+	if strings.Contains(o, "sheaf wt add: ") || strings.Contains(o, "sheaf wt rm: ") {
 		t.Errorf("report view after a cancelled action:\n%s", o)
 	}
 }
@@ -714,7 +714,7 @@ func TestHomeRemoveWorktreeConfirmsAndRefusesPrimary(t *testing.T) {
 	}
 	var out syncBuffer
 	// r on the primary is refused in the overview; then r on feat, confirmed.
-	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "r"), key{keys: "j", wait: waitOutput(t, &out, "primary checkout")}, key{keys: "r"}), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "remove", "x"), ovKeys(t, &out, "remove: done", 1, "q"))
+	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "r"), key{keys: "j", wait: waitOutput(t, &out, "primary checkout")}, key{keys: "r"}), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "wt rm", "x"), ovKeys(t, &out, "wt rm: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -722,7 +722,7 @@ func TestHomeRemoveWorktreeConfirmsAndRefusesPrimary(t *testing.T) {
 	if exists(feat) || !exists(alpha) {
 		t.Fatalf("feat not removed or primary removed\nstdout:\n%s\nstderr:\n%s", out.String(), errs)
 	}
-	for _, want := range []string{"primary checkout", "Remove worktree feat of alpha?", "remove: done"} {
+	for _, want := range []string{"primary checkout", "Remove worktree feat of alpha?", "wt rm: done"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out.String())
 		}
@@ -735,9 +735,9 @@ func TestHomeRemoveDeclinedKeepsWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out syncBuffer
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", "r"), declineRemoval(t, &out), ovKeys(t, &out, "remove: cancelled", 1, "q"))
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", "r"), declineRemoval(t, &out), ovKeys(t, &out, "wt rm: cancelled", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
-	if code != 0 || !exists(feat) || !strings.Contains(out.String(), "remove: cancelled") {
+	if code != 0 || !exists(feat) || !strings.Contains(out.String(), "wt rm: cancelled") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 }
@@ -851,7 +851,7 @@ func TestHomeRefusesRemovingOutsideWorktree(t *testing.T) {
 	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "/", "e", "l", "s", "e", "\r", "r"),
 		key{keys: "q", wait: waitOutput(t, &out, "outside its repository directory")}))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
-	if code != 0 || !exists(outside) || strings.Contains(out.String(), "remove failed") {
+	if code != 0 || !exists(outside) || strings.Contains(out.String(), "wt rm failed") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 }
@@ -905,14 +905,14 @@ func TestHomeKeepsSelectionAfterCancelledRemoval(t *testing.T) {
 	var out syncBuffer
 	in := newScript(t, false,
 		ovKeys(t, &out, "STATE", 1, "j", " ", "r"), declineRemoval(t, &out),
-		ovKeys(t, &out, "remove: cancelled", 1, "r"), ovKeys(t, &out, "[y/N]", 2, "y"), reportKey(t, &out, "remove", "x"),
-		ovKeys(t, &out, "remove: done", 1, "q"))
+		ovKeys(t, &out, "wt rm: cancelled", 1, "r"), ovKeys(t, &out, "[y/N]", 2, "y"), reportKey(t, &out, "wt rm", "x"),
+		ovKeys(t, &out, "wt rm: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || exists(feat) {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 	o := out.String()
-	cancelled := strings.Index(o, "remove: cancelled")
+	cancelled := strings.Index(o, "wt rm: cancelled")
 	if frame := o[strings.LastIndex(o[:cancelled], "STATE"):cancelled]; !strings.Contains(frame, "1/3 selected") {
 		t.Errorf("selection lost after the cancelled removal:\n%s", o)
 	}
