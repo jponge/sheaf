@@ -374,13 +374,38 @@ func homeAge(now, t time.Time) string {
 	return strconv.Itoa(max(1, int(d/(365*day)))) + "y"
 }
 
+// splitProblems splits the row keys targets into those of checkouts and
+// the names ("<repo>/<dir>", as the overview shows them) of the problem
+// rows.
+func (h *home) splitProblems(targets []string) (checkouts, problems []string) {
+	for _, k := range targets {
+		if p := h.rows[k].problem; p != nil {
+			problems = append(problems, p.Repo+"/"+filepath.Base(p.Path))
+		} else {
+			checkouts = append(checkouts, k)
+		}
+	}
+	return checkouts, problems
+}
+
+// skipsProblems reports whether the action name, on a selection, skips its
+// problem rows (see act) rather than being refused: update and remove,
+// whose Check (noProblem) refuses only a selection of problem rows alone.
+func skipsProblems(name string) bool { return name == "update" || name == "remove" }
+
 // actions are the actions of the overview.
 func (h *home) actions() []tui.OverviewAction {
+	// noProblem refuses targets that are all problem rows, naming them
+	// (the actions on a selection skip the problem rows among others, see
+	// act).
 	noProblem := func(targets []string) string {
-		for _, k := range targets {
-			if h.rows[k].problem != nil {
-				return "not available on a row with a problem (see `sheaf doctor`)"
+		checkouts, problems := h.splitProblems(targets)
+		if len(checkouts) == 0 && len(problems) > 0 {
+			rows := "problem row"
+			if len(problems) > 1 {
+				rows += "s"
 			}
+			return strings.Join(problems, ", ") + ": " + rows + ", see `sheaf doctor`"
 		}
 		return ""
 	}
@@ -388,7 +413,8 @@ func (h *home) actions() []tui.OverviewAction {
 		if why := noProblem(targets); why != "" {
 			return why
 		}
-		for _, k := range targets {
+		checkouts, _ := h.splitProblems(targets)
+		for _, k := range checkouts {
 			switch c := h.rows[k].checkout; {
 			case c.Primary:
 				return "the primary checkout cannot be removed (use `sheaf remove " + c.Repo + "`)"
@@ -461,11 +487,27 @@ func (h *home) cd(r homeRow) error {
 }
 
 // act runs the action name on targets and returns the message the next
-// overview displays.
+// overview displays. An action that skips problem rows (see
+// skipsProblems) runs on the other targets, and its message says which
+// problem rows it skipped: "update: done · skipped 1 problem row
+// (alpha/feat)".
 func (h *home) act(name string, targets []string) string {
 	h.action = name
 	h.unchanged = ""
 	h.output.Reset()
+	if !skipsProblems(name) {
+		return h.run(name, targets)
+	}
+	targets, skipped := h.splitProblems(targets)
+	msg := h.run(name, targets)
+	if len(skipped) > 0 {
+		msg += " · skipped " + countOf(len(skipped), "problem row", "problem rows") + " (" + strings.Join(skipped, ", ") + ")"
+	}
+	return msg
+}
+
+// run runs the action name on targets (see act).
+func (h *home) run(name string, targets []string) string {
 	var repos []string
 	for _, k := range targets {
 		if r := h.rows[k].repo(); !slices.Contains(repos, r) {

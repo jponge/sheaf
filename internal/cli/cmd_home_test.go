@@ -776,23 +776,69 @@ func TestHomePruneDoctorAndSync(t *testing.T) {
 	}
 }
 
-// Enter and u on a row with a problem (here a missing worktree of alpha,
-// the second row, below its primary) are refused in the overview, which
-// stays open.
+// Enter, u and r on a row with a problem (here a missing worktree of
+// alpha, the second row, below its primary) are refused in the overview,
+// which stays open, naming the row.
 func TestHomeRefusesEnterAndUpdateOnProblemRows(t *testing.T) {
 	t.Parallel()
-	for _, k := range []string{"\r", "u"} {
+	for _, k := range []string{"\r", "u", "r"} {
 		e, _, feat, _, _ := homeBundle(t)
 		if err := os.RemoveAll(feat); err != nil {
 			t.Fatal(err)
 		}
 		var out syncBuffer
 		in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "j", k),
-			key{keys: "q", wait: waitOutput(t, &out, "not available on a row with a problem")}))
+			key{keys: "q", wait: waitOutput(t, &out, problemRefusal)}))
 		errs, code := runHomeWith(t, e.deps(), in, &out)
-		if code != 0 || strings.Contains(out.String(), "Updating") || strings.HasSuffix(out.String(), feat+"\n") {
+		if code != 0 || strings.Contains(out.String(), "Updating") || strings.Contains(out.String(), "Remove worktree") || strings.HasSuffix(out.String(), feat+"\n") {
 			t.Fatalf("%q: exit %d\nstdout:\n%s\nstderr:\n%s", k, code, out.String(), errs)
 		}
+	}
+}
+
+// problemRefusal is the refusal of an action on the problem row of
+// homeBundle's feat worktree once deleted.
+const problemRefusal = "alpha/feat: problem row, see `sheaf doctor`"
+
+// u on a selection with a problem row (here every row, selected with a)
+// updates the other rows and says the problem row was skipped, naming it
+// (B52 A4).
+func TestHomeUpdateSkipsSelectedProblemRows(t *testing.T) {
+	t.Parallel()
+	e, alpha, feat, _, o := homeBundle(t)
+	if err := os.RemoveAll(feat); err != nil {
+		t.Fatal(err)
+	}
+	var out syncBuffer
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "a", "u"), keys(), reportKey(t, &out, "update", "x"),
+		ovKeys(t, &out, "update: done · skipped 1 problem row (alpha/feat)", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	if got, want := testutil.Git(t, alpha, "rev-parse", "HEAD"), testutil.Git(t, o.Path, "rev-parse", "main"); got != want {
+		t.Errorf("alpha not updated: HEAD %s, origin main %s\nstdout:\n%s", got, want, out.String())
+	}
+}
+
+// r on a selection with a problem row removes the selected worktrees and
+// says the problem row was skipped, naming it (B52 A4). The rows: alpha's
+// primary, other, the problem row of feat (after alpha's checkouts), beta.
+func TestHomeRemoveSkipsSelectedProblemRows(t *testing.T) {
+	t.Parallel()
+	e, alpha, feat, _, _ := homeBundle(t)
+	if err := os.RemoveAll(feat); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(filepath.Dir(alpha), "other")
+	testutil.Git(t, alpha, "worktree", "add", "-q", "-b", "other", other)
+	var out syncBuffer
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", " ", "j", " ", "r"),
+		[]key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "wt rm", "x"),
+		ovKeys(t, &out, "wt rm: done · skipped 1 problem row (alpha/feat)", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 || exists(other) {
+		t.Fatalf("exit %d, other exists: %v\nstdout:\n%s\nstderr:\n%s", code, exists(other), out.String(), errs)
 	}
 }
 
@@ -828,7 +874,7 @@ func TestHomeCopyRefusedOnProblemRowsAndNonTerminals(t *testing.T) {
 	}
 	var out syncBuffer
 	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "j", "y"),
-		key{keys: "k", wait: waitOutput(t, &out, "not available on a row with a problem")},
+		key{keys: "k", wait: waitOutput(t, &out, problemRefusal)},
 		key{keys: "y"},
 		key{keys: "q", wait: waitOutput(t, &out, "copy not available: the output is not a terminal, or TERM=dumb")}))
 	errs, code := runHomeWith(t, e.deps(), in, &out)

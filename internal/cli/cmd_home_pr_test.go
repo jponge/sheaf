@@ -65,7 +65,7 @@ func TestHomeRefusesPullRequestOnProblemAndNonGitHubRows(t *testing.T) {
 	}
 	var out syncBuffer
 	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "j", "#"),
-		key{keys: "q", wait: waitOutput(t, &out, "not available on a row with a problem")}))
+		key{keys: "q", wait: waitOutput(t, &out, problemRefusal)}))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || strings.Contains(out.String(), "Pull request of") {
 		t.Fatalf("problem row: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
