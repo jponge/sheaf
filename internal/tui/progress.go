@@ -92,8 +92,9 @@ type progressRow struct {
 // Progress is a bubbletea model displaying one row per unit of work (a
 // repository, a checkout) fed by RowUpdate messages: a spinner while
 // running, then a final marker (✓ done, - skipped or cancelled, ✗ failed,
-// ! interrupted) and a short message. The header shows the counts and the elapsed time,
-// then, once the rows are planned (PlannedMsg), a progress bar.
+// ! interrupted) and a short message. The header shows the counts and the
+// elapsed time, then, once the rows are planned (PlannedMsg), a progress
+// bar.
 //
 // ctrl+c does not quit: each press runs the interrupt function given to
 // WithInterrupt in a command (outside the event loop), and the view tells
