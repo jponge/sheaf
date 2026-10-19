@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -59,7 +60,7 @@ func printSummary(w io.Writer, s ops.Summary) error {
 		default:
 			status = "failed"
 			if r.Err != nil {
-				detail = firstLine(r.Err.Error())
+				detail = errorText(r.Err)
 			}
 		}
 		fmt.Fprintf(w, "%-8s %s", status, r.Repo)
@@ -70,6 +71,31 @@ func printSummary(w io.Writer, s ops.Summary) error {
 	}
 	fmt.Fprintf(w, "%d done, %d skipped, %d failed\n", s.Count(ops.StatusDone), s.Count(ops.StatusSkipped), s.Count(ops.StatusFailed))
 	return s.Err()
+}
+
+// errorLine returns err on one line, for the places that show one (the
+// overview message, progress rows, summary lines), and whether its full
+// text says more (the caller prints it elsewhere or points to it): the
+// Summary of a multi-line refusal (ops.RisksError,
+// ops.WorktreeRefusedError), wrapped or not, else the first line, without
+// a trailing colon when more lines follow (their introduction).
+func errorLine(err error) (line string, more bool) {
+	msg := err.Error()
+	var s interface{ Summary() string }
+	if errors.As(err, &s) {
+		return s.Summary(), true
+	}
+	line = firstLine(msg)
+	if line == msg {
+		return line, false
+	}
+	return strings.TrimSuffix(line, ":"), true
+}
+
+// errorText is the line of errorLine.
+func errorText(err error) string {
+	line, _ := errorLine(err)
+	return line
 }
 
 func firstLine(s string) string {

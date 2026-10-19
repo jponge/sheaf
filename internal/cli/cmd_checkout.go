@@ -215,7 +215,7 @@ func writeStatusTable(out io.Writer, r ops.StatusReport, paint func(tui.Level, s
 			// The state (last column) carries the error; the colored part is
 			// last so escapes do not disturb the alignment.
 			fmt.Fprintf(tw, "%s\t%s\t%s\t-\t-\t-\t-\t-\t-\t-\t-\t%s\n", c.Repo, displayDir(c.Checkout), branch,
-				paintWith(paint, tui.LevelFail, "error: "+firstLine(c.Err.Error())))
+				paintWith(paint, tui.LevelFail, "error: "+errorText(c.Err)))
 			continue
 		}
 		s := c.Status
@@ -442,7 +442,7 @@ func printUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error {
 				if detail != "" {
 					detail += ": "
 				}
-				detail += firstLine(u.Err.Error())
+				detail += errorText(u.Err)
 				if msg := u.Err.Error(); msg != firstLine(msg) {
 					details = append(details, displayName(u.Checkout)+":\n    "+strings.ReplaceAll(msg, "\n", "\n    "))
 				}
@@ -557,7 +557,7 @@ func runFailure(r ops.RunResult) string {
 	case !r.Started && r.Err != nil && errors.Is(r.Err, context.Canceled):
 		return "not started (interrupted)"
 	case r.Err != nil:
-		return firstLine(r.Err.Error())
+		return errorText(r.Err)
 	default:
 		return fmt.Sprintf("exit status %d", r.ExitCode)
 	}

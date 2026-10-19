@@ -118,7 +118,7 @@ func eventRow(e ops.Event, aside string) tui.RowUpdate {
 		case errors.Is(e.Err, context.Canceled) && strings.HasPrefix(e.Message, "not started"):
 			u.Message = "not started (interrupted)"
 		case e.Err != nil:
-			u.Message = firstLine(e.Err.Error())
+			u.Message = errorText(e.Err)
 		}
 	default:
 		if e.Phase == ops.PhaseWaitFastForward {

@@ -254,7 +254,7 @@ func (h *home) overview() (tui.Overview, error) {
 		p := &r.Problems[i]
 		key := "problem:" + p.Path
 		h.rows[key] = homeRow{problem: p}
-		rows = append(rows, tui.Row{Key: key, Cells: []string{p.Repo, filepath.Base(p.Path), "-", "", "problem: " + firstLine(p.Err.Error())}, Alert: true})
+		rows = append(rows, tui.Row{Key: key, Cells: []string{p.Repo, filepath.Base(p.Path), "-", "", "problem: " + errorText(p.Err)}, Alert: true})
 	}
 	// Checkouts and problems are each sorted by repository: the problem
 	// rows of a repository go after its checkouts, so that the rows of a
@@ -317,7 +317,7 @@ func homeLevel(c ops.CheckoutStatus) tui.Level {
 
 func homeState(c ops.CheckoutStatus) string {
 	if c.Err != nil {
-		return "error: " + firstLine(c.Err.Error())
+		return "error: " + errorText(c.Err)
 	}
 	s := c.Status
 	parts := []string{"clean"}
@@ -661,7 +661,9 @@ func (h *home) commandIn(dir string, args ...string) error {
 // the overview, with the command the action ran (see homeCommand):
 // "<command>: done", "<command>: <note>" when the command changed nothing
 // (e.g. "prune: nothing to prune"), "<command>: cancelled", "<command>
-// failed: <error>", or the counts when the action ran several times.
+// failed: <error>" (the error on one line, see errorLine, followed by
+// "(see report)" when the report has more), or the counts when the action
+// ran several times.
 func (h *home) outcome(name string, errs []error) string {
 	name = homeCommand(name)
 	var done, cancelled, failed int
@@ -685,7 +687,11 @@ func (h *home) outcome(name string, errs []error) string {
 	case len(errs) > 1:
 		return fmt.Sprintf("%s: %d done, %d cancelled, %d failed", name, done, cancelled, failed)
 	case failed > 0:
-		return name + " failed: " + firstLine(last.Error())
+		msg, more := errorLine(last)
+		if more {
+			msg += " (see report)"
+		}
+		return name + " failed: " + msg
 	case cancelled > 0:
 		return name + ": cancelled"
 	case h.unchanged != "":

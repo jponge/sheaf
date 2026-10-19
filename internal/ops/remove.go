@@ -132,6 +132,28 @@ func (e *RisksError) Error() string {
 	return sb.String()
 }
 
+// Summary returns the refusal on one line, for the places that show one
+// (see Error for the checkouts concerned and the command to run anyway):
+// "refusing to remove <repo>: " followed by the leading clause of each
+// problem (once) and the risks added up over the checkouts listed by
+// Error, without their details.
+func (e *RisksError) Summary() string {
+	var parts []string
+	var risks []gitx.Risk
+	for _, it := range e.Plan.Items {
+		if !it.Hard && (e.Force || !it.blocking()) {
+			continue
+		}
+		parts = appendNew(parts, problemHead(it.Problem))
+		for _, r := range it.Risks {
+			if !r.Informational() {
+				risks = append(risks, r)
+			}
+		}
+	}
+	return "refusing to remove " + e.Plan.Repo + ": " + strings.Join(append(parts, riskTotals(risks)...), ", ")
+}
+
 // command returns the command line of the refused removal with flag (see
 // CommandLine).
 func (e *RisksError) command(flag string) string {

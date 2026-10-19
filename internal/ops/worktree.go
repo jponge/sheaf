@@ -824,6 +824,74 @@ func (e *WorktreeRefusedError) Error() string {
 	return sb.String()
 }
 
+// Summary returns the refusal on one line, for the places that show one
+// (see Error for the details and the command to run anyway): "refusing to
+// remove <repo>/<dir>: " followed by the leading clause of each hard
+// problem, the blocking risks without their details, and the leading
+// clause of the unmerged branch, as listed by Error.
+func (e *WorktreeRefusedError) Summary() string {
+	what := e.Plan.Repo + "/" + e.Plan.Worktree.Dir
+	if e.Plan.Worktree.Outside || e.Plan.Worktree.Dir == "" {
+		what = e.Plan.Worktree.Path
+	}
+	var parts []string
+	for _, h := range e.Plan.Hard {
+		parts = appendNew(parts, problemHead(h))
+	}
+	if !e.Force {
+		parts = append(parts, riskTotals(e.Plan.Blocking())...)
+	}
+	if e.Plan.Unmerged != "" && !e.ForceDeleteBranch {
+		parts = appendNew(parts, problemHead(e.Plan.Unmerged))
+	}
+	return "refusing to remove " + what + ": " + strings.Join(parts, ", ")
+}
+
+// problemHead returns the leading clause of a refusal reason, for a
+// Summary: without a "refusing to remove <path>: " prefix, up to the first
+// "; ", " (" or ": " (what follows explains or tells what to do).
+func problemHead(p string) string {
+	if rest, ok := strings.CutPrefix(p, "refusing to remove "); ok {
+		if _, after, ok := strings.Cut(rest, ": "); ok {
+			p = after
+		}
+	}
+	end := len(p)
+	for _, sep := range []string{"; ", " (", ": "} {
+		if i := strings.Index(p, sep); i >= 0 && i < end {
+			end = i
+		}
+	}
+	return p[:end]
+}
+
+// riskTotals returns the risks of a Summary: their counts added up by
+// kind, in the order of first appearance, without details ("3 untracked
+// files").
+func riskTotals(risks []gitx.Risk) []string {
+	var kinds []gitx.RiskKind
+	counts := map[gitx.RiskKind]int{}
+	for _, r := range risks {
+		if _, ok := counts[r.Kind]; !ok {
+			kinds = append(kinds, r.Kind)
+		}
+		counts[r.Kind] += r.Count
+	}
+	out := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		out = append(out, gitx.Risk{Kind: k, Count: counts[k]}.String())
+	}
+	return out
+}
+
+// appendNew appends s to parts unless it is empty or already there.
+func appendNew(parts []string, s string) []string {
+	if s == "" || slices.Contains(parts, s) {
+		return parts
+	}
+	return append(parts, s)
+}
+
 // command returns the command line of the refused removal (see
 // CommandLine), with --force, -D (instead of -d) and --offline added as
 // asked; the worktree is selected by its directory.
