@@ -357,10 +357,13 @@ func (m MultiSelect) layout() layout {
 	}
 	chrome := func() int {
 		n := l.gaps
-		for _, shown := range []bool{l.title, l.filter, l.status, l.help} {
+		for _, shown := range []bool{l.title, l.filter, l.status} {
 			if shown {
 				n++
 			}
+		}
+		if l.help {
+			n += len(m.helpLines())
 		}
 		return n
 	}
@@ -406,6 +409,45 @@ func footer(gaps int, sections ...[]string) []string {
 			gaps--
 		}
 		lines = append(lines, s...)
+	}
+	return lines
+}
+
+// fitStatus returns how many of parts (none empty), joined with " · " into
+// a status line, to keep so that its truncation to width (0 = unknown)
+// leaves no dangling separator: a part cut off entirely is dropped with
+// the separator before it, as are the parts after it.
+func fitStatus(width int, parts []string) int {
+	if len(parts) == 0 {
+		return 0
+	}
+	n, w := 1, lipgloss.Width(parts[0])
+	for ; n < len(parts); n++ {
+		if width > 0 && w+lipgloss.Width(" · ") >= width {
+			break
+		}
+		w += lipgloss.Width(" · " + parts[n])
+	}
+	return n
+}
+
+// wrapHelp renders the key help of bindings on as many lines of width as
+// needed so that none is cut off (on one line when the width is unknown);
+// only a binding wider than the width alone is truncated by h.
+func wrapHelp(h help.Model, width int, bindings []key.Binding) []string {
+	unbounded := h // measures lines without the ellipsis
+	unbounded.SetWidth(0)
+	var lines []string
+	var line []key.Binding
+	for _, b := range bindings {
+		if len(line) > 0 && width > 0 && lipgloss.Width(unbounded.ShortHelpView(append(slices.Clone(line), b))) > width {
+			lines = append(lines, h.ShortHelpView(line))
+			line = nil
+		}
+		line = append(line, b)
+	}
+	if len(line) > 0 {
+		lines = append(lines, h.ShortHelpView(line))
 	}
 	return lines
 }
@@ -468,17 +510,11 @@ func (m MultiSelect) View() tea.View {
 
 	var status, help []string
 	if l.status {
-		status = []string{st.Status.Render(m.status())}
+		parts := m.status()
+		status = []string{st.Status.Render(joinStatus(parts[:fitStatus(m.width, parts)]...))}
 	}
-	switch {
-	case !l.help:
-	case m.filtering:
-		help = []string{m.help.ShortHelpView([]key.Binding{m.keys.ApplyFilter, m.keys.ClearFilter})}
-	default:
-		help = []string{m.help.ShortHelpView([]key.Binding{
-			m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.All, m.keys.None,
-			m.keys.Filter, m.keys.Confirm, m.keys.Cancel,
-		})}
+	if l.help {
+		help = m.helpLines()
 	}
 	lines = append(lines, footer(l.gaps, status, help)...)
 
@@ -489,6 +525,18 @@ func (m MultiSelect) View() tea.View {
 		}
 	}
 	return tea.NewView(strings.Join(lines, "\n"))
+}
+
+// helpLines renders the key help, wrapped to the width so that no key is
+// cut off.
+func (m MultiSelect) helpLines() []string {
+	if m.filtering {
+		return wrapHelp(m.help, m.width, []key.Binding{m.keys.ApplyFilter, m.keys.ClearFilter})
+	}
+	return wrapHelp(m.help, m.width, []key.Binding{
+		m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.All, m.keys.None,
+		m.keys.Filter, m.keys.Confirm, m.keys.Cancel,
+	})
 }
 
 func (m MultiSelect) renderRow(row int) string {
@@ -537,7 +585,8 @@ func (m MultiSelect) renderRow(row int) string {
 	return cursor + line
 }
 
-func (m MultiSelect) status() string {
+// status returns the parts of the status line.
+func (m MultiSelect) status() []string {
 	selected, total, locked := len(m.SelectedKeys()), len(m.items), 0
 	if m.lockedLabel != "" {
 		// Only the enabled items are the user's choices.
@@ -554,15 +603,15 @@ func (m MultiSelect) status() string {
 			}
 		}
 	}
-	s := fmt.Sprintf("%d/%d selected", selected, total)
+	parts := []string{fmt.Sprintf("%d/%d selected", selected, total)}
 	if locked > 0 {
-		s += fmt.Sprintf(" · %d %s", locked, m.lockedLabel)
+		parts = append(parts, fmt.Sprintf("%d %s", locked, m.lockedLabel))
 	}
 	if m.filter != "" {
-		s += fmt.Sprintf(" · %d shown", len(m.visible))
+		parts = append(parts, fmt.Sprintf("%d shown", len(m.visible)))
 	}
 	if h := m.listHeight(); len(m.visible) > h {
-		s += fmt.Sprintf(" · rows %d-%d of %d", m.offset+1, m.offset+h, len(m.visible))
+		parts = append(parts, fmt.Sprintf("rows %d-%d of %d", m.offset+1, m.offset+h, len(m.visible)))
 	}
-	return s
+	return parts
 }

@@ -601,3 +601,27 @@ func TestOverviewTruncatesTheStatusLine(t *testing.T) {
 		t.Errorf("view:\n%s", view(m))
 	}
 }
+
+// Truncating the status line to the width never leaves a separator (or
+// its start) at its end, whichever part is cut off: the number
+// shown, the scroll position or the message.
+func TestOverviewNarrowStatusPartsLeaveNoDanglingSeparator(t *testing.T) {
+	t.Parallel()
+	var rows []Row
+	for i := range 25 {
+		rows = append(rows, Row{Key: fmt.Sprint(i), Cells: []string{fmt.Sprintf("r%02d", i), "main"}})
+	}
+	for _, msg := range []string{"", "prune: nothing to prune"} {
+		for _, f := range []string{"", "r", "zzz"} {
+			var ov tea.Model = NewOverview("t", []string{"REPO", "DIR"}, rows, ovActions()).WithMessage(msg).WithFilter(f)
+			wide, _ := ov.Update(tea.WindowSizeMsg{Width: 200, Height: 10})
+			full := statusLine(t, wide)
+			for w := 10; w <= 40; w++ {
+				m, _ := ov.Update(tea.WindowSizeMsg{Width: w, Height: 10})
+				if l := statusLine(t, m); danglingSeparator(full, l) {
+					t.Errorf("message %q, filter %q, width %d: status line %q", msg, f, w, l)
+				}
+			}
+		}
+	}
+}

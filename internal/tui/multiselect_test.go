@@ -102,7 +102,7 @@ func TestMultiSelectCursorMovement(t *testing.T) {
 }
 
 func TestMultiSelectPageKeysMoveByViewportHeight(t *testing.T) {
-	m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 80, Height: 9}) // 4 list rows
+	m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 100, Height: 9}) // 4 list rows
 	m, _ = press(m, "pgdown")
 	if l := currentLine(t, m); !strings.Contains(l, "item04") {
 		t.Fatalf("after pgdown cursor line = %q, want item04", l)
@@ -282,7 +282,7 @@ func TestMultiSelectFilterModeView(t *testing.T) {
 
 func TestMultiSelectViewportKeepsCursorVisible(t *testing.T) {
 	height := 9
-	m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 80, Height: height})
+	m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 100, Height: height})
 	check := func(when string, in, out []string) {
 		t.Helper()
 		v := view(m)
@@ -309,7 +309,7 @@ func TestMultiSelectViewportKeepsCursorVisible(t *testing.T) {
 	check("cursor at 15", []string{"item15", "item18"}, []string{"item14", "item19"})
 	// Growing the window shows more rows.
 	height = 30
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: height})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: height})
 	check("tall window", []string{"item00", "item19"}, nil)
 }
 
@@ -385,7 +385,7 @@ func TestMultiSelectArrowsNavigateInFilterMode(t *testing.T) {
 }
 
 func TestMultiSelectStatusShowsScrollPosition(t *testing.T) {
-	m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 80, Height: 9})
+	m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 100, Height: 9})
 	m, _ = press(m, "end")
 	if !strings.Contains(view(m), "rows 17-20 of 20") {
 		t.Fatalf("status lacks scroll position:\n%s", view(m))
@@ -412,7 +412,7 @@ func TestMultiSelectViewStripsControlCharacters(t *testing.T) {
 		{Key: "b", Label: "two\nlines", Detail: "cr\rhere\ttab"},
 	}
 	m := tea.Model(NewMultiSelect("Ti\x1b[2Jtle\n"+injectedSGR, items))
-	for _, size := range []tea.Msg{nil, tea.WindowSizeMsg{Width: 80, Height: 20}} {
+	for _, size := range []tea.Msg{nil, tea.WindowSizeMsg{Width: 100, Height: 20}} {
 		if size != nil {
 			m, _ = m.Update(size)
 		}
@@ -553,7 +553,8 @@ func TestMultiSelectStatusCountsLockedItemsApart(t *testing.T) {
 }
 
 // msShape classifies the lines of a MultiSelect view: T title, F filter,
-// R row, S status line, K key help, ? other.
+// R row, S status line, K key help (with "esc/q cancel" alone, wrapped),
+// ? other.
 func msShape(m tea.Model) string {
 	row := regexp.MustCompile(`^(> |  )\[[ x+-]\] `)
 	status := regexp.MustCompile(`^\d+/\d+ selected`)
@@ -567,7 +568,7 @@ func msShape(m tea.Model) string {
 			return "R"
 		case status.MatchString(l):
 			return "S"
-		case strings.Contains(l, " • "):
+		case strings.Contains(l, " • "), l == "esc/q cancel":
 			return "K"
 		}
 		return "?"
@@ -577,7 +578,7 @@ func msShape(m tea.Model) string {
 // A blank line separates the rows from the status line, and another one
 // separates it from the key help.
 func TestMultiSelectSpacesTheFooter(t *testing.T) {
-	for _, size := range []tea.Msg{nil, tea.WindowSizeMsg{Width: 80, Height: 24}} {
+	for _, size := range []tea.Msg{nil, tea.WindowSizeMsg{Width: 100, Height: 24}} {
 		var m tea.Model = NewMultiSelect("Pick", abc())
 		if size != nil {
 			m, _ = m.Update(size)
@@ -603,7 +604,7 @@ func TestMultiSelectDropsSpacingToFitWithoutScrolling(t *testing.T) {
 		5: "T R _ S K",
 	}
 	for h := 5; h <= 8; h++ {
-		m, _ := NewMultiSelect("Pick", abc()).Update(tea.WindowSizeMsg{Width: 80, Height: h})
+		m, _ := NewMultiSelect("Pick", abc()).Update(tea.WindowSizeMsg{Width: 100, Height: h})
 		v := view(m)
 		if got := msShape(m); got != want[h] || lineCount(v) > h {
 			t.Errorf("height %d: shape %q, want %q:\n%s", h, got, want[h], v)
@@ -627,11 +628,137 @@ func TestMultiSelectShortTerminalDropsSpacingFirst(t *testing.T) {
 		1: "R",
 	}
 	for h := 1; h <= 7; h++ {
-		m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 80, Height: h})
+		m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 100, Height: h})
 		m, _ = press(m, "end")
 		v := view(m)
 		if got := msShape(m); got != want[h] || lineCount(v) > h || !strings.Contains(v, "> [ ] item19") {
 			t.Errorf("height %d: shape %q, want %q:\n%s", h, got, want[h], v)
 		}
+	}
+}
+
+// The key help wraps onto as many lines as the width needs, so that no key
+// is cut off (B29: "esc/q cancel" was lost at 80 columns), and the wrapped
+// lines count in the layout: the view never exceeds the height.
+func TestMultiSelectKeyHelpWrapsToWidth(t *testing.T) {
+	list := []string{"↑/k up", "↓/j down", "space toggle", "a all", "n none", "/ filter", "enter confirm", "esc/q cancel"}
+	filter := []string{"enter apply filter", "esc clear filter"}
+	for w := 20; w <= 80; w++ {
+		var m tea.Model = NewMultiSelect("Pick", abc())
+		m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 24})
+		for _, mode := range []struct {
+			name string
+			keys []string
+		}{{"list", list}, {"filter", filter}} {
+			if mode.name == "filter" {
+				m, _ = press(m, "/")
+			}
+			v := view(m)
+			for _, k := range mode.keys {
+				if !strings.Contains(v, k) {
+					t.Errorf("width %d, %s mode: key help %q missing:\n%s", w, mode.name, k, v)
+				}
+			}
+			for _, l := range strings.Split(v, "\n") {
+				if lipgloss.Width(l) > w || strings.Contains(l, "…") {
+					t.Errorf("width %d, %s mode: line %q", w, mode.name, l)
+				}
+			}
+		}
+	}
+	for h := 1; h <= 16; h++ {
+		var m tea.Model = NewMultiSelect("Pick", manyItems(20))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 30, Height: h})
+		m, _ = press(m, "end")
+		if v := view(m); lineCount(v) > h || !strings.Contains(v, "> [ ] item19") {
+			t.Errorf("width 30, height %d: %d lines:\n%s", h, lineCount(v), v)
+		}
+	}
+	// At 80 columns the help takes two lines; on a short terminal the
+	// blank lines go first, then the help, title and status lines.
+	want := map[int]string{
+		9: "T R R R _ S _ K K",
+		8: "T R R _ S _ K K",
+		7: "T R _ S _ K K",
+		6: "T R _ S K K",
+		5: "T R S K K",
+		4: "T R R S",
+		3: "T R S",
+		2: "R S",
+		1: "R",
+	}
+	for h := 1; h <= 9; h++ {
+		m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 80, Height: h})
+		m, _ = press(m, "end")
+		if got := msShape(m); got != want[h] {
+			t.Errorf("width 80, height %d: shape %q, want %q:\n%s", h, got, want[h], view(m))
+		}
+	}
+}
+
+// statusLine returns the line of m's view that reads "N/M selected...",
+// possibly truncated.
+func statusLine(t *testing.T, m tea.Model) string {
+	t.Helper()
+	for _, l := range strings.Split(view(m), "\n") {
+		if regexp.MustCompile(`^\d+/\d+ `).MatchString(l) {
+			return l
+		}
+	}
+	t.Fatalf("no status line:\n%s", view(m))
+	return ""
+}
+
+// danglingSeparator reports whether the status line l, a truncation of
+// the status line full, ends with a separator " · " of full (or its start)
+// after whole parts.
+func danglingSeparator(full, l string) bool {
+	parts := strings.Split(full, " · ")
+	for i := 1; i < len(parts); i++ {
+		prefix := strings.Join(parts[:i], " · ")
+		for _, sep := range []string{" ", " ·", " · "} {
+			if l == prefix+sep {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Truncating the status line to the width never leaves a separator (or
+// its start) at its end: a part cut off entirely goes with the separator
+// before it, and parts cut partly stay.
+func TestMultiSelectNarrowStatusLineHasNoDanglingSeparator(t *testing.T) {
+	items := manyItems(25)
+	items[0].Disabled, items[0].Selected = true, true
+	type tc struct {
+		name string
+		m    tea.Model
+	}
+	var cases []tc
+	for _, locked := range []bool{false, true} {
+		ms := NewMultiSelect("Pick", items)
+		if locked {
+			ms = ms.WithLockedLabel("present")
+		}
+		cases = append(cases, tc{fmt.Sprintf("scrolling, locked %v", locked), ms})
+		filtered, _ := press(ms, "/", "i", "t", "enter")
+		cases = append(cases, tc{fmt.Sprintf("filtered, locked %v", locked), filtered})
+	}
+	empty, _ := press(NewMultiSelect("Pick", nil), "/", "x", "enter")
+	cases = append(cases, tc{"empty, filtered", empty})
+	for _, c := range cases {
+		wide, _ := c.m.Update(tea.WindowSizeMsg{Width: 200, Height: 10})
+		full := statusLine(t, wide)
+		for w := 10; w <= 40; w++ {
+			m, _ := c.m.Update(tea.WindowSizeMsg{Width: w, Height: 10})
+			if l := statusLine(t, m); danglingSeparator(full, l) {
+				t.Errorf("%s, width %d: status line %q", c.name, w, l)
+			}
+		}
+	}
+	m, _ := NewMultiSelect("Pick", manyItems(25)).Update(tea.WindowSizeMsg{Width: 17, Height: 10})
+	if !hasLine(view(m), "0/25 selected · r") {
+		t.Errorf("width 17: part cut partly not kept:\n%s", view(m))
 	}
 }

@@ -528,12 +528,16 @@ func (m Overview) View() tea.View {
 	}
 	var status, help []string
 	if l.status {
-		s := st.Status.Render(m.status())
-		line := joinStatus(s, sanitize(m.message))
-		// A message cut off entirely by the truncation to the width below
-		// leaves no dangling separator.
-		if m.width > 0 && lipgloss.Width(lipgloss.NewStyle().MaxWidth(m.width).Render(line)) <= lipgloss.Width(s+" · ") {
-			line = s
+		// The message is the last part, unstyled.
+		parts := m.status()
+		n := len(parts)
+		if msg := sanitize(m.message); msg != "" {
+			parts = append(parts, msg)
+		}
+		k := fitStatus(m.width, parts)
+		line := st.Status.Render(joinStatus(parts[:min(k, n)]...))
+		if k > n {
+			line = joinStatus(line, parts[n])
 		}
 		status = []string{line}
 	}
@@ -559,21 +563,11 @@ func (m Overview) helpLines() []string {
 		return []string{m.help.ShortHelpView([]key.Binding{m.keys.ApplyFilter, m.keys.ClearFilter})}
 	}
 	lines := []string{m.help.ShortHelpView([]key.Binding{m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.All, m.keys.None, m.keys.Filter, m.keys.Cancel})}
-	unbounded := m.help // measures lines without the ellipsis
-	unbounded.SetWidth(0)
-	var line []key.Binding
+	var actions []key.Binding
 	for _, a := range m.actions {
-		b := key.NewBinding(key.WithKeys(a.Key), key.WithHelp(a.Key, a.Help))
-		if len(line) > 0 && m.width > 0 && lipgloss.Width(unbounded.ShortHelpView(append(slices.Clone(line), b))) > m.width {
-			lines = append(lines, m.help.ShortHelpView(line))
-			line = nil
-		}
-		line = append(line, b)
+		actions = append(actions, key.NewBinding(key.WithKeys(a.Key), key.WithHelp(a.Key, a.Help)))
 	}
-	if len(line) > 0 {
-		lines = append(lines, m.help.ShortHelpView(line))
-	}
-	return lines
+	return append(lines, wrapHelp(m.help, m.width, actions)...)
 }
 
 func (m Overview) renderRow(i int, widths []int) string {
@@ -598,19 +592,20 @@ func (m Overview) renderRow(i int, widths []int) string {
 	return cursor + box + " " + text
 }
 
-func (m Overview) status() string {
+// status returns the parts of the status line, without the message.
+func (m Overview) status() []string {
 	n := 0
 	for _, r := range m.rows {
 		if m.selected[r.Key] {
 			n++
 		}
 	}
-	s := fmt.Sprintf("%d/%d selected", n, len(m.rows))
+	parts := []string{fmt.Sprintf("%d/%d selected", n, len(m.rows))}
 	if m.filter != "" {
-		s += fmt.Sprintf(" · %d shown", len(m.visible))
+		parts = append(parts, fmt.Sprintf("%d shown", len(m.visible)))
 	}
 	if h := m.layout().rows; len(m.visible) > h {
-		s += fmt.Sprintf(" · rows %d-%d of %d", m.offset+1, m.offset+h, len(m.visible))
+		parts = append(parts, fmt.Sprintf("rows %d-%d of %d", m.offset+1, m.offset+h, len(m.visible)))
 	}
-	return s
+	return parts
 }
