@@ -13,6 +13,8 @@ on a terminal and as a plain CLI otherwise.
 Worktrees are not recorded in `sheaf.yaml`: git (`git worktree list`) is the
 source of truth, so worktrees created or removed with plain git are picked up.
 
+![sheaf demo: the home screen lists the checkouts of a bundle; the primary checkouts are filtered and selected, fetched, then updated; a worktree of a new branch is added, enter changes the shell to it, and sheaf status lists every checkout](demo/sheaf.gif)
+
 ## Contents
 
 - [Install](#install)
@@ -716,6 +718,8 @@ make vet                             # go vet ./... and staticcheck (pinned, run
 make vet-windows                     # the same for the Windows build (GOOS=windows)
 make test-symlinked-tmp              # suite with TMPDIR behind a symbolic link (macOS /var case)
 make test-shells SHELLS_ROOT=DIR     # cli tests with fish and zsh required
+make demo                            # record demo/sheaf.gif with vhs
+make demo-check                      # check the demo bundle and the tape, without vhs
 ```
 
 `make test` skips the fish and zsh tests when those shells are missing.
@@ -728,6 +732,27 @@ Tests use real git only against temporary local repositories (bare
 configuration; they never use the network, never push anywhere else, and
 never run `gh` (the hosting layer is tested with a fake and recorded JSON
 fixtures).
+
+### Regenerating the demo
+
+`demo/sheaf.gif` is recorded by [vhs](https://github.com/charmbracelet/vhs)
+from `demo/sheaf.tape`. vhs needs `ttyd` and `ffmpeg` on `PATH`:
+
+```sh
+brew install vhs ttyd ffmpeg                         # macOS (Homebrew)
+go install github.com/charmbracelet/vhs@v0.12.1      # or with Go, plus ttyd and ffmpeg
+make demo                                            # writes demo/sheaf.gif
+```
+
+`make demo` builds sheaf into a temporary directory put first on `PATH`,
+and `demo/setup.sh` creates a throwaway bundle in `DEMO_DIR` (default
+`/tmp/sheaf-demo`, removed afterwards): three repositories with local bare
+remotes (`file://` URLs), worktrees, a checkout behind its remote and a
+dirty one. The recording shell gets its own `HOME` and git configuration
+and the `sheaf` shell function; nothing uses the network, gh or your
+configuration. `make demo-check` runs the steps of the tape in plain mode
+against such a bundle (`demo/check.sh`) and checks the tape with vhs's
+parser, without ttyd or ffmpeg.
 
 ## License
 

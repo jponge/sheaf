@@ -1,7 +1,7 @@
 VERSION ?= dev
 LDFLAGS := -X github.com/jponge/sheaf/internal/cli.Version=$(VERSION)
 
-.PHONY: build install test test-shells test-symlinked-tmp vet vet-windows
+.PHONY: build install test test-shells test-symlinked-tmp vet vet-windows demo demo-check
 
 # staticcheck runs at a pinned version through `go run` (downloaded into the
 # module cache on first use): it is a tool, not a dependency of the module.
@@ -63,3 +63,27 @@ vet:
 vet-windows:
 	GOOS=windows go vet ./...
 	go run -exec 'env GOOS=windows' $(STATICCHECK) ./...
+
+# Records demo/sheaf.gif with vhs (needs vhs, ttyd and ffmpeg on PATH; see
+# the README). demo/setup.sh creates the demo bundle in DEMO_DIR (replaced if
+# an earlier run left it; another existing directory is refused and kept),
+# with sheaf built into a temporary directory first on PATH; both are
+# removed afterwards. Nothing uses the network or the user's configuration.
+DEMO_DIR ?= /tmp/sheaf-demo
+demo:
+	@set -e; bin=$$(mktemp -d) && \
+	trap 'rm -rf "$$bin"; if [ -e "$(DEMO_DIR)/.sheaf-demo" ]; then rm -rf "$(DEMO_DIR)"; fi' EXIT; \
+	go build -ldflags "$(LDFLAGS)" -o "$$bin/sheaf" ./cmd/sheaf; \
+	PATH="$$bin:$$PATH" demo/setup.sh "$(DEMO_DIR)"; \
+	PATH="$$bin:$$PATH" SHEAF_DEMO_DIR="$(DEMO_DIR)" vhs demo/sheaf.tape
+
+# Checks the demo without vhs: demo/check.sh runs the steps of the tape in
+# plain mode against a fresh demo bundle (temporary, offline), and vhs's
+# parser validates the tape (vhs at a pinned version through `go run`, like
+# staticcheck; ttyd and ffmpeg are not needed).
+VHS := github.com/charmbracelet/vhs@v0.12.1
+demo-check:
+	@set -e; bin=$$(mktemp -d) && trap 'rm -rf "$$bin"' EXIT; \
+	go build -o "$$bin/sheaf" ./cmd/sheaf; \
+	PATH="$$bin:$$PATH" demo/check.sh; \
+	go run $(VHS) validate demo/sheaf.tape
