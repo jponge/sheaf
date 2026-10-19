@@ -43,7 +43,7 @@ jobs:
       - name: Vet
         run: |
           make vet
-          GOOS=windows go vet ./...
+          make vet-windows
 
       - name: Test
         run: make test

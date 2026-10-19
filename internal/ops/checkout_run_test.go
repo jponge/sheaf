@@ -287,6 +287,13 @@ func TestRunCommandCancelTerminatesProcessGroup(t *testing.T) {
 	}
 }
 
+// resetCommands re-enables starting commands after KillCommands.
+func resetCommands() {
+	runningCommands.Lock()
+	runningCommands.stopped = false
+	runningCommands.Unlock()
+}
+
 func TestKillCommandsKillsRunningGroups(t *testing.T) {
 	t.Cleanup(resetCommands)
 	f, _ := threeCheckouts(t)

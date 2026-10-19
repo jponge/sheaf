@@ -120,7 +120,7 @@ func TestWorktreeAddTagCLI(t *testing.T) {
 			t.Errorf("wt rm %s: exit %d, stderr:\n%s", flag, code, errs)
 		}
 	}
-	out, errs, code = e.run(t, "wt", "rm", "a", "release/1.0", "--offline")
+	_, errs, code = e.run(t, "wt", "rm", "a", "release/1.0", "--offline")
 	if code == 0 || !strings.Contains(errs, "[tag release/1.0]") {
 		t.Errorf("wt rm without --yes: exit %d, stderr:\n%s", code, errs)
 	}

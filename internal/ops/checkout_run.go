@@ -397,11 +397,3 @@ func runIn(ctx context.Context, c Checkout, argv []string, out io.Writer, grace 
 	}
 	return res
 }
-
-// resetCommands re-enables starting commands after KillCommands (tests
-// only).
-func resetCommands() {
-	runningCommands.Lock()
-	runningCommands.stopped = false
-	runningCommands.Unlock()
-}

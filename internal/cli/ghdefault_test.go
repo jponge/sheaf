@@ -23,6 +23,7 @@ func githubClone(t *testing.T, dir string) {
 	testutil.Git(t, dir, "remote", "set-url", "origin", "https://github.com/o/"+filepath.Base(dir)+".git")
 }
 
+//lint:ignore ST1005 reproduces gh's stderr verbatim, final period included.
 var errGHUnauthenticated = fmt.Errorf("gh repo set-default: %w: exit status 4: To get started with GitHub CLI, please run:  gh auth login\n"+
 	"Alternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.", hosting.ErrGHNotAuthenticated)
 

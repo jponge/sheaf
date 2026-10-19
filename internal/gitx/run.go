@@ -308,10 +308,3 @@ func KillAll() int {
 	}
 	return n
 }
-
-// resetStopped re-enables starting processes after KillAll (tests only).
-func resetStopped() {
-	running.gate.Lock()
-	running.stopped = false
-	running.gate.Unlock()
-}

@@ -1,7 +1,11 @@
 VERSION ?= dev
 LDFLAGS := -X github.com/jponge/sheaf/internal/cli.Version=$(VERSION)
 
-.PHONY: build install test test-shells test-symlinked-tmp vet
+.PHONY: build install test test-shells test-symlinked-tmp vet vet-windows
+
+# staticcheck runs at a pinned version through `go run` (downloaded into the
+# module cache on first use): it is a tool, not a dependency of the module.
+STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.2
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/sheaf ./cmd/sheaf
@@ -52,3 +56,10 @@ test-shells:
 
 vet:
 	go vet ./...
+	go run $(STATICCHECK) ./...
+
+# Vets the Windows build: staticcheck is built for the host and analyses the
+# code with GOOS=windows.
+vet-windows:
+	GOOS=windows go vet ./...
+	go run -exec 'env GOOS=windows' $(STATICCHECK) ./...

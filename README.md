@@ -645,7 +645,8 @@ These commands accept `--json`; each document has a `"version": 1` field.
 ```sh
 make build                           # bin/sheaf (VERSION=... to stamp)
 make test                            # go test -race ./...
-make vet                             # go vet ./...
+make vet                             # go vet ./... and staticcheck (pinned, run with go run)
+make vet-windows                     # the same for the Windows build (GOOS=windows)
 make test-symlinked-tmp              # suite with TMPDIR behind a symbolic link (macOS /var case)
 make test-shells SHELLS_ROOT=DIR     # cli tests with fish and zsh required
 ```
