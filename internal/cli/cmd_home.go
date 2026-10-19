@@ -63,7 +63,7 @@ func installHome(root *cobra.Command, d Deps) {
 // checkout is written to the file named by $SHEAF_CD_FILE, set by the shell
 // function of shell-init, which then changes the directory; without it the
 // path is printed, with a hint to add the shell function (the key help
-// then says "print path" rather than "cd"). On a terminal, the programs of
+// then says "path" rather than "cd"). On a terminal, the programs of
 // the home screen and of its actions set the window title (see homeTitle);
 // bubbletea clears it when each program ends.
 func runHome(c *cobra.Command, d Deps) error {
@@ -486,7 +486,7 @@ func (h *home) actions() []tui.OverviewAction {
 	// Without the shell function, enter prints the path (see cd).
 	cdHelp := "cd"
 	if h.d.getenv(cdFileVar) == "" {
-		cdHelp = "print path"
+		cdHelp = "path"
 	}
 	return []tui.OverviewAction{
 		{Key: "enter", Name: "cd", Help: cdHelp, Short: true, Scope: tui.ScopeCurrent, Check: noProblem},

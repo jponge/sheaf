@@ -431,7 +431,7 @@ func TestHomeEnterPrintsPath(t *testing.T) {
 }
 
 // Without the shell function (no SHEAF_CD_FILE), the key help labels enter
-// "print path", and after the path, alone on standard output (scripts may
+// "path", and after the path, alone on standard output (scripts may
 // read it), a hint on standard error tells how to add the shell function
 // for the shell of $SHELL (bash, zsh, fish), else where to read about it
 // (B52 D2).
@@ -463,8 +463,9 @@ func TestHomeEnterWithoutShellFunction(t *testing.T) {
 		if errs != tc.hint+"\n" {
 			t.Errorf("%s: stderr %q, want %q", tc.shell, errs, tc.hint+"\n")
 		}
-		if text := ansi.Strip(out.String()); !strings.Contains(text, "• enter print path •") || strings.Contains(text, "enter cd") {
-			t.Errorf("%s: key help without \"enter print path\":\n%s", tc.shell, text)
+		// The short help stays one line of 79 columns (fits in 80).
+		if text := ansi.Strip(out.String()); !strings.Contains(text, "space toggle • a/n all/none • enter path • u update • f fetch • ? more • q quit") || strings.Contains(text, "enter cd") {
+			t.Errorf("%s: key help without \"enter path\":\n%s", tc.shell, text)
 		}
 	}
 }

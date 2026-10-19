@@ -284,7 +284,7 @@ absolute paths, so that they can be pasted.
 
 The key help below the table is one short line (`space toggle • a/n
 all/none • enter cd • u update • f fetch • ? more • q quit`, with
-`enter print path` without the shell function, see below); `?` shows the
+`enter path` without the shell function, see below); `?` shows the
 full list (with `/`, movement and every action), and the next overviews keep
 that choice until `?` is pressed again. The selection menus of the commands
 (e.g. `sync`, `init`) work the same way: their short line lists space, `a`,
@@ -326,7 +326,7 @@ the `sheaf` shell function defined by `sheaf shell-init` creates and then
 `cd`s into. Without the shell function the path is printed on standard
 output, alone (scripts may read it), followed on standard error by a hint
 to add the shell function (the line for the startup file of the shell of
-`$SHELL`: bash, zsh or fish); the key help then says `enter print path`
+`$SHELL`: bash, zsh or fish); the key help then says `enter path`
 rather than `enter cd`. sheaf removes `SHEAF_CD_FILE` from its environment at startup, so
 the processes it starts (git, hooks, `sheaf run` commands) never see it.
 
