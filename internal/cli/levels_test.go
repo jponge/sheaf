@@ -312,9 +312,47 @@ func TestHomeLevel(t *testing.T) {
 		{"dirty, behind", st(func(s *gitx.RepoStatus) { s.Conflicted, s.Behind = 1, 3 }), tui.LevelWarn},
 		{"dirty, diverged", st(func(s *gitx.RepoStatus) { s.Untracked, s.Ahead, s.Behind = 1, 2, 3 }), tui.LevelFail},
 		{"error", ops.CheckoutStatus{Checkout: ops.Checkout{Repo: "a"}, Err: errors.New("boom")}, tui.LevelFail},
+		{"PR", prStatus(nil, ops.PullRequestHead{Number: 7}), tui.LevelOK},
+		{"PR recorded, in sync", prStatus(nil, ops.PullRequestHead{Number: 7, Recorded: true}), tui.LevelOK},
+		{"PR, dirty", prStatus(func(s *gitx.RepoStatus) { s.Unstaged = 1 }, ops.PullRequestHead{Number: 7}), tui.LevelWarn},
+		{"PR, ahead", prStatus(nil, ops.PullRequestHead{Number: 7, Recorded: true, Ahead: 1}), tui.LevelWarn},
+		{"PR, behind", prStatus(nil, ops.PullRequestHead{Number: 7, Recorded: true, Behind: 2}), tui.LevelWarn},
+		{"PR, diverged", prStatus(nil, ops.PullRequestHead{Number: 7, Recorded: true, Ahead: 1, Behind: 2}), tui.LevelFail},
 	} {
 		if got := homeLevel(tc.c); got != tc.want {
 			t.Errorf("%s (%s): level %d, want %d", tc.name, homeState(tc.c), got, tc.want)
+		}
+	}
+}
+
+// prStatus returns the status of a checkout on the branch of pull request
+// pr (no upstream for git), modified by mod.
+func prStatus(mod func(s *gitx.RepoStatus), pr ops.PullRequestHead) ops.CheckoutStatus {
+	s := &gitx.RepoStatus{}
+	if mod != nil {
+		mod(s)
+	}
+	return ops.CheckoutStatus{Checkout: ops.Checkout{Repo: "a", Branch: fmt.Sprintf("pr/%d", pr.Number)}, Status: s, PullRequest: &pr}
+}
+
+// A pull request worktree (a branch tracking refs/pull/<n>/head, see
+// ops.PullRequestHead) shows its number rather than "no upstream", and its
+// commits ahead of and behind the head recorded by the last wt pr (B52
+// E4).
+func TestHomeStatePullRequest(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		c    ops.CheckoutStatus
+		want string
+	}{
+		{prStatus(nil, ops.PullRequestHead{Number: 7}), "clean, PR #7"},
+		{prStatus(nil, ops.PullRequestHead{Number: 7, Recorded: true}), "clean, PR #7"},
+		{prStatus(func(s *gitx.RepoStatus) { s.Untracked = 1 }, ops.PullRequestHead{Number: 12}), "dirty, PR #12"},
+		{prStatus(nil, ops.PullRequestHead{Number: 7, Recorded: true, Ahead: 2}), "clean, PR #7 ↑2"},
+		{prStatus(nil, ops.PullRequestHead{Number: 7, Recorded: true, Ahead: 1, Behind: 3}), "clean, PR #7 ↑1 ↓3"},
+	} {
+		if got := homeState(tc.c); got != tc.want {
+			t.Errorf("state %q, want %q", got, tc.want)
 		}
 	}
 }

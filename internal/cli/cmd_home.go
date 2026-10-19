@@ -296,20 +296,27 @@ func homeBranch(c ops.CheckoutStatus) string {
 
 // homeLevel returns the level of the STATE cell of c (see homeState), the
 // worst of: failed for an error, an upstream gone or a divergence (ahead
-// and behind); warning for local changes or commits to push or pull (ahead,
-// behind); info for no upstream; ok otherwise (clean, in sync or
-// detached). The STATE column of status has the same colors.
+// and behind, of the upstream or of the recorded head of a pull request);
+// warning for local changes or commits to push or pull (ahead, behind);
+// info for no upstream (a pull request branch has one, for this purpose);
+// ok otherwise (clean, in sync or detached). The STATE column of status
+// has the same colors.
 func homeLevel(c ops.CheckoutStatus) tui.Level {
 	if c.Err != nil {
 		return tui.LevelFail
 	}
 	s := c.Status
+	ahead, behind := s.Ahead, s.Behind
+	if p := c.PullRequest; p != nil {
+		ahead, behind = p.Ahead, p.Behind
+	}
+	tracked := s.Upstream != "" || c.PullRequest != nil
 	switch {
-	case s.Upstream != "" && (s.UpstreamGone || s.Ahead > 0 && s.Behind > 0):
+	case s.Upstream != "" && s.UpstreamGone || tracked && ahead > 0 && behind > 0:
 		return tui.LevelFail
-	case !c.Clean() || s.Upstream != "" && (s.Ahead > 0 || s.Behind > 0):
+	case !c.Clean() || tracked && (ahead > 0 || behind > 0):
 		return tui.LevelWarn
-	case s.Upstream == "" && !c.Detached:
+	case !tracked && !c.Detached:
 		return tui.LevelInfo
 	}
 	return tui.LevelOK
@@ -328,20 +335,31 @@ func homeState(c ops.CheckoutStatus) string {
 	case s.Upstream != "" && s.UpstreamGone:
 		parts = append(parts, "upstream gone")
 	case s.Upstream != "":
-		var ab []string
-		if s.Ahead > 0 {
-			ab = append(ab, "↑"+strconv.Itoa(s.Ahead))
+		if ab := aheadBehind(s.Ahead, s.Behind); ab != "" {
+			parts = append(parts, ab)
 		}
-		if s.Behind > 0 {
-			ab = append(ab, "↓"+strconv.Itoa(s.Behind))
-		}
-		if len(ab) > 0 {
-			parts = append(parts, strings.Join(ab, " "))
-		}
+	case c.PullRequest != nil:
+		// "PR #7", followed by the commits ahead of and behind its
+		// recorded head: "PR #7 ↑1".
+		p := c.PullRequest
+		parts = append(parts, strings.TrimSuffix("PR #"+strconv.Itoa(p.Number)+" "+aheadBehind(p.Ahead, p.Behind), " "))
 	case !c.Detached:
 		parts = append(parts, "no upstream")
 	}
 	return strings.Join(parts, ", ")
+}
+
+// aheadBehind returns "↑<ahead> ↓<behind>", omitting a zero side; "" when
+// both are zero.
+func aheadBehind(ahead, behind int) string {
+	var ab []string
+	if ahead > 0 {
+		ab = append(ab, "↑"+strconv.Itoa(ahead))
+	}
+	if behind > 0 {
+		ab = append(ab, "↓"+strconv.Itoa(behind))
+	}
+	return strings.Join(ab, " ")
 }
 
 // homeAge returns the age at now of a commit dated t, for the AGE column:

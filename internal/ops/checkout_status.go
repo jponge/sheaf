@@ -43,6 +43,23 @@ type CheckoutStatus struct {
 	// StatusOptions.HeadTimes; zero when unknown (no commit yet, or the
 	// status or the commit could not be read).
 	HeadTime time.Time
+	// PullRequest is set for a checkout on a branch tracking the head of a
+	// pull request (branch.<name>.merge = refs/pull/<n>/head, as `sheaf wt
+	// pr` sets up for a pull request from a fork), for which git has no
+	// upstream (Status.Upstream is empty).
+	PullRequest *PullRequestHead
+}
+
+// PullRequestHead is the pull request whose head a branch tracks (see
+// CheckoutStatus.PullRequest).
+type PullRequestHead struct {
+	Number int
+	// Recorded tells whether the head recorded by the last fetch of the
+	// pull request (gitx.PullHeadRef, by `wt pr`) exists; Ahead and Behind
+	// then count the commits of HEAD not in it and the reverse, else they
+	// are 0.
+	Recorded      bool
+	Ahead, Behind int
 }
 
 // Clean reports whether the status is known and the work tree has no
@@ -134,6 +151,7 @@ func CollectStatus(ctx context.Context, w *Workspace, opts StatusOptions, rep Re
 	forEach(opts.Jobs, len(cs), func(i int) {
 		cs[i].Status, cs[i].Err = gitx.Status(ctx, cs[i].Path)
 	})
+	pullRequests(ctx, sets, cs, opts.Jobs)
 	if opts.HeadTimes {
 		headTimes(ctx, sets, cs, opts.Jobs)
 	}
@@ -142,6 +160,50 @@ func CollectStatus(ctx context.Context, w *Workspace, opts StatusOptions, rep Re
 	}
 	sortProblems(probs)
 	return StatusReport{Checkouts: cs, Problems: probs}, nil
+}
+
+// pullRequests sets the PullRequest of cs, the checkouts of sets in order:
+// for each repository with a checkout on a branch without upstream, one
+// read of its branch configuration, then, for each checkout on a pull
+// request branch, one count of its commits ahead of and behind the recorded
+// head (gitx.PullHeadRef), up to jobs repositories at a time. Best effort:
+// what cannot be read is left unset (not recorded).
+func pullRequests(ctx context.Context, sets []*repoCheckouts, cs []CheckoutStatus, jobs int) {
+	starts := make([]int, len(sets))
+	n := 0
+	for i, s := range sets {
+		starts[i] = n
+		n += len(s.checkouts)
+	}
+	forEach(jobs, len(sets), func(i int) {
+		repo := cs[starts[i] : starts[i]+len(sets[i].checkouts)]
+		untracked := func(c CheckoutStatus) bool {
+			return c.Status != nil && c.Status.Branch != "" && !c.Status.Detached && c.Status.Upstream == ""
+		}
+		if !slices.ContainsFunc(repo, untracked) {
+			return
+		}
+		prs, err := gitx.BranchPullRequests(ctx, sets[i].primary)
+		if err != nil {
+			return
+		}
+		for j := range repo {
+			if !untracked(repo[j]) {
+				continue
+			}
+			num, ok := prs[repo[j].Status.Branch]
+			if !ok {
+				continue
+			}
+			p := &PullRequestHead{Number: num}
+			if !repo[j].Status.Unborn {
+				if ahead, behind, err := gitx.AheadBehind(ctx, repo[j].Path, "HEAD", gitx.PullHeadRef(num)); err == nil {
+					p.Recorded, p.Ahead, p.Behind = true, ahead, behind
+				}
+			}
+			repo[j].PullRequest = p
+		}
+	})
 }
 
 // headTimes sets the HeadTime of cs, the checkouts of sets in order, with

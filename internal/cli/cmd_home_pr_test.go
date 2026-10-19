@@ -43,9 +43,10 @@ func TestHomeChecksOutPullRequest(t *testing.T) {
 	if !exists(filepath.Join(pr, ".git")) {
 		t.Fatalf("pull request not checked out\nstdout:\n%s\nstderr:\n%s", out.String(), errs)
 	}
-	// The overview after the action lists the new worktree.
+	// The overview after the action lists the new worktree, with its pull
+	// request in STATE rather than "no upstream" (B52 E4).
 	o := out.String()
-	if done := strings.Index(o, "wt pr: done"); done < 0 || !strings.Contains(o[:done], "pr-7") {
+	if done := strings.Index(o, "wt pr: done"); done < 0 || !strings.Contains(o[:done], "pr-7") || !strings.Contains(o[:done], "clean, PR #7") {
 		t.Fatalf("overview without the new worktree:\n%s", o)
 	}
 	// esc cancels.

@@ -82,6 +82,37 @@ func PullRequestBranches(ctx context.Context, dir, remote string) ([]int, error)
 	return ns, nil
 }
 
+// BranchPullRequests returns, by local branch name, the number of the pull
+// request whose head the branch tracks (branch.<name>.merge =
+// refs/pull/<n>/head, as `sheaf wt pr` sets up), for the branches of the
+// repository containing dir that track one.
+func BranchPullRequests(ctx context.Context, dir string) (map[string]int, error) {
+	cfg, err := branchConfig(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	prs := map[string]int{}
+	for name, c := range cfg {
+		if n, ok := PullRequestRef(c.merge); ok && c.merge == "refs/pull/"+strconv.Itoa(n)+"/head" {
+			prs[name] = n
+		}
+	}
+	return prs, nil
+}
+
+// AheadBehind returns the number of commits reachable from left but not
+// from right, and the reverse, in the repository containing dir.
+func AheadBehind(ctx context.Context, dir, left, right string) (ahead, behind int, err error) {
+	out, err := Run(ctx, dir, "rev-list", "--left-right", "--count", left+"..."+right, "--")
+	if err != nil {
+		return 0, 0, err
+	}
+	if _, err := fmt.Sscanf(out, "%d\t%d", &ahead, &behind); err != nil {
+		return 0, 0, fmt.Errorf("gitx: unexpected rev-list output %q", out)
+	}
+	return ahead, behind, nil
+}
+
 // LocalBranches returns the local branches of the repository containing dir,
 // sorted by name, with their upstream configuration.
 func LocalBranches(ctx context.Context, dir string) ([]LocalBranch, error) {

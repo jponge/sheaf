@@ -249,7 +249,11 @@ STATE is `clean` or `dirty` (anything not committed, untracked files
 included), followed by `↑N ↓M`, the commits to push and to pull relative to
 the upstream as of the last fetch (e.g. `clean, ↑2 ↓1`; a zero side is
 omitted, nothing is shown when in sync), or by `upstream gone` or
-`no upstream`. STATE is coloured by its worst part: red for a divergence
+`no upstream`. A pull request worktree whose branch tracks
+`refs/pull/<n>/head` (what `wt pr` sets up for a pull request from a fork;
+git sees no upstream) shows `PR #<n>` instead, followed by the arrows
+relative to the pull request head recorded by the last `wt pr` (e.g.
+`clean, PR #7 ↑1`). STATE is coloured by its worst part: red for a divergence
 (`↑` and `↓`), `upstream gone`, errors and problem rows; yellow for local
 changes or commits to push or pull (`dirty`, `↑`, `↓`); faint for
 `no upstream`; green otherwise (clean, in sync or detached). In a narrow

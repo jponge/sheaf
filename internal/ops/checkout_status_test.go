@@ -2,6 +2,8 @@ package ops
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -57,6 +59,58 @@ func TestCollectStatusCountsAndCleanliness(t *testing.T) {
 	}
 	if len(r.Checkouts) != 2 || r.Checkouts[0].Name() != "alpha/main" || r.Checkouts[1].Name() != "alpha/feat" {
 		t.Fatalf("dirty-only: %+v", r.Checkouts)
+	}
+}
+
+// A checkout on a branch tracking refs/pull/<n>/head (as `wt pr` sets up
+// for a pull request from a fork; git sees no upstream) has its pull
+// request number, and its commits ahead of and behind the head recorded by
+// the last wt pr (gitx.PullHeadRef) when that ref exists (B52 E4). Other
+// branches without upstream, and tracked ones, have none.
+func TestCollectStatusPullRequestWorktrees(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	_, alpha := addRepoWith(t, f, "alpha")
+	pr := func(dir string, n int) string {
+		branch := fmt.Sprintf("pr/%d", n)
+		p := addWorktree(t, alpha, dir, branch, false)
+		testutil.Git(t, alpha, "config", "branch."+branch+".remote", "origin")
+		testutil.Git(t, alpha, "config", "branch."+branch+".merge", fmt.Sprintf("refs/pull/%d/head", n))
+		return p
+	}
+	pr7 := pr("pr-7", 7)
+	testutil.Git(t, alpha, "update-ref", gitx.PullHeadRef(7), "HEAD")
+	writeFile(t, filepath.Join(pr7, "local.txt"), "l\n")
+	testutil.Git(t, pr7, "add", "local.txt")
+	testutil.Git(t, pr7, "commit", "-q", "-m", "local")
+	pr("pr-8", 8) // no recorded head
+	addWorktree(t, alpha, "local", "local", false)
+	merge := addWorktree(t, alpha, "merge", "merge", false)
+	testutil.Git(t, merge, "config", "branch.merge.merge", "refs/pull/9/merge")
+
+	r, err := CollectStatus(context.Background(), f.w, StatusOptions{Jobs: 4}, Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, c := range r.Checkouts {
+		if c.Err != nil {
+			t.Fatalf("%s: %v", c.Name(), c.Err)
+		}
+		got[c.Dir] = "-"
+		if p := c.PullRequest; p != nil {
+			got[c.Dir] = fmt.Sprintf("#%d recorded=%v +%d -%d upstream=%q", p.Number, p.Recorded, p.Ahead, p.Behind, c.Status.Upstream)
+		}
+	}
+	want := map[string]string{
+		"main":  "-",
+		"pr-7":  `#7 recorded=true +1 -0 upstream=""`,
+		"pr-8":  `#8 recorded=false +0 -0 upstream=""`,
+		"local": "-",
+		"merge": "-",
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("pull requests %v, want %v", got, want)
 	}
 }
 
