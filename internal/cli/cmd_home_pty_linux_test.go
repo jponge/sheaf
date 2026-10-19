@@ -571,3 +571,37 @@ func TestHomeOnPTYInterruptedActionLeavesItsOutput(t *testing.T) {
 		t.Errorf("the summary of the interrupted fetch is not on the normal screen once (%d times):\n%s", n, strings.Join(normal, "\n"))
 	}
 }
+
+// On a terminal, the STATE column of the overview and the level words of
+// doctor's report are colored; with NO_COLOR, nothing is (B32, B33).
+func TestHomeOnPTYColorsStatesAndLevels(t *testing.T) {
+	green := regexp.MustCompile("\x1b\\[(?:[0-9;]*;)?32m(?:\x1b\\[[0-9;]*m)*clean")
+	yellow := regexp.MustCompile("\x1b\\[(?:[0-9;]*;)?33m(?:\x1b\\[[0-9;]*m)*WARN")
+	for _, noColor := range []bool{false, true} {
+		e, _, _, _, _ := homeBundle(t)
+		env := ""
+		if noColor {
+			env = "NO_COLOR=1; export NO_COLOR; "
+		}
+		bin := toolsDir(t, "git", "stty") // no gh: doctor warns
+		s := startPTYShell(t, e.cwd, env+`PATH='`+bin+`'; export PATH; B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+		s.waitFor(`STATE`)
+		s.write("d")
+		dismissReport(t, s, "doctor", 1)
+		waitScreenState(t, s, "the overview after doctor", func(vt *vtScreen) bool {
+			return vt.altActive() && slices.ContainsFunc(vt.altLines(), func(l string) bool { return strings.HasPrefix(overviewMessage(l), "doctor") })
+		})
+		s.write("q")
+		wantTerminalRestored(t, s, "0")
+		out := s.output()
+		if got := green.MatchString(out); got == noColor {
+			t.Errorf("NO_COLOR %v: green clean state %v:\n%q", noColor, got, out)
+		}
+		if got := yellow.MatchString(out); got == noColor {
+			t.Errorf("NO_COLOR %v: yellow WARN %v:\n%q", noColor, got, out)
+		}
+		if noColor && colorSGR.MatchString(out) {
+			t.Errorf("NO_COLOR: colors in\n%q", out)
+		}
+	}
+}

@@ -18,6 +18,7 @@ type Row struct {
 	Key   string   // returned by Overview.Chosen; should be unique
 	Cells []string // one per column, matched by the filter
 	Alert bool     // the last cell is rendered with the Failed style (e.g. a problem)
+	Level Level    // unless Alert, the last cell is rendered in the style of this level
 }
 
 // Scope tells which rows an OverviewAction applies to.
@@ -582,8 +583,12 @@ func (m Overview) renderRow(i int, widths []int) string {
 		box = st.Checked.Render("[x]")
 	}
 	var last *lipgloss.Style
-	if r.Alert {
+	switch {
+	case r.Alert:
 		last = &st.Failed
+	case r.Level != LevelNone:
+		s := st.Level(r.Level)
+		last = &s
 	}
 	text := cells(r.Cells, widths, last)
 	if i == m.cursor {

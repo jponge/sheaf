@@ -26,8 +26,39 @@ type Styles struct {
 	FilterPrompt lipgloss.Style
 	Status       lipgloss.Style // "N/M selected" line
 	Question     lipgloss.Style
-	Failed       lipgloss.Style // failure marker of a Progress row
+	Failed       lipgloss.Style // failure marker of a Progress row; LevelFail
+	OK           lipgloss.Style // LevelOK
+	Info         lipgloss.Style // LevelInfo
+	Warn         lipgloss.Style // LevelWarn
 	Help         help.Styles
+}
+
+// Level is the severity of a piece of text (e.g. a doctor check, the state
+// of a checkout), displayed in the style of its level (see Styles.Level).
+type Level int
+
+const (
+	LevelNone Level = iota // no particular style
+	LevelOK
+	LevelInfo
+	LevelWarn
+	LevelFail
+)
+
+// Level returns the style of l: OK green, Info faint, Warn yellow, Fail
+// red (Failed); none for LevelNone.
+func (s Styles) Level(l Level) lipgloss.Style {
+	switch l {
+	case LevelOK:
+		return s.OK
+	case LevelInfo:
+		return s.Info
+	case LevelWarn:
+		return s.Warn
+	case LevelFail:
+		return s.Failed
+	}
+	return lipgloss.NewStyle()
 }
 
 // DefaultStyles returns the package's default styles.
@@ -56,6 +87,9 @@ func DefaultStyles() Styles {
 		Status:       faint,
 		Question:     lipgloss.NewStyle().Bold(true),
 		Failed:       lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+		OK:           lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
+		Info:         faint,
+		Warn:         lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
 		Help:         h,
 	}
 }

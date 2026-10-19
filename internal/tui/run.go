@@ -260,6 +260,28 @@ func isTerminalWriter(w io.Writer) bool {
 	return false
 }
 
+// Painter returns a function rendering text in the style of a Level (see
+// Styles.Level) for writing to out outside a program (e.g. a summary that
+// a command prints): with the colors and text attributes that the color
+// profile of out and environ allows, as a program rendering to out would
+// (see colorProfile), so none at all when out is not a terminal (unless
+// CLICOLOR_FORCE).
+func Painter(out io.Writer, environ []string) func(Level, string) string {
+	p, st := colorProfile(out, environ), DefaultStyles()
+	return func(l Level, s string) string {
+		if p <= colorprofile.NoTTY {
+			return s
+		}
+		style := st.Level(l)
+		if p == colorprofile.ASCII {
+			// The styles only use basic ANSI colors, which every other
+			// profile renders as is.
+			style = style.UnsetForeground()
+		}
+		return style.Render(s)
+	}
+}
+
 // colorProfile returns the color profile used to render to out: the one
 // detected by colorprofile from out and environ, limited to ASCII (no colors,
 // text attributes kept) when NO_COLOR is set to any non-empty value

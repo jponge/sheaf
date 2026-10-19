@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -172,7 +173,7 @@ func newTUISession(c *cobra.Command, d Deps) *tuiSession {
 		// bubbletea needs the terminal itself to know its size.
 		out = p.w
 	}
-	return &tuiSession{ctx: ctx, ctl: ctl, in: c.InOrStdin(), out: out, errw: c.ErrOrStderr()}
+	return &tuiSession{ctx: ctx, ctl: ctl, in: c.InOrStdin(), out: out, errw: d.leveled(c, c.ErrOrStderr())}
 }
 
 // run runs a menu or confirmation program. An interruption (signal) kills
@@ -470,4 +471,39 @@ func isNotice(e ops.Event) bool {
 	return strings.HasPrefix(m, "warning: ") || strings.HasPrefix(m, "note: ") || strings.HasPrefix(m, "offline: ") ||
 		strings.Contains(m, "(informational, not blocking)") || strings.Contains(m, "will be lost (--force)") ||
 		strings.HasPrefix(m, "git worktree remove failed, deleting the directory instead")
+}
+
+// leveled returns w, standard output or error of c, for the summaries and
+// notes that c prints: in TUI mode, with their level words colored (see
+// levelWriter) as the terminal behind w allows (see tui.Painter); else w
+// itself.
+func (d Deps) leveled(c *cobra.Command, w io.Writer) io.Writer {
+	if !d.tuiMode(c) {
+		return w
+	}
+	environ := os.Environ
+	if d.environ != nil {
+		environ = d.environ
+	}
+	return &levelWriter{w: w, paint: tui.Painter(terminalOf(w), environ())}
+}
+
+// teeWriter writes to Writer, a copy of term (the terminal) and of
+// something else, and tells term as the terminal behind it (see
+// terminalOf): the home screen captures what its actions print.
+type teeWriter struct {
+	io.Writer
+	term io.Writer
+}
+
+// terminalOf returns the stream behind w (standard output watched for
+// EPIPE, the terminal of a teeWriter), which may be a terminal.
+func terminalOf(w io.Writer) io.Writer {
+	switch v := w.(type) {
+	case *pipeWatch:
+		return terminalOf(v.w)
+	case teeWriter:
+		return terminalOf(v.term)
+	}
+	return w
 }

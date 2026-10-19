@@ -233,6 +233,10 @@ sheaf prune                            # list worktrees whose branch is gone or 
 on a terminal, opens an overview of every checkout of the bundle (columns
 REPO, DIR, BRANCH, STATE). It reads local state only; nothing is fetched
 when it opens. Checkouts that cannot be inspected are shown as problem rows.
+STATE is coloured by its worst part: red for commits to pull (`behind`,
+diverged), `upstream gone`, errors and problem rows; yellow for local
+changes or commits to push (`dirty`, `ahead`); faint for `no upstream`;
+green otherwise (clean, in sync or detached).
 
 | Key | Action |
 |---|---|
@@ -590,7 +594,13 @@ visible, `n` none, `/` filters, enter confirms, esc or q cancels.
 **Colour.** Plain output uses colour only on a terminal and not when
 `NO_COLOR` is set to a non-empty value. The TUI drops colours when
 `NO_COLOR` is non-empty or `CLICOLOR=0` (without `CLICOLOR_FORCE`); bold
-and faint are kept.
+and faint are kept. With the same rules, outside plain mode (terminals, no
+`--no-tui`), the level words of what commands print are coloured, OK
+green, INFO faint, WARN yellow, FAIL red: `OK`, `INFO`, `WARN`, `FAIL` of
+`doctor`; `done`, `skipped`, `failed` of summaries (and `fast-forwarded`,
+`up to date`, `pinned` of `update`); the `warning:` and `note:` markers.
+The report view of the home screen colours them the same way. `--json`
+output is never coloured.
 
 **Terminal access for git.** git normally runs in its own session without
 the terminal, so it cannot prompt: use an SSH agent or a credential helper.

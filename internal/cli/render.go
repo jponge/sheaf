@@ -3,9 +3,12 @@ package cli
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/jponge/sheaf/internal/ops"
+	"github.com/jponge/sheaf/internal/tui"
 )
 
 // plainRenderer prints one line per event (CLI mode). ops serializes the
@@ -72,4 +75,67 @@ func printSummary(w io.Writer, s ops.Summary) error {
 func firstLine(s string) string {
 	l, _, _ := strings.Cut(s, "\n")
 	return l
+}
+
+// levelWords are the level words of the lines commands print, by level:
+// doctor's levels, the outcomes of summaries (printSummary, update, prune)
+// and the markers of warnings and notes.
+var levelWords = map[string]tui.Level{
+	"OK": tui.LevelOK, "done": tui.LevelOK, "fast-forwarded": tui.LevelOK, "up to date": tui.LevelOK,
+	"INFO": tui.LevelInfo, "skipped": tui.LevelInfo, "pinned": tui.LevelInfo, "note:": tui.LevelInfo,
+	"WARN": tui.LevelWarn, "warning:": tui.LevelWarn,
+	"FAIL": tui.LevelFail, "failed": tui.LevelFail,
+}
+
+// levelLine matches a line starting with a level word followed by a space:
+// group 1 is a word of doctor or of a summary, at the start of the line;
+// group 2 a warning or note marker, at the start of the line or after
+// indentation, "sheaf: " or the "<who>: <phase>: " of an event.
+var levelLine = regexp.MustCompile(`^(?:(OK|INFO|WARN|FAIL|done|fast-forwarded|up to date|skipped|pinned|failed)|(?: +|sheaf: |\S+: \S+: )?(warning:|note:)) `)
+
+// levelMark marks the level word of a line printed by a command (see
+// levelWords); none for other lines.
+func levelMark(line string) tui.Mark {
+	m := levelLine.FindStringSubmatchIndex(line)
+	if m == nil {
+		return tui.Mark{}
+	}
+	for g := 1; g <= 2; g++ {
+		if start, end := m[2*g], m[2*g+1]; start >= 0 {
+			return tui.Mark{Start: start, End: end, Level: levelWords[line[start:end]]}
+		}
+	}
+	return tui.Mark{}
+}
+
+// levelWriter writes to w, with the level word of each line (see
+// levelMark) rendered by paint. A line written in several parts is
+// classified by the part that starts it, which must hold its level word
+// and the space after it (as the commands print them).
+type levelWriter struct {
+	mu    sync.Mutex
+	w     io.Writer
+	paint func(tui.Level, string) string
+	mid   bool // the last write ended inside a line
+}
+
+func (l *levelWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var b strings.Builder
+	for rest := string(p); rest != ""; {
+		line, after, nl := strings.Cut(rest, "\n")
+		if k := levelMark(line); !l.mid && k.Level != tui.LevelNone {
+			line = line[:k.Start] + l.paint(k.Level, line[k.Start:k.End]) + line[k.End:]
+		}
+		b.WriteString(line)
+		if nl {
+			b.WriteByte('\n')
+		}
+		l.mid, rest = !nl, after
+	}
+	if _, err := io.WriteString(l.w, b.String()); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }

@@ -153,7 +153,7 @@ func (h *home) loop() error {
 			// (ctrl+c interrupts, as in the action's dialogs; input
 			// ending returns to the overview); none after an action
 			// cancelled before printing anything.
-			report := tui.NewReport("sheaf "+name+": "+h.root, homeReportLines(h.output.String(), h.message), "back to the overview")
+			report := homeReport(name, h.root, h.output.String(), h.message)
 			if _, err := h.s.runModel(report); err != nil {
 				return err
 			}
@@ -182,7 +182,7 @@ func (h *home) overview() (tui.Overview, error) {
 	for i := range r.Checkouts {
 		cs := &r.Checkouts[i]
 		h.rows[cs.Path] = homeRow{checkout: cs}
-		rows = append(rows, tui.Row{Key: cs.Path, Cells: []string{cs.Repo, displayDir(cs.Checkout), homeBranch(*cs), homeState(*cs)}, Alert: cs.Err != nil})
+		rows = append(rows, tui.Row{Key: cs.Path, Cells: []string{cs.Repo, displayDir(cs.Checkout), homeBranch(*cs), homeState(*cs)}, Alert: cs.Err != nil, Level: homeLevel(*cs)})
 	}
 	for i := range r.Problems {
 		p := &r.Problems[i]
@@ -216,6 +216,27 @@ func homeBranch(c ops.CheckoutStatus) string {
 		return c.Branch + " (unborn)"
 	}
 	return c.Branch
+}
+
+// homeLevel returns the level of the STATE cell of c (see homeState), the
+// worst of: failed for an error, an upstream gone or commits to pull
+// (behind, diverged); warning for local changes or commits to push
+// (ahead); info for no upstream; ok otherwise (clean, in sync or
+// detached).
+func homeLevel(c ops.CheckoutStatus) tui.Level {
+	if c.Err != nil {
+		return tui.LevelFail
+	}
+	s := c.Status
+	switch {
+	case s.Upstream != "" && (s.UpstreamGone || s.Behind > 0):
+		return tui.LevelFail
+	case !c.Clean() || s.Upstream != "" && s.Ahead > 0:
+		return tui.LevelWarn
+	case s.Upstream == "" && !c.Detached:
+		return tui.LevelInfo
+	}
+	return tui.LevelOK
 }
 
 func homeState(c ops.CheckoutStatus) string {
@@ -312,8 +333,8 @@ func (h *home) act(name string, targets []string) string {
 			// renders on the terminal only.
 			c := &cobra.Command{}
 			c.SetIn(h.c.InOrStdin())
-			c.SetOut(io.MultiWriter(h.c.OutOrStdout(), &h.output))
-			c.SetErr(io.MultiWriter(h.c.ErrOrStderr(), &h.output))
+			c.SetOut(teeWriter{io.MultiWriter(h.c.OutOrStdout(), &h.output), h.c.OutOrStdout()})
+			c.SetErr(teeWriter{io.MultiWriter(h.c.ErrOrStderr(), &h.output), h.c.ErrOrStderr()})
 			c.SetContext(h.s.ctx)
 			d := h.d
 			d.ctl, d.term = h.s.ctl, h.s.out
@@ -382,7 +403,8 @@ func (h *home) command(args ...string) error {
 	d.unchanged = func(note string) { h.unchanged = note }
 	cancelled := false
 	d.cancelled = func() { cancelled = true }
-	out, errw := io.MultiWriter(h.c.OutOrStdout(), &h.output), io.MultiWriter(h.c.ErrOrStderr(), &h.output)
+	out := teeWriter{io.MultiWriter(h.c.OutOrStdout(), &h.output), h.c.OutOrStdout()}
+	errw := teeWriter{io.MultiWriter(h.c.ErrOrStderr(), &h.output), h.c.ErrOrStderr()}
 	root := NewRootCmdWithDeps(Streams{In: h.c.InOrStdin(), Out: out, Err: errw}, d)
 	root.SetArgs(append([]string{"--bundle=" + h.root, "--jobs=" + strconv.Itoa(h.jobs)}, args...))
 	err := root.ExecuteContext(h.s.ctx)
@@ -426,6 +448,14 @@ func (h *home) outcome(name string, errs []error) string {
 		return name + ": " + h.unchanged
 	}
 	return name + ": done"
+}
+
+// homeReport returns the report view of the action name on the bundle
+// root, which printed output (see homeReportLines), with the level words
+// of its lines colored (see levelMark): the output is captured without
+// escape sequences.
+func homeReport(name, root, output, message string) tui.Report {
+	return tui.NewReport("sheaf "+name+": "+root, homeReportLines(output, message), "back to the overview").WithLevels(levelMark)
 }
 
 // homeReportLines returns the lines of the report view of an action: those

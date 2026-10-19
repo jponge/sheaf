@@ -60,6 +60,30 @@ func NewReport(title string, lines []string, back string) Report {
 	return m
 }
 
+// Mark is the part of a line, from byte Start to End, displayed in the
+// style of Level (see Report.WithLevels).
+type Mark struct {
+	Start, End int
+	Level      Level
+}
+
+// WithLevels returns a copy of m in which the part of each line that
+// classify marks (e.g. the level of a doctor check) is displayed in the
+// style of its level. classify receives each line as displayed (tabs
+// expanded, control characters replaced); a mark of LevelNone, or out of
+// the line's bounds, displays it unstyled.
+func (m Report) WithLevels(classify func(line string) Mark) Report {
+	lines := make([]string, len(m.lines))
+	for i, l := range m.lines {
+		lines[i] = l
+		if k := classify(l); k.Level != LevelNone && 0 <= k.Start && k.Start < k.End && k.End <= len(l) {
+			lines[i] = l[:k.Start] + m.styles.Level(k.Level).Render(l[k.Start:k.End]) + l[k.End:]
+		}
+	}
+	m.lines = lines
+	return m
+}
+
 // expandTabs replaces the tabs of s by spaces up to the next multiple of 8
 // columns.
 func expandTabs(s string) string {

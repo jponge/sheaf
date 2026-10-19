@@ -126,7 +126,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 	if err != nil {
 		return err
 	}
-	out, errOut := c.OutOrStdout(), c.ErrOrStderr()
+	out, errOut := c.OutOrStdout(), d.leveled(c, c.ErrOrStderr())
 	for _, o := range rep.Orgs {
 		switch {
 		case o.Err != nil:

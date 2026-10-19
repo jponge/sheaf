@@ -60,6 +60,9 @@ type Deps struct {
 	// (interactive git mode) and standard output (colors); tests only.
 	stdinTTY  func(io.Reader) bool
 	stdoutTTY func(io.Writer) bool
+	// environ replaces os.Environ for the color decisions (see leveled);
+	// tests only.
+	environ func() []string
 }
 
 // reportUnchanged tells d.unchanged, if set, that the command changed
