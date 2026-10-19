@@ -446,6 +446,49 @@ func TestProgressHeaderBarFollowsColorProfile(t *testing.T) {
 	}
 }
 
+// With WithTerminalProgress, the view drives the terminal's own progress
+// indicator (tab, taskbar; OSC 9;4) with the ratio of the header bar:
+// indeterminate until rows are planned, error once a row failed, none in
+// the final view (bubbletea then resets it). Without, it never does.
+func TestProgressTerminalProgress(t *testing.T) {
+	t.Parallel()
+	bar := func(m tea.Model) *tea.ProgressBar { return m.View().ProgressBar }
+	p, _ := newTestProgress("Updating")
+	if pb := bar(p); pb != nil {
+		t.Fatalf("progress bar %+v without WithTerminalProgress", pb)
+	}
+	if pb := bar(plannedProgress(t)); pb != nil {
+		t.Fatalf("progress bar %+v without WithTerminalProgress", pb)
+	}
+	p = p.WithTerminalProgress()
+	for _, c := range []struct {
+		name string
+		msgs []tea.Msg
+		want *tea.ProgressBar
+	}{
+		{"unknown total", nil, &tea.ProgressBar{State: tea.ProgressBarIndeterminate}},
+		{"unknown total, rows", []tea.Msg{RowUpdate{Key: "a", Label: "a", State: RowDone}}, &tea.ProgressBar{State: tea.ProgressBarIndeterminate}},
+		{"planned", []tea.Msg{PlannedMsg{Units: 3}, RowUpdate{Key: "a", Label: "a", State: RowRunning}}, &tea.ProgressBar{State: tea.ProgressBarDefault, Value: 0}},
+		{"done and skipped", []tea.Msg{
+			PlannedMsg{Units: 3},
+			RowUpdate{Key: "a", Label: "a", State: RowDone},
+			RowUpdate{Key: "b", Label: "b", State: RowSkipped},
+			RowUpdate{Key: "x", Label: "x (fetch)", State: RowFailed, Aside: true},
+		}, &tea.ProgressBar{State: tea.ProgressBarDefault, Value: 67}},
+		{"failed", []tea.Msg{
+			PlannedMsg{Units: 4},
+			RowUpdate{Key: "a", Label: "a", State: RowFailed},
+			RowUpdate{Key: "b", Label: "b", State: RowRunning},
+		}, &tea.ProgressBar{State: tea.ProgressBarError, Value: 25}},
+		{"finished", []tea.Msg{PlannedMsg{Units: 1}, RowUpdate{Key: "a", Label: "a", State: RowDone}, FinishMsg{}}, nil},
+	} {
+		m, _ := feed(p, c.msgs...)
+		if got := bar(m); (got == nil) != (c.want == nil) || got != nil && *got != *c.want {
+			t.Errorf("%s: progress bar %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}
+
 // progressShape classifies the lines of a progress view titled "t": H
 // header, R row, N hidden-rows note, I interruption note, ? other.
 func progressShape(m tea.Model) string {

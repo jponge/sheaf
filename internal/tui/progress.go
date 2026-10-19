@@ -111,8 +111,9 @@ type Progress struct {
 	interrupts   int
 	finished     bool
 
-	width, height int
-	profile       colorprofile.Profile
+	width, height    int
+	profile          colorprofile.Profile
+	terminalProgress bool
 
 	spin   spinner.Model
 	styles Styles
@@ -144,6 +145,16 @@ func (m Progress) WithClock(now func() time.Time) Progress {
 // pressed outside a question.
 func (m Progress) WithInterrupt(f func()) Progress {
 	m.interrupt = f
+	return m
+}
+
+// WithTerminalProgress returns a copy of m driving the progress indicator
+// of the terminal (tab, taskbar; see tea.View.ProgressBar) too: the ratio
+// of the header bar, in the error state once a row failed, indeterminate
+// until rows are planned. The final view has none, which makes bubbletea
+// reset it, as it does when the program is killed.
+func (m Progress) WithTerminalProgress() Progress {
+	m.terminalProgress = true
 	return m
 }
 
@@ -401,7 +412,20 @@ func (m Progress) bar(w int, r float64) string {
 }
 
 // View implements tea.Model.
-func (m Progress) View() tea.View { return tea.NewView(m.render()) }
+func (m Progress) View() tea.View {
+	v := tea.NewView(m.render())
+	if m.terminalProgress && !m.finished {
+		v.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, 0)
+		if r, ok := m.ratio(); ok {
+			state := tea.ProgressBarDefault
+			if _, _, _, failed := m.Counts(); failed > 0 {
+				state = tea.ProgressBarError
+			}
+			v.ProgressBar = tea.NewProgressBar(state, int(math.Round(r*100)))
+		}
+	}
+	return v
+}
 
 func (m Progress) render() string {
 	lines := []string{m.headerLine()}

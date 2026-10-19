@@ -217,4 +217,78 @@ func TestTUIRemoveDialogOnPTY(t *testing.T) {
 	}
 }
 
+// fakeFetchGit returns a directory holding a git wrapper running fetch as
+// the shell code fetch says (in the checkout's directory, with the
+// arguments in "$@"), other commands as git.
+func fakeFetchGit(t *testing.T, fetch string) string {
+	t.Helper()
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	writeFile(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a in \"$@\"; do if [ \"$a\" = fetch ]; then\n"+fetch+"\nfi; done\nexec '"+git+"' \"$@\"\n")
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
+// terminalProgress matches the OSC 9;4 sequences (terminal progress).
+var terminalProgress = regexp.MustCompile(`\x1b\]9;4;[^\x07\x1b]*(?:\x07|\x1b\\)`)
+
+// wantTerminalProgressReset checks that out sets the terminal's progress
+// indicator, and resets it last.
+func wantTerminalProgressReset(t *testing.T, out string) {
+	t.Helper()
+	all := terminalProgress.FindAllString(out, -1)
+	if len(all) < 2 || all[len(all)-1] != "\x1b]9;4;0\x07" {
+		t.Errorf("terminal progress sequences %q: want some, the last one the reset \\x1b]9;4;0\\x07", all)
+	}
+}
+
+// On a terminal, the progress view drives the terminal's own progress
+// indicator (OSC 9;4, B43): here the error state at 50% once one of two
+// fetches failed while the other runs; the indicator is reset when the
+// program ends.
+func TestTUIProgressDrivesTerminalProgress(t *testing.T) {
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
+	e.addRepo(t, "beta")
+	bin := fakeFetchGit(t, `case "$PWD" in */alpha*) echo boom >&2; exit 1;; esac; sleep 30`)
+	s := startPTYShell(t, e.cwd, `PATH='`+bin+`':$PATH; export PATH; B=$(stty -g); "$SHEAF" fetch -j 2`+sttyCheck, 0)
+	s.waitFor(`\x1b\]9;4;2;50\x07`)
+	s.write("\x03")
+	wantTerminalRestored(t, s, "130")
+	wantTerminalProgressReset(t, s.output())
+}
+
+// The emergency stop (a second ctrl+c while git ignores the first) kills
+// the progress view: the terminal's progress indicator is reset too.
+func TestTUIEmergencyStopResetsTerminalProgress(t *testing.T) {
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
+	bin := fakeFetchGit(t, `trap '' TERM INT HUP; while :; do sleep 1; done`)
+	s := startPTYShell(t, e.cwd, `PATH='`+bin+`':$PATH; export PATH; B=$(stty -g); "$SHEAF" fetch`+sttyCheck, 0)
+	s.waitFor(`\x1b\]9;4;1;0\x07`)
+	s.write("\x03")
+	s.waitFor(`Interrupted: no new work`)
+	s.write("\x03")
+	s.waitFor(`interrupted again`)
+	wantTerminalRestored(t, s, "130")
+	wantTerminalProgressReset(t, s.output())
+}
+
+// Without the TUI (--no-tui) nothing drives the terminal's progress
+// indicator.
+func TestPlainFetchOnPTYLeavesTerminalProgressAlone(t *testing.T) {
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
+	s := startPTYShell(t, e.cwd, `"$SHEAF" --no-tui fetch; echo SHEAF-EXIT=$?`+readNext, 0)
+	s.waitFor(`SHEAF-EXIT=0`)
+	if all := terminalProgress.FindAllString(s.output(), -1); len(all) > 0 {
+		t.Errorf("terminal progress sequences %q in plain mode", all)
+	}
+}
+
 func uintptrOf[T any](p *T) uintptr { return uintptr(unsafe.Pointer(p)) }

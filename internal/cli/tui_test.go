@@ -281,6 +281,21 @@ func TestTUIProgressPlansRows(t *testing.T) {
 	}
 }
 
+// A progress view on an output that is not a terminal (a TUI forced on)
+// never drives the terminal's progress indicator (OSC 9;4).
+func TestTUIProgressOnNonTerminalLeavesTerminalProgressAlone(t *testing.T) {
+	t.Parallel()
+	var out syncBuffer
+	s := &tuiSession{ctx: context.Background(), ctl: newInterruptCtl(), out: &out, errw: io.Discard}
+	s.progress("Fetching", progressOpts{}, func(_ context.Context, rep ops.Reporter, _ askFunc) {
+		rep.Report(ops.Event{Repo: "alpha", Phase: "p", Kind: ops.KindStart})
+		waitScreen(t, &out, "Fetching · 1 running")()
+	})
+	if strings.Contains(out.String(), "\x1b]9;4;") {
+		t.Errorf("output contains OSC 9;4:\n%q", out.String())
+	}
+}
+
 func TestCredentialHint(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

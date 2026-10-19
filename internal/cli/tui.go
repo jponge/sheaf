@@ -266,6 +266,9 @@ type progressOpts struct {
 func (s *tuiSession) progress(title string, o progressOpts, work func(ctx context.Context, rep ops.Reporter, ask askFunc)) {
 	plain := checkoutRenderer{plainRenderer{s.errw}}
 	model := tui.NewProgress(title).WithInterrupt(s.ctl.interrupt)
+	if isTerminal(s.out) {
+		model = model.WithTerminalProgress()
+	}
 	p, err := tui.NewProgram(model, s.in, s.out, tea.WithoutSignalHandler())
 	if err != nil {
 		fmt.Fprintf(s.errw, "sheaf: cannot start the progress view (%v); plain output follows\n", err)
