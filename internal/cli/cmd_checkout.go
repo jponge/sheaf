@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -408,7 +409,10 @@ func newUpdateCmd(d Deps) *cobra.Command {
 }
 
 func printUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error {
-	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	// The table goes through a buffer: its lines without detail lose the
+	// padding of the empty last cell.
+	var table bytes.Buffer
+	tw := tabwriter.NewWriter(&table, 0, 0, 2, ' ', 0)
 	var ff, upToDate, pinned, skipped, failed, interrupted int
 	var details []string
 	for _, u := range r.Checkouts {
@@ -446,6 +450,9 @@ func printUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", label, displayName(u.Checkout), detail)
 	}
 	_ = tw.Flush()
+	for line := range strings.Lines(table.String()) {
+		fmt.Fprintln(out, strings.TrimRight(line, " \n"))
+	}
 	for _, d := range details {
 		fmt.Fprintln(out, d)
 	}

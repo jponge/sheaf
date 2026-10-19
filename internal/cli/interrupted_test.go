@@ -61,7 +61,7 @@ func TestUpdateSummaryInterrupted(t *testing.T) {
 	}}
 	var b bytes.Buffer
 	err := printUpdateSummary(&b, r, false)
-	want := "interrupted  a/main  \ninterrupted  b/main  not started\nup to date   c/main  \n0 fast-forwarded, 1 up to date, 0 skipped, 0 failed, 2 interrupted\n"
+	want := "interrupted  a/main\ninterrupted  b/main  not started\nup to date   c/main\n0 fast-forwarded, 1 up to date, 0 skipped, 0 failed, 2 interrupted\n"
 	if got := b.String(); got != want {
 		t.Errorf("printUpdateSummary =\n%q\nwant\n%q", got, want)
 	}
