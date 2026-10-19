@@ -727,7 +727,7 @@ func danglingSeparator(full, l string) bool {
 
 // Truncating the status line to the width never leaves a separator (or
 // its start) at its end: a part cut off entirely goes with the separator
-// before it, and parts cut partly stay.
+// before it, as does a part that would be cut partly.
 func TestMultiSelectNarrowStatusLineHasNoDanglingSeparator(t *testing.T) {
 	items := manyItems(25)
 	items[0].Disabled, items[0].Selected = true, true
