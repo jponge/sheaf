@@ -176,13 +176,13 @@ var gitCallCommands = []struct {
 		_, err := AddWorktree(ctx, f.w, "r1", "feat/new", WorktreeAddOptions{}, noEmit)
 		return err
 	}},
-	{"wt rm", 24 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"wt rm", 25 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		_, err := RemoveWorktree(ctx, f.w, "r1", WorktreeTarget{Name: "feat/b"}, WorktreeRemoveOptions{WorkingDir: f.w.Root, Confirm: func(WorktreeRemovePlan) bool { return true }}, noEmit)
 		return err
 	}},
-	// The home screen's r on two worktrees of a repository (45 calls
+	// The home screen's r on two worktrees of a repository (47 calls
 	// when they were removed one after the other).
-	{"wt rm (2)", 41 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"wt rm (2)", 43 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		items := []WorktreeRemoval{{Repo: "r2", Target: WorktreeTarget{Name: "feat-a", Kind: TargetDir}}, {Repo: "r2", Target: WorktreeTarget{Name: "feat-b", Kind: TargetDir}}}
 		for _, r := range RemoveWorktrees(ctx, f.w, items, WorktreeRemoveOptions{WorkingDir: f.w.Root}, func([]WorktreeRemovalResult) bool { return true }, Discard) {
 			if r.Err != nil {

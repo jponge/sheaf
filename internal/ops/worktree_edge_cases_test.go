@@ -143,6 +143,126 @@ func TestRemoveWorktreeChangedDuringConfirm(t *testing.T) {
 	}
 }
 
+// swapDuringConfirm moves the worktree x away to tmp and the worktree y to
+// x's directory (git worktree move), as could happen while a confirmation
+// dialog is shown.
+func swapDuringConfirm(t *testing.T, primary, x, y, tmp string) {
+	t.Helper()
+	testutil.Git(t, primary, "worktree", "move", x, tmp)
+	testutil.Git(t, primary, "worktree", "move", y, x)
+}
+
+// A worktree replaced at its directory by another worktree of the
+// repository while the confirmation was shown is not removed, nor the
+// other one (the plan was made for the first).
+func TestRemoveWorktreeRefusesWorktreeSwappedDuringConfirm(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	primary, _ := f.clonedRepo(t, "a")
+	x := f.mustAddWT(t, "a", "x").Path
+	y := f.mustAddWT(t, "a", "y").Path
+	// An ignored file (informational: deleted with the worktree).
+	writeFile(t, filepath.Join(primary, ".git", "info", "exclude"), "build.log\n")
+	writeFile(t, filepath.Join(y, "build.log"), "y\n")
+	tmp := filepath.Join(f.w.Root, "a", "tmp")
+	_, err := f.rmWT(t, "a", "x", WorktreeRemoveOptions{Confirm: func(WorktreeRemovePlan) bool {
+		swapDuringConfirm(t, primary, x, y, tmp)
+		return true
+	}})
+	if err == nil || !strings.Contains(err.Error(), "changed while waiting") || !strings.Contains(err.Error(), "nothing was removed") {
+		t.Fatalf("err = %v", err)
+	}
+	if !exists(filepath.Join(x, "build.log")) || !exists(tmp) {
+		t.Fatalf("y (now at %s) or x (now at %s) was removed", x, tmp)
+	}
+	if got := strings.TrimSpace(testutil.Git(t, x, "branch", "--show-current")); got != "y" {
+		t.Fatalf("%s is on %q, want y", x, got)
+	}
+}
+
+// Two detached worktrees at the same commit swapped while the
+// confirmation was shown: only the identity of the worktree (its
+// administrative directory) tells them apart.
+func TestRemoveWorktreeRefusesDetachedWorktreeSwappedDuringConfirm(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	primary, _ := f.clonedRepo(t, "a")
+	x := filepath.Join(f.w.Root, "a", "x")
+	y := filepath.Join(f.w.Root, "a", "y")
+	testutil.Git(t, primary, "worktree", "add", "-q", "--detach", x)
+	testutil.Git(t, primary, "worktree", "add", "-q", "--detach", y)
+	writeFile(t, filepath.Join(primary, ".git", "info", "exclude"), "build.log\n")
+	writeFile(t, filepath.Join(y, "build.log"), "y\n")
+	tmp := filepath.Join(f.w.Root, "a", "tmp")
+	_, err := f.rmWT(t, "a", "x", WorktreeRemoveOptions{Confirm: func(WorktreeRemovePlan) bool {
+		swapDuringConfirm(t, primary, x, y, tmp)
+		return true
+	}})
+	if err == nil || !strings.Contains(err.Error(), "changed while waiting for confirmation (it is now another worktree)") {
+		t.Fatalf("err = %v", err)
+	}
+	if !exists(filepath.Join(x, "build.log")) || !exists(tmp) {
+		t.Fatalf("y (now at %s) or x (now at %s) was removed", x, tmp)
+	}
+}
+
+// A worktree switched to another branch, or with a new commit, while the
+// confirmation was shown is not the planned one any more.
+func TestRemoveWorktreeRefusesBranchOrHeadChangedDuringConfirm(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, why string
+		change    func(t *testing.T, p string)
+	}{
+		{"switched", "it is now on other", func(t *testing.T, p string) { testutil.Git(t, p, "switch", "-q", "-c", "other") }},
+		{"committed", "its HEAD moved from ", func(t *testing.T, p string) { testutil.CommitFile(t, p, "c.txt", "c\n", "during the dialog") }},
+	} {
+		f := newFixture(t)
+		f.clonedRepo(t, "a")
+		x := f.mustAddWT(t, "a", "x").Path
+		_, err := f.rmWT(t, "a", "x", WorktreeRemoveOptions{Confirm: func(WorktreeRemovePlan) bool {
+			tc.change(t, x)
+			return true
+		}})
+		if err == nil || !strings.Contains(err.Error(), "changed while waiting for confirmation ("+tc.why) || !exists(x) {
+			t.Fatalf("%s: err = %v", tc.name, err)
+		}
+	}
+}
+
+// A worktree locked while the confirmation was shown is refused with a
+// clear reason, not git's error.
+func TestRemoveWorktreeRefusesWorktreeLockedDuringConfirm(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	primary, _ := f.clonedRepo(t, "a")
+	x := f.mustAddWT(t, "a", "x").Path
+	_, err := f.rmWT(t, "a", "x", WorktreeRemoveOptions{Confirm: func(WorktreeRemovePlan) bool {
+		testutil.Git(t, primary, "worktree", "lock", x)
+		return true
+	}})
+	if err == nil || !strings.Contains(err.Error(), "changed while waiting for confirmation (it is now locked)") || !exists(x) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// A worktree removed by someone else while the confirmation was shown is
+// reported as such, not with git's error.
+func TestRemoveWorktreeRemovedDuringConfirm(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	primary, _ := f.clonedRepo(t, "a")
+	x := f.mustAddWT(t, "a", "x").Path
+	_, err := f.rmWT(t, "a", "x", WorktreeRemoveOptions{DeleteBranch: true, Confirm: func(WorktreeRemovePlan) bool {
+		testutil.Git(t, primary, "worktree", "remove", x)
+		testutil.Git(t, primary, "branch", "-D", "x")
+		return true
+	}})
+	if err == nil || !strings.Contains(err.Error(), "worktree x [x] no longer exists") || !strings.Contains(err.Error(), "nothing was removed") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestRemoveWorktreeKeepsBranchThatMoved(t *testing.T) {
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")

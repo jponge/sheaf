@@ -447,6 +447,63 @@ func TestRemoveWorktreesRecheckSeesBranchCheckedOutDuringConfirm(t *testing.T) {
 	}
 }
 
+// A worktree replaced at its directory by another worktree of the
+// repository while the confirmation was shown is not removed, nor the
+// other one; the rest is removed.
+func TestRemoveWorktreesRefusesWorktreeSwappedDuringConfirm(t *testing.T) {
+	t.Parallel()
+	e := newRemovalsEnv(t)
+	x := e.f.mustAddWT(t, "a", "x").Path
+	y := e.f.mustAddWT(t, "a", "y").Path
+	writeFile(t, filepath.Join(e.primary, ".git", "info", "exclude"), "build.log\n")
+	writeFile(t, filepath.Join(y, "build.log"), "y\n")
+	tmp := filepath.Join(e.root, "a", "tmp")
+	res := RemoveWorktrees(context.Background(), e.f.w, []WorktreeRemoval{target("a", "x"), target("b", "comp")}, WorktreeRemoveOptions{WorkingDir: e.root},
+		func([]WorktreeRemovalResult) bool {
+			swapDuringConfirm(t, e.primary, x, y, tmp)
+			return true
+		}, ReporterFunc(noEmit))
+	if res[0].Err == nil || !strings.Contains(res[0].Err.Error(), "changed while waiting") {
+		t.Fatalf("x: err = %v (%s)", res[0].Err, res[0].Message)
+	}
+	if !exists(filepath.Join(x, "build.log")) || !exists(tmp) {
+		t.Fatalf("y (now at %s) or x (now at %s) was removed", x, tmp)
+	}
+	if res[1].Err != nil || exists(e.comp) {
+		t.Fatalf("comp: %v", res[1].Err)
+	}
+}
+
+// The same worktree named twice (by its directory and by its branch) is
+// planned and removed once; both items get its result.
+func TestRemoveWorktreesDeduplicatesItems(t *testing.T) {
+	t.Parallel()
+	e := newRemovalsEnv(t)
+	x := e.f.mustAddWT(t, "a", "feat/x").Path
+	var asked []WorktreeRemovalResult
+	var log removalsLog
+	items := []WorktreeRemoval{target("a", "feat-x"), {Repo: "a", Target: WorktreeTarget{Name: "feat/x", Kind: TargetBranch}}, target("b", "comp")}
+	res := RemoveWorktrees(context.Background(), e.f.w, items, WorktreeRemoveOptions{WorkingDir: e.root},
+		func(rs []WorktreeRemovalResult) bool { asked = rs; return true }, &log)
+	for i, r := range res {
+		if r.Err != nil || r.WorktreeRemoval != items[i] {
+			t.Fatalf("item %d: %+v", i, r)
+		}
+	}
+	if res[0].Message != res[1].Message || exists(x) || exists(e.comp) {
+		t.Fatalf("messages %q, %q; x exists %v", res[0].Message, res[1].Message, exists(x))
+	}
+	planned := 0
+	for _, r := range asked {
+		if r.Plan != nil && r.Err == nil {
+			planned++
+		}
+	}
+	if planned != 2 || log.units != 2 || len(log.finals()) != 2 {
+		t.Fatalf("%d planned in the confirmation, %d units, finals %v; want 2 each", planned, log.units, log.finals())
+	}
+}
+
 // Nested repositories are fetched before being assessed: a commit whose
 // branch was deleted on the nested repository's origin is unpushed.
 func TestRemoveWorktreesFetchesNestedRepositories(t *testing.T) {
@@ -507,6 +564,71 @@ func (l *removalsLog) finals() map[string]Kind {
 		}
 	}
 	return out
+}
+
+// An interruption while the confirmation is shown stops before anything is
+// locked or removed: every confirmed worktree reports the cancellation
+// itself.
+func TestRemoveWorktreesInterruptedDuringConfirm(t *testing.T) {
+	t.Parallel()
+	e := newRemovalsEnv(t)
+	x := e.f.mustAddWT(t, "a", "x").Path
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var log removalsLog
+	res := RemoveWorktrees(ctx, e.f.w, []WorktreeRemoval{target("a", "x"), target("b", "comp")}, WorktreeRemoveOptions{WorkingDir: e.root},
+		func([]WorktreeRemovalResult) bool { cancel(); return true }, &log)
+	for _, r := range res {
+		if r.Err != context.Canceled { // the cancellation itself, not a failure wrapping it
+			t.Errorf("%v: err = %v, want context.Canceled itself", r.WorktreeRemoval, r.Err)
+		}
+	}
+	if !exists(x) || !exists(e.comp) {
+		t.Fatal("removed after the interruption")
+	}
+	for _, ev := range log.events {
+		if ev.Phase == PhaseRemove || ev.Phase == PhaseWorktree && ev.Kind == KindProgress {
+			t.Errorf("event after the interruption: %+v", ev)
+		}
+	}
+}
+
+// While the confirmation is shown, every worktree waits (its last event is
+// a PhaseWait one); so does a confirmed worktree until its removal starts.
+func TestRemoveWorktreesRowsWaitForTheirTurn(t *testing.T) {
+	t.Parallel()
+	e := newRemovalsEnv(t)
+	e.f.mustAddWT(t, "a", "x")
+	dirty := e.f.mustAddWT(t, "a", "dirty").Path
+	writeFile(t, filepath.Join(dirty, "u.txt"), "u\n")
+	var log removalsLog
+	last := func() map[string]Event {
+		m := map[string]Event{}
+		for _, ev := range log.events {
+			m[ev.Repo+"/"+ev.Worktree] = ev
+		}
+		return m
+	}
+	RemoveWorktrees(context.Background(), e.f.w, []WorktreeRemoval{target("a", "x"), target("a", "dirty"), target("b", "comp")}, WorktreeRemoveOptions{WorkingDir: e.root},
+		func([]WorktreeRemovalResult) bool {
+			for row, ev := range last() {
+				if ev.Phase != PhaseWait || ev.Kind != KindProgress {
+					t.Errorf("during the confirmation, %s: last event %+v, want a PhaseWait one", row, ev)
+				}
+			}
+			return true
+		}, &log)
+	// comp (last) waited for x's removal, then was checked again.
+	var comp []Event
+	for _, ev := range log.events {
+		if ev.Repo == "b" {
+			comp = append(comp, ev)
+		}
+	}
+	n := len(comp)
+	if n < 4 || comp[n-4].Phase != PhaseWait || comp[n-4].Message != "queued" || comp[n-3].Phase != PhaseCheck {
+		t.Errorf("comp's last events: %+v", comp)
+	}
 }
 
 // One unit of work and one final event per worktree, every event on the

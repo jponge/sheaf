@@ -973,6 +973,7 @@ type worktreeRemoval struct {
 	r                        bundle.Repository
 	primary, common, repoDir string
 	wt                       WorktreeInfo
+	adminDir                 string // of wt as listed, see worktreeAdminDir
 	deleteBr                 bool
 	wd                       string
 	ev                       func(phase, msg string)
@@ -1015,6 +1016,7 @@ func locateWorktreeRemoval(ctx context.Context, w *Workspace, repo string, tgt W
 		wd, _ = os.Getwd()
 	}
 	x := &worktreeRemoval{r: r, primary: primary, common: common, repoDir: repoDir, wt: wt, deleteBr: deleteBr, wd: wd}
+	x.adminDir, _ = worktreeAdminDir(wt.Path) // none: the plan refuses (directory missing or unusable)
 	x.ev = func(phase, msg string) {
 		emit(Event{Repo: r.Name, Worktree: wt.Dir, Phase: phase, Kind: KindProgress, Message: msg})
 	}
@@ -1154,6 +1156,12 @@ func (x *worktreeRemoval) apply(ctx context.Context, w *Workspace, opts Worktree
 		_, err := usableWorktree(wt, r.Name)
 		return "", err
 	}
+	// The worktree at wt.Path may also have been removed, moved, replaced
+	// by another worktree of the repository or locked: the plan was made
+	// for the entry listed then.
+	if err := x.recheckEntry(ctx); err != nil {
+		return "", err
+	}
 	again, err := x.mkPlan(ctx)
 	if err != nil {
 		return "", err
@@ -1197,6 +1205,65 @@ func (x *worktreeRemoval) apply(ctx context.Context, w *Workspace, opts Worktree
 		return msg + fmt.Sprintf("; deleted branch %s (contained in %s)", wt.Branch, plan.ContainedIn), nil
 	}
 	return msg + fmt.Sprintf("; deleted unmerged branch %s (%s lost)", wt.Branch, commits(plan.UnmergedCommits)), nil
+}
+
+// recheckEntry lists the worktrees of the repository again (under the
+// bundle lock, with fresh reads) and checks that the entry at x.wt.Path is
+// still the worktree that was planned: registered, its directory present,
+// not locked, on the same branch (or detached) and commit, with the same
+// administrative directory (see worktreeAdminDir).
+func (x *worktreeRemoval) recheckEntry(ctx context.Context) error {
+	wt := x.wt
+	infos, _, err := listCheckedRepo(ctx, x.r, x.primary, x.common, false)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(infos, func(in WorktreeInfo) bool { return in.Path == wt.Path })
+	if i < 0 || infos[i].Prunable {
+		return fmt.Errorf("worktree %s no longer exists at %s (removed or moved while waiting for confirmation); nothing was removed", describe(wt), wt.Path)
+	}
+	now := infos[i]
+	changed := func(why string) error {
+		return fmt.Errorf("worktree %s changed while waiting for confirmation (%s); nothing was removed, run the command again", describe(wt), why)
+	}
+	switch {
+	case now.Locked:
+		return changed("it is now locked")
+	case now.Branch != wt.Branch || now.Detached != wt.Detached:
+		return changed("it is now on " + branchOrDetached(now))
+	case now.Head != wt.Head:
+		return changed("its HEAD moved from " + shortID(wt.Head) + " to " + shortID(now.Head))
+	}
+	if admin, err := worktreeAdminDir(wt.Path); err != nil || x.adminDir == "" || !sameFile(admin, x.adminDir) {
+		return changed("it is now another worktree")
+	}
+	return nil
+}
+
+// worktreeAdminDir returns the administrative directory of the linked
+// worktree at path (<common dir>/worktrees/<id>), named by its .git file:
+// it identifies the worktree, and follows it when it is moved.
+func worktreeAdminDir(path string) (string, error) {
+	gitFile := filepath.Join(path, ".git")
+	fi, err := os.Lstat(gitFile)
+	if err != nil {
+		return "", err
+	}
+	if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a file", gitFile)
+	}
+	b, err := os.ReadFile(gitFile)
+	if err != nil {
+		return "", err
+	}
+	dir, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir: ")
+	if !ok || dir == "" {
+		return "", fmt.Errorf("%s does not name a git directory", gitFile)
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(path, dir)
+	}
+	return filepath.Clean(dir), nil
 }
 
 func hasNested(risks []gitx.Risk) bool {
