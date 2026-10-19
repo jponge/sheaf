@@ -182,7 +182,7 @@ func TestTUIWorktreeRemoveTagWorktree(t *testing.T) {
 		t.Fatal("worktree not removed")
 	}
 	for _, want := range []string{"will remove worktree v1 [tag v1] at " + filepath.Join(root, "a", "v1"), "detached HEAD"} {
-		if !strings.Contains(out.String(), want) {
+		if !strings.Contains(expandREP(out.String()), want) { // runs of a character in the path (B55)
 			t.Errorf("dialog lacks %q:\n%s", want, out.String())
 		}
 	}

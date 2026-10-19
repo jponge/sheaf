@@ -223,7 +223,7 @@ func TestHomeOnPTYOverviewOnAlternateScreen(t *testing.T) {
 	wantTerminalRestored(t, s, "0")
 	vt = newVTScreen(24, 100)
 	vt.write(s.output())
-	normal := vt.normalLines()
+	normal := vt.normalLogicalLines() // the path may be wider than the terminal (B55)
 	if vt.altActive() || !slices.Contains(normal, feat) || !slices.Contains(normal, "before-sheaf") || slices.ContainsFunc(normal, func(l string) bool { return strings.Contains(l, "STATE") }) {
 		t.Errorf("after enter: alternate screen %v, want the normal screen with the path %s and no overview:\n%s", vt.altActive(), feat, strings.Join(normal, "\n"))
 	}
@@ -418,6 +418,26 @@ var (
 
 func isDoctorLine(l string) bool { return doctorLine.MatchString(l) }
 
+// isTitle reports whether the line l of a view is the title title, whole
+// or, when wider than the terminal, cut with an ellipsis (B52 E2, B55).
+func isTitle(l, title string) bool {
+	head, cut := strings.CutSuffix(l, "…")
+	return l == title || cut && head != "" && strings.HasPrefix(title, head)
+}
+
+func TestIsTitle(t *testing.T) {
+	t.Parallel()
+	title := "sheaf doctor: /tmp/b"
+	for l, want := range map[string]bool{
+		title: true, "sheaf doctor: /t…": true, "sheaf doctor: /tmp/b2": false,
+		"sheaf doctor: /x…": false, "…": false, "sheaf doctor: /t": false, "sheaf: /tmp/b": false,
+	} {
+		if got := isTitle(l, title); got != want {
+			t.Errorf("isTitle(%q) = %v, want %v", l, got, want)
+		}
+	}
+}
+
 // overviewStatus matches the status line of an overview (filtered and
 // scrolled or not) followed by a message.
 var overviewStatus = regexp.MustCompile(`^\d+/\d+ selected(?: · \d+ shown)?(?: · rows \d+-\d+ of \d+)? · (.+)$`)
@@ -439,7 +459,7 @@ func doctorView(t *testing.T, s *ptyShell, root, what string, ok func(status, li
 	t.Helper()
 	return waitScreenStateRows(t, s, 10, what, func(vt *vtScreen) bool {
 		alt := vt.altLines()
-		if !vt.altActive() || len(alt) == 0 || alt[0] != "sheaf doctor: "+root {
+		if !vt.altActive() || len(alt) == 0 || !isTitle(alt[0], "sheaf doctor: "+root) {
 			return false
 		}
 		var st, lines []string

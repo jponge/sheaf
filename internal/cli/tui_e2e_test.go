@@ -492,7 +492,7 @@ func TestTUIRemoveConfirmYes(t *testing.T) {
 	if exists(filepath.Join(e.cwd, "alpha")) || len(load(t, e.cwd).Repositories) != 0 {
 		t.Fatal("alpha not removed")
 	}
-	o := out.String()
+	o := expandREP(out.String()) // runs of a character in the path (B55)
 	for _, want := range []string{"Remove alpha?", "will delete " + filepath.Join(e.cwd, "alpha"), "removed " + filepath.Join(e.cwd, "alpha")} {
 		if !strings.Contains(o, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, o)

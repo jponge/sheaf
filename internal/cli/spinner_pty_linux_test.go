@@ -97,7 +97,7 @@ func TestWorktreeAddSpinnerOnPTY(t *testing.T) {
 	if hasSpinnerFrame(lines) {
 		t.Errorf("working indicator left on the screen:\n%s", strings.Join(lines, "\n"))
 	}
-	joined := strings.Join(lines, "\n")
+	joined := strings.Join(vt.normalLogicalLines(), "\n") // paths may be wider than the terminal (B55)
 	if !strings.Contains(joined, "alpha: fetch: fetching origin\n") || !strings.Contains(joined, filepath.Join(e.cwd, "alpha", "spin-x")) {
 		t.Errorf("output lines missing or damaged:\n%s", joined)
 	}

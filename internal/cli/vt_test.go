@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,6 +32,18 @@ type vtScreen struct {
 
 	scrollback []string
 	unknown    map[string]int
+
+	// cont marks the rows (by their first cell, which stays with the row
+	// when it scrolls) that the terminal wrapped onto the next one (soft
+	// wrap), and scrollbackCont the lines of the scrollback that were such
+	// rows, with their text untrimmed in scrollbackRaw (see logicalLines).
+	cont           map[*rune]bool
+	scrollbackCont []bool
+	scrollbackRaw  []string
+	// last is the last character printed, with its width, which REP
+	// repeats.
+	last      string
+	lastWidth int
 
 	alt   bool     // the alternate screen is active (grid)
 	other [][]rune // the inactive screen
@@ -82,9 +95,14 @@ func (s *vtScreen) write(out string) {
 
 func (s *vtScreen) print(g string, width int) {
 	if s.wrap {
+		if s.cont == nil {
+			s.cont = map[*rune]bool{}
+		}
+		s.cont[&s.grid[s.y][0]] = true
 		s.x, s.wrap = 0, false
 		s.lineFeed()
 	}
+	s.last, s.lastWidth = g, width
 	r := []rune(g)[0]
 	s.grid[s.y][s.x] = r
 	for i := 1; i < width && s.x+i < s.cols; i++ {
@@ -111,6 +129,8 @@ func (s *vtScreen) lineFeed() {
 func (s *vtScreen) scrollOff() {
 	if s.top == 0 && s.bottom == s.rows-1 && !s.alt {
 		s.scrollback = append(s.scrollback, lineText(s.grid[0]))
+		s.scrollbackCont = append(s.scrollbackCont, s.cont[&s.grid[0][0]])
+		s.scrollbackRaw = append(s.scrollbackRaw, rowText(s.grid[0]))
 	}
 	copy(s.grid[s.top:s.bottom], s.grid[s.top+1:s.bottom+1])
 	s.grid[s.bottom] = s.blank()
@@ -128,6 +148,7 @@ func (s *vtScreen) control(b byte) {
 		s.x, s.wrap = 0, false
 	case '\n', '\v', '\f':
 		s.wrap = false
+		delete(s.cont, &s.grid[s.y][0]) // a line feed ends the line
 		if s.newline {
 			s.x = 0
 		}
@@ -185,6 +206,13 @@ func (s *vtScreen) csi(seq string, cmd ansi.Cmd, params ansi.Params) {
 			return
 		}
 		s.unknown[seq]++
+		return
+	}
+	if cmd.Final() == 'b' && s.last != "" {
+		// REP: repeat the last character, wrapping as printing it would.
+		for range n(0, 1) {
+			s.print(s.last, s.lastWidth)
+		}
 		return
 	}
 	clear := func(row []rune, from, to int) {
@@ -320,14 +348,17 @@ func (s *vtScreen) altScreen(mode int, set bool) {
 	}
 }
 
-func lineText(row []rune) string {
+func lineText(row []rune) string { return strings.TrimRight(rowText(row), " ") }
+
+// rowText returns the text of row, trailing spaces included.
+func rowText(row []rune) string {
 	var b strings.Builder
 	for _, r := range row {
 		if r != 0 {
 			b.WriteRune(r)
 		}
 	}
-	return strings.TrimRight(b.String(), " ")
+	return b.String()
 }
 
 // lines returns the scrollback followed by the normal screen (see
@@ -344,6 +375,37 @@ func (s *vtScreen) normalLines() []string {
 		normal = s.other
 	}
 	return trimmedLines(append([]string(nil), s.scrollback...), normal)
+}
+
+// normalLogicalLines returns normalLines with the rows that the terminal
+// wrapped (soft wraps of lines wider than the screen) joined: the lines as
+// printed, whatever their length.
+func (s *vtScreen) normalLogicalLines() []string {
+	normal := s.grid
+	if s.alt {
+		normal = s.other
+	}
+	raw, cont := slices.Clone(s.scrollbackRaw), slices.Clone(s.scrollbackCont)
+	for _, row := range normal {
+		raw, cont = append(raw, rowText(row)), append(cont, s.cont[&row[0]])
+	}
+	var out []string
+	line := ""
+	for i, r := range raw {
+		if cont[i] {
+			line += r
+			continue
+		}
+		out = append(out, strings.TrimRight(line+r, " "))
+		line = ""
+	}
+	if line != "" {
+		out = append(out, strings.TrimRight(line, " "))
+	}
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return out
 }
 
 // altLines returns the alternate screen while it is active, trailing empty
@@ -387,6 +449,9 @@ func TestVTScreen(t *testing.T) {
 		{"bare line feed", "ab\ncd", false, []string{"ab", "  cd"}},
 		{"newline mode", "ab\ncd", true, []string{"ab", "cd"}},
 		{"scrollback", "1\r\n2\r\n3\r\n4", false, []string{"1", "2", "3", "4"}},
+		{"repeat", "ab\x1b[2b", false, []string{"abbb"}},
+		{"repeat once", "ab\x1b[b", false, []string{"abb"}},
+		{"repeat wraps", "a\x1b[5b", false, []string{"aaaa", "aa"}},
 	} {
 		vt := newVTScreen(3, 4)
 		vt.newline = tc.newline
@@ -399,6 +464,30 @@ func TestVTScreen(t *testing.T) {
 	vt.write("1\r\n2\r\n3\r\n4")
 	if strings.Join(vt.scrollback, "|") != "1" {
 		t.Errorf("scrollback %q, want [1]", vt.scrollback)
+	}
+}
+
+// normalLogicalLines joins the rows that the terminal wrapped (soft
+// wraps), in the scrollback and on the screen, and only those: a line
+// feed ends a line, also one filling a row exactly.
+func TestVTScreenLogicalLines(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		out  string
+		want []string
+	}{
+		{"abcdefghij\r\nxy", []string{"abcdefghij", "xy"}},
+		{"abcd\r\nef", []string{"abcd", "ef"}},
+		{"ab d e\r\n", []string{"ab d e"}},
+		{"1\r\n2\r\nabcdefgh\r\n3\r\n4", []string{"1", "2", "abcdefgh", "3", "4"}},
+		{"ab\x1b[6b\r\nz", []string{"abbbbbbb", "z"}},
+		{"abcdefgh\x1b[H\x1b[Kxy\r\n", []string{"xy", "efgh"}}, // rewritten, then a line feed
+	} {
+		vt := newVTScreen(3, 4)
+		vt.write(tc.out)
+		if got := vt.normalLogicalLines(); strings.Join(got, "|") != strings.Join(tc.want, "|") {
+			t.Errorf("%q: logical lines %q, want %q (physical %q)", tc.out, got, tc.want, vt.normalLines())
+		}
 	}
 }
 
