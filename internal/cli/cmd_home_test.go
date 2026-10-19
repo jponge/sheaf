@@ -370,6 +370,45 @@ func TestHomeEnterPrintsPath(t *testing.T) {
 	}
 }
 
+// Without the shell function (no SHEAF_CD_FILE), the key help labels enter
+// "print path", and after the path, alone on standard output (scripts may
+// read it), a hint on standard error tells how to add the shell function
+// for the shell of $SHELL (bash, zsh, fish), else where to read about it
+// (B52 D2).
+func TestHomeEnterWithoutShellFunction(t *testing.T) {
+	t.Parallel()
+	e, _, feat, _, _ := homeBundle(t)
+	for _, tc := range []struct{ shell, hint string }{
+		{"/bin/bash", `sheaf: to cd on enter, add the shell function to ~/.bashrc: eval "$(sheaf shell-init bash)"`},
+		{"/usr/bin/zsh", `sheaf: to cd on enter, add the shell function to ~/.zshrc: eval "$(sheaf shell-init zsh)"`},
+		{"/opt/homebrew/bin/fish", `sheaf: to cd on enter, add the shell function to ~/.config/fish/config.fish: sheaf shell-init fish | source`},
+		{"/bin/tcsh", `sheaf: to cd on enter, add the sheaf shell function (see "Shell integration" in the README)`},
+		{"", `sheaf: to cd on enter, add the sheaf shell function (see "Shell integration" in the README)`},
+	} {
+		d := e.deps()
+		d.Getenv = func(k string) string {
+			if k == "SHELL" {
+				return tc.shell
+			}
+			return ""
+		}
+		var out syncBuffer
+		errs, code := runHomeWith(t, d, newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", "\r")), &out)
+		if code != 0 {
+			t.Fatalf("%s: exit %d\nstdout:\n%s\nstderr:\n%s", tc.shell, code, out.String(), errs)
+		}
+		if !strings.HasSuffix(out.String(), feat+"\n") || strings.Contains(out.String(), "shell") {
+			t.Errorf("%s: stdout does not end with the path of feat alone:\n%q", tc.shell, out.String())
+		}
+		if errs != tc.hint+"\n" {
+			t.Errorf("%s: stderr %q, want %q", tc.shell, errs, tc.hint+"\n")
+		}
+		if text := ansi.Strip(out.String()); !strings.Contains(text, "• enter print path •") || strings.Contains(text, "enter cd") {
+			t.Errorf("%s: key help without \"enter print path\":\n%s", tc.shell, text)
+		}
+	}
+}
+
 func TestHomeEnterWritesTheCDFileOfTheShellWrapper(t *testing.T) {
 	t.Parallel()
 	e, _, feat, _, _ := homeBundle(t)
@@ -392,6 +431,9 @@ func TestHomeEnterWritesTheCDFileOfTheShellWrapper(t *testing.T) {
 	}
 	if strings.Contains(out.String(), feat+"\n") {
 		t.Fatalf("the path was also printed:\n%q", out.String())
+	}
+	if errs != "" || !strings.Contains(ansi.Strip(out.String()), "• enter cd •") {
+		t.Fatalf("hint printed, or no \"enter cd\" in the key help:\nstdout:\n%s\nstderr:\n%s", out.String(), errs)
 	}
 }
 
@@ -1057,9 +1099,16 @@ func TestHomeMultiRemoveDeclinedKeepsAll(t *testing.T) {
 func TestHomeCompactHelpAndKeptToggle(t *testing.T) {
 	t.Parallel()
 	e, _, _, _, _ := homeBundle(t)
+	d := e.deps()
+	d.Getenv = func(k string) string {
+		if k == "SHEAF_CD_FILE" {
+			return filepath.Join(t.TempDir(), "cd") // with the shell function: "enter cd"
+		}
+		return ""
+	}
 	var out syncBuffer
 	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "?"), key{keys: "f", wait: waitOutput(t, &out, "? less")}), keys(), reportKey(t, &out, "fetch", "q"), ovKeys(t, &out, "fetch: done", 1, "q"))
-	errs, code := runHomeWith(t, e.deps(), in, &out)
+	errs, code := runHomeWith(t, d, in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}

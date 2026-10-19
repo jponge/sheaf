@@ -62,7 +62,8 @@ func installHome(root *cobra.Command, d Deps) {
 // then comes back. Enter on a checkout ends sheaf: the path of the checkout is
 // written to the file named by $SHEAF_CD_FILE, set by the shell function
 // of shell-init, which then changes the directory; without it the path is
-// printed. On a terminal, the programs of the home screen and of its
+// printed, with a hint to add the shell function (the key help then says
+// "print path" rather than "cd"). On a terminal, the programs of the home screen and of its
 // actions set the window title (see homeTitle); bubbletea clears it when
 // each program ends.
 func runHome(c *cobra.Command, d Deps) error {
@@ -482,8 +483,13 @@ func (h *home) actions() []tui.OverviewAction {
 		path := h.rows[targets[0]].checkout.Path
 		return "sent to the clipboard: " + path, tea.SetClipboard(path)
 	}
+	// Without the shell function, enter prints the path (see cd).
+	cdHelp := "cd"
+	if h.d.getenv(cdFileVar) == "" {
+		cdHelp = "print path"
+	}
 	return []tui.OverviewAction{
-		{Key: "enter", Name: "cd", Help: "cd", Short: true, Scope: tui.ScopeCurrent, Check: noProblem},
+		{Key: "enter", Name: "cd", Help: cdHelp, Short: true, Scope: tui.ScopeCurrent, Check: noProblem},
 		{Key: "y", Name: "copy", Help: "copy path", Scope: tui.ScopeCurrent, Check: copyable, Do: copyPath},
 		{Key: "u", Name: "update", Help: "update", Short: true, Scope: tui.ScopeRows, Check: noProblem},
 		{Key: "f", Name: "fetch", Help: "fetch", Short: true, Scope: tui.ScopeRows},
@@ -497,14 +503,36 @@ func (h *home) actions() []tui.OverviewAction {
 	}
 }
 
-// cd ends sheaf on the checkout of r (see runHome).
+// cd ends sheaf on the checkout of r (see runHome). Without the shell
+// function, the path printed on standard output is followed by a hint on
+// standard error (see cdHint).
 func (h *home) cd(r homeRow) error {
 	path := r.checkout.Path
 	if f := h.d.getenv(cdFileVar); f != "" {
 		return os.WriteFile(f, []byte(path), 0o600)
 	}
-	_, err := fmt.Fprintln(h.c.OutOrStdout(), path)
-	return err
+	if _, err := fmt.Fprintln(h.c.OutOrStdout(), path); err != nil {
+		return err
+	}
+	fmt.Fprintln(h.c.ErrOrStderr(), "sheaf: "+cdHint(h.d.getenv("SHELL")))
+	return nil
+}
+
+// cdHint tells how to add the shell function that makes enter change the
+// directory, for shell, the path of the user's shell ($SHELL): the line to
+// add to the startup file of bash, zsh or fish; otherwise where the README
+// explains it.
+func cdHint(shell string) string {
+	const add = "to cd on enter, add the shell function to "
+	switch filepath.Base(shell) {
+	case "bash":
+		return add + `~/.bashrc: eval "$(sheaf shell-init bash)"`
+	case "zsh":
+		return add + `~/.zshrc: eval "$(sheaf shell-init zsh)"`
+	case "fish":
+		return add + "~/.config/fish/config.fish: sheaf shell-init fish | source"
+	}
+	return `to cd on enter, add the sheaf shell function (see "Shell integration" in the README)`
 }
 
 // act runs the action name on targets and returns the message the next
