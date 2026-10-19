@@ -197,7 +197,8 @@ func (w *spinWriter) Write(p []byte) (int, error) {
 	return w.w.Write(p)
 }
 
-// spinHosting runs the gh default repository calls of h as phases of s.
+// spinHosting runs the gh default repository and browse calls of h as
+// phases of s.
 type spinHosting struct {
 	hosting.Hosting
 	s *spinner
@@ -206,4 +207,9 @@ type spinHosting struct {
 func (h spinHosting) SetDefaultRepo(ctx context.Context, dir, owner, name string) error {
 	defer h.s.start("setting the gh default repository to " + owner + "/" + name)()
 	return h.Hosting.SetDefaultRepo(ctx, dir, owner, name)
+}
+
+func (h spinHosting) Browse(ctx context.Context, owner, name string, page hosting.Page) error {
+	defer h.s.start("opening " + owner + "/" + name + " in the web browser")()
+	return h.Hosting.Browse(ctx, owner, name, page)
 }

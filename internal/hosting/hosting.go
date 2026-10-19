@@ -136,8 +136,9 @@ type Page struct {
 
 // ValidatePage validates owner and name like ValidateRepo, then page: a
 // pull request number that is not negative, and a branch that does not
-// begin with '-' (it would be read as an option) and has no whitespace or
-// control characters.
+// begin with '-' (it would be read as an option) and has no control
+// characters (git refuses ASCII spaces in branch names, not every Unicode
+// space).
 func ValidatePage(owner, name string, page Page) error {
 	if err := ValidateRepo(owner, name); err != nil {
 		return err
@@ -145,7 +146,7 @@ func ValidatePage(owner, name string, page Page) error {
 	if page.PR < 0 {
 		return fmt.Errorf("%w: pull request number %d must not be negative", ErrInvalidInput, page.PR)
 	}
-	if strings.HasPrefix(page.Branch, "-") || strings.ContainsFunc(page.Branch, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+	if strings.HasPrefix(page.Branch, "-") || strings.ContainsFunc(page.Branch, unicode.IsControl) {
 		return fmt.Errorf("%w: branch %q", ErrInvalidInput, page.Branch)
 	}
 	return nil

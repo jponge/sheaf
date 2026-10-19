@@ -142,6 +142,17 @@ func (g *GH) run(ctx context.Context, args ...string) ([]byte, error) {
 // runIn runs gh in dir (empty: the current directory), without the
 // variables that redirect git to another repository when dir is set.
 func (g *GH) runIn(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	cmd := g.command(ctx, dir, args)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := g.failure(ctx, args, cmd.Run(), stderr.String()); err != nil {
+		return nil, err
+	}
+	return stdout.Bytes(), nil
+}
+
+// command returns the command running gh with args in dir (see runIn).
+func (g *GH) command(ctx context.Context, dir string, args []string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, g.opts.Path, args...)
 	cmd.Env = childEnv()
 	if dir != "" {
@@ -150,30 +161,69 @@ func (g *GH) runIn(ctx context.Context, dir string, args ...string) ([]byte, err
 	}
 	// Bound the wait for orphaned grandchildren holding the output pipes after a kill.
 	cmd.WaitDelay = 2 * time.Second
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
+	return cmd
+}
+
+// failure returns the error of the gh command args whose run ended with
+// err (nil on success: failure then returns nil) and printed stderr.
+func (g *GH) failure(ctx context.Context, args []string, err error, stderr string) error {
 	if cerr := ctx.Err(); cerr != nil {
-		return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), cerr)
+		return fmt.Errorf("gh %s: %w", strings.Join(args, " "), cerr)
 	}
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) && !isChdirError(err) {
+		return fmt.Errorf("%w (%s): install the GitHub CLI from https://cli.github.com/ and run `gh auth login`: %w",
+			ErrGHNotFound, g.opts.Path, err)
+	}
+	msg := strings.TrimSpace(stderr)
+	wrapped := err
+	if isNotFound(msg) {
+		wrapped = fmt.Errorf("%w: %w", ErrNotFound, err)
+	} else if isUnauthenticated(err, msg) {
+		wrapped = fmt.Errorf("%w: %w", ErrGHNotAuthenticated, err)
+	}
+	if msg == "" {
+		return fmt.Errorf("gh %s: %w", strings.Join(args, " "), wrapped)
+	}
+	return fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), wrapped, msg)
+}
+
+// runBrowser runs gh like run for a command that starts a web browser.
+// gh's browser launcher passes gh's standard output and error on to the
+// browser (or to xdg-open, $BROWSER...), which may outlive gh: with pipes,
+// the wait for their end would last until the browser exits (WaitDelay
+// then reports a failure). Standard output goes to the null device and
+// standard error to a temporary file read once gh has exited, so the
+// wait ends with gh. The line in which gh announces the page ("Opening
+// ... in your browser.") is left out of an error.
+func (g *GH) runBrowser(ctx context.Context, args ...string) error {
+	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	if err != nil {
-		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) && !isChdirError(err) {
-			return nil, fmt.Errorf("%w (%s): install the GitHub CLI from https://cli.github.com/ and run `gh auth login`: %w",
-				ErrGHNotFound, g.opts.Path, err)
-		}
-		msg := strings.TrimSpace(stderr.String())
-		wrapped := err
-		if isNotFound(msg) {
-			wrapped = fmt.Errorf("%w: %w", ErrNotFound, err)
-		} else if isUnauthenticated(err, msg) {
-			wrapped = fmt.Errorf("%w: %w", ErrGHNotAuthenticated, err)
-		}
-		if msg == "" {
-			return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), wrapped)
-		}
-		return nil, fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), wrapped, msg)
+		return err
 	}
-	return stdout.Bytes(), nil
+	defer null.Close()
+	errf, err := os.CreateTemp("", "sheaf-gh-*.stderr")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(errf.Name())
+	defer errf.Close()
+	cmd := g.command(ctx, "", args)
+	cmd.Stdout, cmd.Stderr = null, errf
+	runErr := cmd.Run()
+	stderr, err := os.ReadFile(errf.Name())
+	if err != nil && runErr == nil {
+		return err
+	}
+	var kept []string
+	for _, l := range strings.Split(string(stderr), "\n") {
+		if !strings.HasPrefix(l, "Opening ") || !strings.HasSuffix(strings.TrimSpace(l), " in your browser.") {
+			kept = append(kept, l)
+		}
+	}
+	return g.failure(ctx, args, runErr, strings.Join(kept, "\n"))
 }
 
 func ghHost() string {
@@ -432,6 +482,5 @@ func (g *GH) Browse(ctx context.Context, owner, name string, page Page) error {
 	case page.Branch != "":
 		args = []string{"browse", "--repo", slug, "--branch", page.Branch}
 	}
-	_, err := g.run(ctx, args...)
-	return err
+	return g.runBrowser(ctx, args...)
 }

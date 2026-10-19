@@ -317,3 +317,23 @@ func TestSpinnerHostingSetDefaultRepo(t *testing.T) {
 		t.Fatalf("phases during the call %d, after %d; want 1 and 0", during, len(s.phases))
 	}
 }
+
+// gh may be slow to open a page (pull request lookup): Browse is a phase.
+func TestSpinnerHostingBrowse(t *testing.T) {
+	t.Parallel()
+	s, _, _ := testSpinner()
+	f := hostingtest.NewFake()
+	var during int
+	f.BrowseHook = func(context.Context) {
+		s.mu.Lock()
+		during = len(s.phases)
+		s.mu.Unlock()
+	}
+	var h hosting.Hosting = spinHosting{f, s}
+	if err := h.Browse(context.Background(), "o", "a", hosting.Page{}); err != nil {
+		t.Fatal(err)
+	}
+	if during != 1 || len(s.phases) != 0 {
+		t.Fatalf("phases during the call %d, after %d; want 1 and 0", during, len(s.phases))
+	}
+}

@@ -93,8 +93,8 @@ func (d Deps) getenv(k string) string {
 	return os.Getenv(k)
 }
 
-// hosting returns the hosting service; its gh default repository calls
-// show the working indicator (see spinHosting).
+// hosting returns the hosting service; its gh default repository and
+// browse calls show the working indicator (see spinHosting).
 func (d Deps) hosting() hosting.Hosting {
 	var h hosting.Hosting
 	if d.Hosting != nil {
