@@ -114,6 +114,39 @@ func TestCollectStatusPullRequestWorktrees(t *testing.T) {
 	}
 }
 
+// Only a branch tracking refs/pull/<n>/head of the reference repository's
+// remote (upstream for a clone of a fork, as wt pr sets it up) is a pull
+// request worktree, as browse sees it: the pull requests of the fork's
+// remote (origin) are not those of the repository, and such a branch has
+// no pull request (status then shows it without upstream).
+func TestCollectStatusPullRequestOfTheReferenceRemoteOnly(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	_, primary := f.addForked(t, "x", testutil.OriginOpts{})
+	for _, b := range []struct {
+		dir, branch, remote string
+		n                   int
+	}{{"pr-5", "pr/5", "origin", 5}, {"pr-6", "pr/6", "upstream", 6}} {
+		addWorktree(t, primary, b.dir, b.branch, false)
+		testutil.Git(t, primary, "config", "branch."+b.branch+".remote", b.remote)
+		testutil.Git(t, primary, "config", "branch."+b.branch+".merge", fmt.Sprintf("refs/pull/%d/head", b.n))
+	}
+	r, err := CollectStatus(context.Background(), f.w, StatusOptions{Jobs: 4}, Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, c := range r.Checkouts {
+		got[c.Dir] = "-"
+		if p := c.PullRequest; p != nil {
+			got[c.Dir] = fmt.Sprintf("#%d", p.Number)
+		}
+	}
+	if want := map[string]string{"main": "-", "pr-5": "-", "pr-6": "#6"}; !maps.Equal(got, want) {
+		t.Errorf("pull requests %v, want %v", got, want)
+	}
+}
+
 // status never fetches unless asked to.
 func TestCollectStatusFetchesOnlyWithFetchOption(t *testing.T) {
 	t.Parallel()

@@ -44,9 +44,11 @@ type CheckoutStatus struct {
 	// status or the commit could not be read).
 	HeadTime time.Time
 	// PullRequest is set for a checkout on a branch tracking the head of a
-	// pull request (branch.<name>.merge = refs/pull/<n>/head, as `sheaf wt
-	// pr` sets up for a pull request from a fork), for which git has no
-	// upstream (Status.Upstream is empty).
+	// pull request of the repository (branch.<name>.merge =
+	// refs/pull/<n>/head of the repository's remote, upstream for a clone
+	// of a fork, as `sheaf wt pr` sets up for a pull request from a fork,
+	// and as browse sees it), for which git has no upstream
+	// (Status.Upstream is empty).
 	PullRequest *PullRequestHead
 }
 
@@ -165,7 +167,7 @@ func CollectStatus(ctx context.Context, w *Workspace, opts StatusOptions, rep Re
 // pullRequests sets the PullRequest of cs, the checkouts of sets in order:
 // for each repository with a checkout on a branch without upstream, one
 // read of its branch configuration, then, for each checkout on a pull
-// request branch, one count of its commits ahead of and behind the recorded
+// request branch (see CheckoutStatus.PullRequest), one count of its commits ahead of and behind the recorded
 // head (gitx.PullHeadRef), up to jobs repositories at a time. Best effort:
 // what cannot be read is left unset (not recorded).
 func pullRequests(ctx context.Context, sets []*repoCheckouts, cs []CheckoutStatus, jobs int) {
@@ -183,7 +185,7 @@ func pullRequests(ctx context.Context, sets []*repoCheckouts, cs []CheckoutStatu
 		if !slices.ContainsFunc(repo, untracked) {
 			return
 		}
-		prs, err := gitx.BranchPullRequests(ctx, sets[i].primary)
+		prs, err := gitx.BranchPullRequests(ctx, sets[i].primary, sets[i].remotes.Reference)
 		if err != nil {
 			return
 		}

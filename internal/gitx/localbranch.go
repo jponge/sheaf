@@ -83,17 +83,18 @@ func PullRequestBranches(ctx context.Context, dir, remote string) ([]int, error)
 }
 
 // BranchPullRequests returns, by local branch name, the number of the pull
-// request whose head the branch tracks (branch.<name>.merge =
-// refs/pull/<n>/head, as `sheaf wt pr` sets up), for the branches of the
-// repository containing dir that track one.
-func BranchPullRequests(ctx context.Context, dir string) (map[string]int, error) {
+// request whose head the branch tracks from remote (branch.<name>.remote =
+// remote and branch.<name>.merge = refs/pull/<n>/head, as `sheaf wt pr`
+// sets up), for the branches of the repository containing dir that track
+// one.
+func BranchPullRequests(ctx context.Context, dir, remote string) (map[string]int, error) {
 	cfg, err := branchConfig(ctx, dir)
 	if err != nil {
 		return nil, err
 	}
 	prs := map[string]int{}
 	for name, c := range cfg {
-		if n, ok := PullRequestRef(c.merge); ok && c.merge == "refs/pull/"+strconv.Itoa(n)+"/head" {
+		if n, ok := PullRequestRef(c.merge); ok && c.remote == remote && c.merge == "refs/pull/"+strconv.Itoa(n)+"/head" {
 			prs[name] = n
 		}
 	}
