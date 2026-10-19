@@ -121,6 +121,9 @@ func eventRow(e ops.Event, aside string) tui.RowUpdate {
 			u.Message = errorText(e.Err)
 		}
 	default:
+		if e.Phase == ops.PhaseWait {
+			u.State = tui.RowWaiting
+		}
 		if e.Phase == ops.PhaseWaitFastForward {
 			u.Message = "waiting for in-progress fast-forward to finish (Ctrl-C again to force)"
 		}

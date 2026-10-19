@@ -103,6 +103,8 @@ func TestEventRow(t *testing.T) {
 			"", tui.RowUpdate{Key: "a/main", Label: "a/main", State: tui.RowInterrupted}},
 		{"wait", ops.Event{Repo: "a", Worktree: "main", Phase: ops.PhaseWaitFastForward, Kind: ops.KindProgress, Message: "waiting"},
 			"", tui.RowUpdate{Key: "a/main", Label: "a/main", Message: "waiting for in-progress fast-forward to finish (Ctrl-C again to force)"}},
+		{"waiting", ops.Event{Repo: "a", Worktree: "x", Phase: ops.PhaseWait, Kind: ops.KindProgress, Message: "waiting for the confirmation"},
+			"", tui.RowUpdate{Key: "a/x", Label: "a/x", State: tui.RowWaiting, Message: "waiting for the confirmation"}},
 		{"aside phase", ops.Event{Repo: "a", Phase: ops.PhaseFetch, Kind: ops.KindDone, Message: "fetched origin"},
 			ops.PhaseFetch, tui.RowUpdate{Key: "a (fetch)", Label: "a (fetch)", State: tui.RowDone, Message: "fetched origin", Aside: true}},
 	} {

@@ -30,11 +30,18 @@ const (
 	// RowInterrupted means the work of the row was stopped, or never
 	// started, because the command was interrupted: not a failure.
 	RowInterrupted
+	// RowWaiting means the work of the row waits (for a confirmation, or
+	// for its turn): a static marker instead of the spinner; not finished,
+	// it counts as running. An update without state makes it run again.
+	RowWaiting
 )
+
+// pending reports whether the work of a row in state s is not finished.
+func (s RowState) pending() bool { return s == RowRunning || s == RowWaiting }
 
 // RowUpdate is a message creating or updating the row Key of a Progress.
 // Label is used when the row is created. A zero State keeps the row's state
-// (a new row starts running); a non-empty Message replaces the row's
+// (a new row starts running, a waiting one runs again); a non-empty Message replaces the row's
 // message, as does any Message with RowInterrupted (the message of the
 // running work does not describe the interrupted one). Aside rows are
 // displayed faint and not counted with the others in the header (only
@@ -206,7 +213,7 @@ func (m Progress) Counts() (running, done, skipped, failed int) {
 			continue
 		}
 		switch r.state {
-		case RowRunning:
+		case RowRunning, RowWaiting:
 			running++
 		case RowDone:
 			done++
@@ -305,8 +312,11 @@ func (m *Progress) apply(u RowUpdate) {
 		return
 	}
 	r := &m.rows[i]
-	if u.State != 0 {
+	switch {
+	case u.State != 0:
 		r.state = u.State
+	case r.state == RowWaiting:
+		r.state = RowRunning
 	}
 	if u.Message != "" || u.State == RowInterrupted {
 		r.message = u.Message
@@ -412,7 +422,7 @@ func (m Progress) asideCounts() string {
 	for _, r := range m.rows {
 		if r.aside {
 			all++
-			if r.state != RowRunning {
+			if !r.state.pending() {
 				finished++
 			}
 		}
@@ -434,7 +444,7 @@ func (m Progress) ratio() (float64, bool) {
 	}
 	finished := 0
 	for _, r := range m.rows {
-		if !r.aside && r.state != RowRunning {
+		if !r.aside && !r.state.pending() {
 			finished++
 		}
 	}
@@ -559,7 +569,7 @@ func (m Progress) render() string {
 			shown[i] = true
 		}
 		for i, r := range m.rows {
-			if !shown[i] && r.state == RowRunning {
+			if !shown[i] && r.state.pending() {
 				running++
 			}
 		}
@@ -599,7 +609,7 @@ func (m Progress) visibleRows(footer int) ([]int, bool) {
 	}
 	keep := map[int]bool{}
 	for i, r := range m.rows {
-		if len(keep) < room && r.state == RowRunning {
+		if len(keep) < room && r.state.pending() {
 			keep[i] = true
 		}
 	}
@@ -633,6 +643,8 @@ func (m Progress) renderRow(r progressRow, width int) string {
 		}
 	case RowCancelled:
 		marker, msg = st.Tag.Render("-"), "cancelled"
+	case RowWaiting:
+		marker, msg = st.Tag.Render("·"), r.message
 	case RowInterrupted:
 		marker, msg = st.Warn.Render("!"), "interrupted"
 		if r.message != "" {

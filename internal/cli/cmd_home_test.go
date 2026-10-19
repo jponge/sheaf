@@ -956,6 +956,41 @@ func TestHomeMultiRemoveHintsNameTheGivenBundle(t *testing.T) {
 	}
 }
 
+// The refused worktree is listed in the dialog itself, before the answer
+// (the progress rows show the refusals only afterwards).
+func TestHomeMultiRemoveDialogListsTheRefusedWorktree(t *testing.T) {
+	t.Parallel()
+	e, _, _, _ := multiRemoveBundle(t)
+	var out syncBuffer
+	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "x"),
+		ovKeys(t, &out, "wt rm: 2 done, 0 cancelled, 1 failed", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	o := ansi.Strip(out.String())
+	answered := strings.Index(o, "Removing 3 worktrees")
+	if code != 0 || answered < 0 || !strings.Contains(o[:answered], "refusing to remove alpha/feat: 1 untracked file") {
+		t.Fatalf("exit %d; the dialog does not list the refusal\nstdout:\n%s\nstderr:\n%s", code, o, errs)
+	}
+}
+
+// A selected worktree containing the working directory of sheaf is
+// refused, as by wt rm; the others are removed.
+func TestHomeMultiRemoveRefusesTheWorkingDirectory(t *testing.T) {
+	t.Parallel()
+	e, feat, x, y := multiRemoveBundle(t)
+	if err := os.Remove(filepath.Join(feat, "new.txt")); err != nil {
+		t.Fatal(err)
+	}
+	d := e.deps()
+	d.Getwd = func() (string, error) { return x, nil }
+	var out syncBuffer
+	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "x"),
+		ovKeys(t, &out, "wt rm: 2 done, 0 cancelled, 1 failed", 1, "q"))
+	errs, code := runHomeWith(t, d, in, &out)
+	if code != 0 || !exists(x) || exists(y) || exists(feat) || !strings.Contains(ansi.Strip(out.String()), "it contains the current working directory") {
+		t.Fatalf("exit %d, x %v, y %v, feat %v\nstdout:\n%s\nstderr:\n%s", code, exists(x), exists(y), exists(feat), out.String(), errs)
+	}
+}
+
 // Declining the one confirmation keeps every worktree and the selection.
 func TestHomeMultiRemoveDeclinedKeepsAll(t *testing.T) {
 	t.Parallel()

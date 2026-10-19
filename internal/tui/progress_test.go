@@ -129,6 +129,36 @@ func TestProgressMessageOnlyUpdateKeepsFinalState(t *testing.T) {
 	}
 }
 
+// A waiting row (its work waits for a confirmation or its turn) has no
+// spinner but a static marker; it counts as running (not finished), and a
+// later update without state makes it run again.
+func TestProgressWaitingRow(t *testing.T) {
+	p, _ := newTestProgress("Removing")
+	m, _ := feed(p,
+		RowUpdate{Key: "a", Label: "a", State: RowRunning, Message: "checking"},
+		RowUpdate{Key: "a", State: RowWaiting, Message: "waiting for the confirmation"},
+		RowUpdate{Key: "b", Label: "b", State: RowRunning, Message: "checking"},
+		PlannedMsg{Units: 2},
+	)
+	pr := asProgress(t, m)
+	if l := strings.TrimSpace(rowLine(view(m), "waiting for the confirmation")); !strings.HasPrefix(l, "· a") {
+		t.Errorf("waiting row = %q, want the static marker", l)
+	}
+	if l := strings.TrimSpace(rowLine(view(m), "b  checking")); strings.HasPrefix(l, "·") || l == "" {
+		t.Errorf("running row = %q, want a spinner", l)
+	}
+	if running, done, _, _ := pr.Counts(); running != 2 || done != 0 {
+		t.Errorf("running=%d done=%d, want 2 and 0", running, done)
+	}
+	if r, _ := pr.ratio(); r != 0 {
+		t.Errorf("ratio %v, want 0 (nothing finished)", r)
+	}
+	m, _ = feed(m, RowUpdate{Key: "a", Message: "removing"})
+	if l := strings.TrimSpace(rowLine(view(m), "removing")); strings.HasPrefix(l, "·") {
+		t.Errorf("row = %q, want running again", l)
+	}
+}
+
 func TestProgressShowsWaitMessages(t *testing.T) {
 	p, _ := newTestProgress("Updating")
 	m, _ := feed(p,
