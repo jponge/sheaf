@@ -52,6 +52,28 @@ type SkipError struct{ Reason string }
 
 func (e *SkipError) Error() string { return "skipped: " + e.Reason }
 
+// CleanupError is the failure of an operation (Err) whose cleanup or
+// rollback failed too, e.g. a partial clone left behind or an adoption not
+// rolled back: Msg says what to fix by hand. It is never a mere
+// interruption (see Interrupted), even when an interruption stopped the
+// operation; Unwrap still gives the operation's failure.
+type CleanupError struct {
+	Err error
+	Msg string
+}
+
+func (e *CleanupError) Error() string { return e.Msg }
+func (e *CleanupError) Unwrap() error { return e.Err }
+
+// Interrupted reports whether err is the failure of work stopped by an
+// interruption, to be reported as such rather than as a failure: it wraps
+// context.Canceled, which only the cancellation of the command's context
+// causes (sheaf's other contexts end with deadlines), and no CleanupError.
+func Interrupted(err error) bool {
+	var c *CleanupError
+	return errors.Is(err, context.Canceled) && !errors.As(err, &c)
+}
+
 // Skip returns an error that makes Execute report the task as skipped.
 func Skip(reason string) error { return &SkipError{Reason: reason} }
 

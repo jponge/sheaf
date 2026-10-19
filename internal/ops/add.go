@@ -428,7 +428,7 @@ func cloneRepo(ctx context.Context, w *Workspace, net gitx.Net, entry bundle.Rep
 	}
 	if err != nil {
 		if rerr := os.RemoveAll(repoDir); rerr != nil {
-			err = fmt.Errorf("%w (cleaning up %s also failed: %v)", err, repoDir, rerr)
+			err = &CleanupError{Err: err, Msg: fmt.Sprintf("%v (cleaning up %s also failed: %v)", err, repoDir, rerr)}
 		}
 		return "", err
 	}

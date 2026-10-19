@@ -89,3 +89,15 @@ func TestLevelMarkInterrupted(t *testing.T) {
 		t.Errorf("levelMark = %+v, want the word interrupted marked", m)
 	}
 }
+
+// A failure whose cleanup failed too stays a failure, with its full text,
+// even when an interruption stopped it (B52 U2 review).
+func TestPrintSummaryCleanupFailureAfterInterruption(t *testing.T) {
+	t.Parallel()
+	err := &ops.CleanupError{Err: context.Canceled, Msg: "adopting /b/tool failed: context canceled; rolling back also failed, fix manually: permission denied"}
+	var b bytes.Buffer
+	_ = printSummary(&b, ops.Summary{Results: []ops.Result{{Repo: "tool", Status: ops.StatusFailed, Err: err}}})
+	if want := "failed   tool: " + err.Msg + "\n0 done, 0 skipped, 1 failed\n"; b.String() != want {
+		t.Errorf("printSummary =\n%s\nwant\n%s", b.String(), want)
+	}
+}

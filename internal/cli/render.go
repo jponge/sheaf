@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -95,10 +94,9 @@ func printSummary(w io.Writer, s ops.Summary) error {
 }
 
 // interruptedErr reports whether err is the failure of work stopped by an
-// interruption: it wraps context.Canceled, which only the cancellation of
-// the command's context causes (see interruptCtl, and pipeWatch for a
-// closed standard output); sheaf's other contexts end with deadlines.
-func interruptedErr(err error) bool { return errors.Is(err, context.Canceled) }
+// interruption (see ops.Interrupted; the command's context is cancelled by
+// interruptCtl, and by pipeWatch for a closed standard output).
+func interruptedErr(err error) bool { return ops.Interrupted(err) }
 
 // interruptedNote returns what is said of work stopped by an interruption
 // besides "interrupted", from its message: "not started" when it never

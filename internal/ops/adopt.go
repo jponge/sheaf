@@ -253,7 +253,7 @@ func adoptCheckout(ctx context.Context, root string, l layout, entry bundle.Repo
 			panic(r) // restored as far as possible; the executor reports it
 		}
 		if rerr != nil {
-			err = fmt.Errorf("adopting %s failed: %w; rolling back also failed, fix manually: %v", l.dir, cause, rerr)
+			err = &CleanupError{Err: cause, Msg: fmt.Sprintf("adopting %s failed: %v; rolling back also failed, fix manually: %v", l.dir, cause, rerr)}
 			return
 		}
 		err = fmt.Errorf("adopting %s failed (restored): %w", l.dir, cause)
