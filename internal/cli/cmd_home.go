@@ -249,13 +249,13 @@ func (h *home) overview() (tui.Overview, error) {
 	for i := range r.Checkouts {
 		cs := &r.Checkouts[i]
 		h.rows[cs.Path] = homeRow{checkout: cs}
-		rows = append(rows, tui.Row{Key: cs.Path, Cells: []string{cs.Repo, displayDir(cs.Checkout), homeBranch(*cs), homeAge(now, cs.HeadTime), homeState(*cs)}, Alert: cs.Err != nil, Level: homeLevel(*cs)})
+		rows = append(rows, tui.Row{Key: cs.Path, Cells: []string{cs.Repo, displayDir(cs.Checkout), homeBranch(*cs), homeAge(now, cs.HeadTime), homeState(*cs)}, Alert: cs.Err != nil, Level: homeLevel(*cs), Links: homeLinks(repoOf(h.bundle, cs.Repo), cs)})
 	}
 	for i := range r.Problems {
 		p := &r.Problems[i]
 		key := "problem:" + p.Path
 		h.rows[key] = homeRow{problem: p}
-		rows = append(rows, tui.Row{Key: key, Cells: []string{p.Repo, filepath.Base(p.Path), "-", "", "problem: " + errorText(p.Err)}, Alert: true})
+		rows = append(rows, tui.Row{Key: key, Cells: []string{p.Repo, filepath.Base(p.Path), "-", "", "problem: " + errorText(p.Err)}, Alert: true, Links: homeLinks(repoOf(h.bundle, p.Repo), nil)})
 	}
 	// Checkouts and problems are each sorted by repository: the problem
 	// rows of a repository go after its checkouts, so that the rows of a
@@ -264,11 +264,37 @@ func (h *home) overview() (tui.Overview, error) {
 	ov := tui.NewOverview("sheaf: "+h.displayRoot(), []string{"REPO", "DIR", "BRANCH", "AGE", "STATE"}, rows, h.actions())
 	ov = ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithFullHelp(h.fullHelp).WithAltScreen().WithGrouping().WithShrinkable(2, 1)
 	if h.s.controls {
-		// Mouse wheel scrolling, on a terminal that takes controls (see
-		// terminalControls).
-		ov = ov.WithMouse()
+		// Mouse wheel scrolling and hyperlinks, on a terminal that takes
+		// controls (see terminalControls).
+		ov = ov.WithMouse().WithHyperlinks()
 	}
 	return ov, nil
+}
+
+// repoOf returns the repository of b named name, nil if there is none.
+func repoOf(b *bundle.Bundle, name string) *bundle.Repository {
+	r, _ := b.Repository(name)
+	return r
+}
+
+// homeLinks returns the hyperlinks of the row of a checkout c (nil for a
+// problem row) of the repository r (nil when not in the bundle): when r is
+// on github.com, its name (REPO) links to its page and "PR #<n>" (STATE)
+// to the pull request; for a clone of a fork, the pages are those of the
+// reference repository, as browse opens them. Repositories on other hosts,
+// including the aliases of github.com that gh may reach (see
+// ops.OnGitHub), have no link: their web address is unknown.
+func homeLinks(r *bundle.Repository, c *ops.CheckoutStatus) []tui.Link {
+	if r == nil || !r.IsGitHub() {
+		return nil
+	}
+	page := "https://github.com/" + r.Slug
+	links := []tui.Link{{Cell: 0, Text: r.Name, URL: page}}
+	if c != nil && c.Err == nil && c.PullRequest != nil {
+		n := strconv.Itoa(c.PullRequest.Number)
+		links = append(links, tui.Link{Cell: 4, Text: "PR #" + n, URL: page + "/pull/" + n})
+	}
+	return links
 }
 
 // scope returns the scope of the action name.

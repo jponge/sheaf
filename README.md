@@ -263,6 +263,13 @@ every view of the TUI). The title (`sheaf: <bundle>`) and that of the
 report view show the home directory as `~`; commands in hints keep
 absolute paths, so that they can be pasted.
 
+On a terminal (not with `TERM=dumb`), the names of the repositories hosted
+on github.com are hyperlinks to their page (for a clone of your fork, the
+repository, as `sheaf browse` opens it), and `PR #<n>` in STATE to the pull
+request (OSC 8 sequences: most terminals open them with a ctrl- or
+cmd-click; others show the text alone). Repositories on other hosts,
+including SSH aliases of github.com, have no link.
+
 | Key | Action |
 |---|---|
 | up/down, k/j, pgup/pgdown, home/end, mouse wheel | move (the wheel by 3 rows) |

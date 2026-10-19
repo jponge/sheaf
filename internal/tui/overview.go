@@ -20,6 +20,15 @@ type Row struct {
 	Cells []string // one per column, matched by the filter
 	Alert bool     // the last cell is rendered with the Failed style (e.g. a problem)
 	Level Level    // unless Alert, the last cell is rendered in the style of this level
+	Links []Link   // hyperlinks in the cells, see Overview.WithHyperlinks
+}
+
+// Link makes the first occurrence of Text in the cell Cell of a Row a
+// hyperlink to URL (see Overview.WithHyperlinks). A cell has at most one
+// link: the first Link of the cell.
+type Link struct {
+	Cell      int
+	Text, URL string
 }
 
 // Scope tells which rows an OverviewAction applies to.
@@ -94,6 +103,7 @@ type Overview struct {
 	mouse         bool  // see WithMouse
 	grouped       bool  // see WithGrouping
 	shrink        []int // see WithShrinkable
+	hyperlinks    bool  // see WithHyperlinks
 
 	filter    string
 	filtering bool
@@ -167,6 +177,17 @@ const wheelStep = 3
 // matches the blanked cells.
 func (m Overview) WithGrouping() Overview {
 	m.grouped = true
+	return m
+}
+
+// WithHyperlinks returns a copy of m rendering the Links of its rows as
+// hyperlinks (OSC 8), for a terminal that takes terminal controls: the text
+// is unchanged, terminals without hyperlinks ignore the sequences. Only a
+// URL of printable ASCII characters without spaces is linked; a link is
+// ended on its line, also in a cell or a line cut at the window width, and
+// is not rendered in a cell blanked by WithGrouping.
+func (m Overview) WithHyperlinks() Overview {
+	m.hyperlinks = true
 	return m
 }
 
@@ -583,11 +604,18 @@ func (m Overview) columnWidths() []int {
 
 // cells pads the cells to the column widths (not the last one), truncating
 // those wider than their column, and joins them; style, if set, renders the
-// last cell.
-func cells(cs []string, widths []int, last *lipgloss.Style) string {
+// last cell. The first link of each cell is rendered as a hyperlink (see
+// link).
+func cells(cs []string, widths []int, last *lipgloss.Style, links []Link) string {
 	var b strings.Builder
 	for i, c := range cs {
 		c = sanitize(c)
+		for _, l := range links {
+			if l.Cell == i {
+				c = link(c, l)
+				break
+			}
+		}
 		if i < len(cs)-1 && lipgloss.Width(c) > widths[i] {
 			c = ansi.Truncate(c, widths[i], "…")
 		}
@@ -604,6 +632,31 @@ func cells(cs []string, widths []int, last *lipgloss.Style) string {
 		b.WriteString(c + strings.Repeat(" ", max(0, widths[i]-lipgloss.Width(c))))
 	}
 	return b.String()
+}
+
+// link returns the sanitized cell c with the first occurrence of the text
+// of l (sanitized) made a hyperlink to its URL (OSC 8), if its URL is safe
+// to send (see safeURL). Truncation (ansi.Truncate) keeps the sequence
+// that ends the link, which takes no width.
+func link(c string, l Link) string {
+	text := sanitize(l.Text)
+	i := strings.Index(c, text)
+	if text == "" || i < 0 || !safeURL(l.URL) {
+		return c
+	}
+	return c[:i] + ansi.SetHyperlink(l.URL) + text + ansi.ResetHyperlink() + c[i+len(text):]
+}
+
+// safeURL reports whether url is not empty and only made of printable
+// ASCII characters other than space, so that it can neither end the OSC 8
+// sequence early nor inject another sequence.
+func safeURL(url string) bool {
+	for _, r := range url {
+		if r <= ' ' || r > '~' {
+			return false
+		}
+	}
+	return url != ""
 }
 
 // View implements tea.Model.
@@ -632,7 +685,7 @@ func (m Overview) View() tea.View {
 		lines = append(lines, f)
 	}
 	if l.header {
-		lines = append(lines, "      "+st.Detail.Render(cells(m.header, widths, nil)))
+		lines = append(lines, "      "+st.Detail.Render(cells(m.header, widths, nil, nil)))
 	}
 	switch {
 	case len(m.rows) == 0:
@@ -727,7 +780,11 @@ func (m Overview) renderRow(i int, widths []int) string {
 	if prev := m.rows[m.visible[max(i-1, 0)]].Cells; m.grouped && i > m.offset && len(cs) > 0 && len(prev) > 0 && prev[0] == cs[0] {
 		cs = append([]string{""}, cs[1:]...)
 	}
-	text := cells(cs, widths, last)
+	var links []Link
+	if m.hyperlinks {
+		links = r.Links
+	}
+	text := cells(cs, widths, last, links)
 	if i == m.cursor {
 		text = st.CurrentRow.Render(text)
 	}

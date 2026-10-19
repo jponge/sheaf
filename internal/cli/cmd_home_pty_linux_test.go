@@ -760,6 +760,40 @@ func TestHomeOnPTYCopiesPathWithOSC52(t *testing.T) {
 	}
 }
 
+// On a terminal, the repository names of the overview are hyperlinks to
+// their GitHub page (OSC 8, B46), through bubbletea's renderer, and the
+// last hyperlink sequence ends the link; with TERM=dumb, none is sent.
+func TestHomeOnPTYLinksRepositories(t *testing.T) {
+	for _, c := range []struct {
+		term   string
+		linked bool
+	}{{"xterm-256color", true}, {"dumb", false}} {
+		t.Run(c.term, func(t *testing.T) {
+			e, _, _, _, _ := homeBundle(t)
+			s := startPTYShell(t, e.cwd, `B=$(stty -g); TERM=`+c.term+` "$SHEAF"`+sttyCheck, 0)
+			s.waitFor(`STATE`)
+			s.write("q")
+			wantTerminalRestored(t, s, "0")
+			out := s.output()
+			all := regexp.MustCompile(`\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]*)(?:\x07|\x1b\\)`).FindAllStringSubmatch(out, -1)
+			if !c.linked {
+				if len(all) > 0 {
+					t.Errorf("hyperlinks with TERM=dumb: %q", all)
+				}
+				return
+			}
+			for _, repo := range []string{"alpha", "beta"} {
+				if !strings.Contains(out, "\x1b]8;;https://github.com/o/"+repo+"\x07"+repo) {
+					t.Errorf("no hyperlink on %s:\n%q", repo, out)
+				}
+			}
+			if len(all) == 0 || all[len(all)-1][1] != "" {
+				t.Errorf("hyperlink left open at the end: %q", all)
+			}
+		})
+	}
+}
+
 // Mouse wheel reports (SGR, as the terminal sends them once asked) move the
 // cursor of the overview by up to 3 rows (B49); mouse reporting is on while
 // the overview is displayed, as cell motion with SGR encoding (DECSET 1002
