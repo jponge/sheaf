@@ -229,6 +229,7 @@ What to do differently
 | B35 | Overview groups by repository: repository name blank on rows repeating the previous row's repository; rows, selection, filter unchanged (user, 2026-10-19) | open: step 3 |
 | B36 | Overview: ahead/behind arrows in STATE (`↑2 ↓1`, local refs only) and an AGE column (last commit age) (user, 2026-10-19) | open: step 3 |
 | B37 | Home screen key `#`: prompt for a PR number, check it out with `wt pr` (user, 2026-10-19) | open: step 4 |
+| B38 | Ctrl-C during the gh default-repository call (B20) in plain `add` exits 0 with "done" and no warning, instead of 130 (pre-existing; found in step 2 review) | open (recorded) |
 
 Order for the high-priority items: B3 → B6 (review sees the merged code) → B2 → B1 (docs describe the final behaviour).
 - Decisions 2026-10-16 (user) for B2: bare `sheaf` in a bundle with a TTY opens an overview (checkouts table from local status, no network at open; multi-select, filter) with actions update/fetch/wt add/wt rm/prune/doctor/sync reusing the per-command TUIs and returning to the overview; enter on a row cds there through the shell-init wrapper (prints the path without it). Outside a bundle: help plus a create/init hint. --no-tui or non-TTY: help, unchanged.
