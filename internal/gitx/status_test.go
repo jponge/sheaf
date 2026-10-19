@@ -296,8 +296,8 @@ func TestCommitTimes(t *testing.T) {
 
 // CommitTimes passes the ids on standard input, not as arguments (no
 // command-line length limit), and refuses anything but full lowercase hex
-// ids without starting git (on standard input, rev-list also takes
-// pseudo-options such as --all).
+// ids without starting git (on standard input, rev-list takes ranges and
+// ^exclusions, and since git 2.42 pseudo-options such as --all).
 func TestCommitTimesValidatesIDsAndUsesStdin(t *testing.T) {
 	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
