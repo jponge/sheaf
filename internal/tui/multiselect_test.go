@@ -758,7 +758,33 @@ func TestMultiSelectNarrowStatusLineHasNoDanglingSeparator(t *testing.T) {
 		}
 	}
 	m, _ := NewMultiSelect("Pick", manyItems(25)).Update(tea.WindowSizeMsg{Width: 17, Height: 10})
-	if !hasLine(view(m), "0/25 selected · r") {
-		t.Errorf("width 17: part cut partly not kept:\n%s", view(m))
+	if l := statusLine(t, m); l != "0/25 selected" {
+		t.Errorf("width 17: status line %q, want the part cut partly dropped", l)
+	}
+}
+
+// A status part is shown only when it fits whole with its separator: a
+// part cut partway could read as another number ("12 shown" as "12",
+// "rows 18-20 of 20" as "… of 2", "1 present" as "1").
+func TestMultiSelectStatusPartsAreShownWholeOrNotAtAll(t *testing.T) {
+	items := manyItems(25)
+	items[0].Disabled, items[0].Selected = true, true
+	for _, f := range []string{"", "item1"} {
+		for w := 14; w <= 60; w++ {
+			var m tea.Model = NewMultiSelect("Pick", items).WithLockedLabel("present")
+			if f != "" {
+				m, _ = press(m, append(append([]string{"/"}, strings.Split(f, "")...), "enter")...)
+			}
+			m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 10})
+			m, _ = press(m, "end")
+			n := len(m.(MultiSelect).visible)
+			whole := regexp.MustCompile(fmt.Sprintf(`^(1 present|%d shown|rows \d+-\d+ of %d)$`, n, n))
+			l := statusLine(t, m)
+			for _, p := range strings.Split(l, " · ")[1:] {
+				if !whole.MatchString(p) {
+					t.Errorf("filter %q, width %d: part %q cut (status line %q)", f, w, p, l)
+				}
+			}
+		}
 	}
 }

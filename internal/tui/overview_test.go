@@ -625,3 +625,80 @@ func TestOverviewNarrowStatusPartsLeaveNoDanglingSeparator(t *testing.T) {
 		}
 	}
 }
+
+// Every key of the movement and filter help lines is visible at any width
+// from 18 columns (B31 follow-up: the movement line was cut below ~73
+// columns and, at 18, the filter help lost "esc clear filter"), and the
+// wrapped lines count in the layout: the view never exceeds the height.
+func TestOverviewKeyHelpWrapsToWidth(t *testing.T) {
+	t.Parallel()
+	list := []string{"↑/k up", "↓/j down", "space toggle", "a all", "n none", "/ filter", "esc/q quit"}
+	filter := []string{"enter apply filter", "esc clear filter"}
+	for w := 18; w <= 80; w++ {
+		var m tea.Model = newOv()
+		m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 30})
+		for _, mode := range []struct {
+			name string
+			keys []string
+		}{{"list", list}, {"filter", filter}} {
+			if mode.name == "filter" {
+				m, _ = press(m, "/")
+			}
+			v := view(m)
+			for _, k := range mode.keys {
+				if !strings.Contains(v, k) {
+					t.Errorf("width %d, %s mode: key help %q missing:\n%s", w, mode.name, k, v)
+				}
+			}
+			for _, l := range strings.Split(v, "\n") {
+				if lipgloss.Width(l) > w || strings.Contains(l, "…") {
+					t.Errorf("width %d, %s mode: line %q", w, mode.name, l)
+				}
+			}
+		}
+	}
+	for _, filtering := range []bool{false, true} {
+		for h := 1; h <= 16; h++ {
+			var m tea.Model = newOv()
+			if filtering {
+				m, _ = press(m, "/")
+			}
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 20, Height: h})
+			m, _ = press(m, "end")
+			if v := view(m); lineCount(v) > h || !strings.Contains(v, "> [ ] bravo") {
+				t.Errorf("width 20, filtering %v, height %d: %d lines:\n%s", filtering, h, lineCount(v), v)
+			}
+		}
+	}
+}
+
+// A status part is shown only when it fits whole with its separator: a
+// part cut partway could read as another number ("12 shown" as "12",
+// "rows 18-20 of 20" as "… of 2"). The message, free text, is still
+// truncated like any line (see TestOverviewTruncatesTheStatusLine).
+func TestOverviewStatusPartsAreShownWholeOrNotAtAll(t *testing.T) {
+	t.Parallel()
+	var rows []Row
+	for i := range 25 {
+		rows = append(rows, Row{Key: fmt.Sprint(i), Cells: []string{fmt.Sprintf("r%02d", i), "main"}})
+	}
+	for f, n := range map[string]int{"": 25, "r": 25, "1": 12, "zzz": 0} {
+		whole := regexp.MustCompile(fmt.Sprintf(`^(%d shown|rows \d+-\d+ of %d)$`, n, n))
+		for w := 14; w <= 60; w++ {
+			var m tea.Model = NewOverview("t", []string{"REPO", "DIR"}, rows, ovActions()).WithFilter(f)
+			m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 10})
+			m, _ = press(m, "end")
+			l := statusLine(t, m)
+			for _, p := range strings.Split(l, " · ")[1:] {
+				if !whole.MatchString(p) {
+					t.Errorf("filter %q, width %d: part %q cut (status line %q)", f, w, p, l)
+				}
+			}
+		}
+	}
+	var m tea.Model = NewOverview("t", []string{"REPO", "DIR"}, rows, ovActions()).WithFilter("1")
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 18, Height: 30})
+	if l := statusLine(t, m); l != "0/25 selected" {
+		t.Errorf("width 18: status line %q, want %q", l, "0/25 selected")
+	}
+}

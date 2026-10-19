@@ -528,16 +528,15 @@ func (m Overview) View() tea.View {
 	}
 	var status, help []string
 	if l.status {
-		// The message is the last part, unstyled.
+		// The message follows the parts, unstyled; free text, it may be
+		// cut partway, but is dropped with its separator when not even
+		// its start fits.
 		parts := m.status()
-		n := len(parts)
-		if msg := sanitize(m.message); msg != "" {
-			parts = append(parts, msg)
-		}
-		k := fitStatus(m.width, parts)
-		line := st.Status.Render(joinStatus(parts[:min(k, n)]...))
-		if k > n {
-			line = joinStatus(line, parts[n])
+		parts = parts[:fitStatus(m.width, parts)]
+		line := st.Status.Render(joinStatus(parts...))
+		msg := sanitize(m.message)
+		if msg != "" && (m.width <= 0 || lipgloss.Width(joinStatus(parts...)+" · ") < m.width) {
+			line = joinStatus(line, msg)
 		}
 		status = []string{line}
 	}
@@ -557,12 +556,13 @@ func (m Overview) View() tea.View {
 }
 
 // helpLines renders the key help: the movement keys and quit, then the
-// actions, wrapped to the width so that none is cut off.
+// actions (the filter keys in filter mode), each wrapped to the width so
+// that none is cut off.
 func (m Overview) helpLines() []string {
 	if m.filtering {
-		return []string{m.help.ShortHelpView([]key.Binding{m.keys.ApplyFilter, m.keys.ClearFilter})}
+		return wrapHelp(m.help, m.width, []key.Binding{m.keys.ApplyFilter, m.keys.ClearFilter})
 	}
-	lines := []string{m.help.ShortHelpView([]key.Binding{m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.All, m.keys.None, m.keys.Filter, m.keys.Cancel})}
+	lines := wrapHelp(m.help, m.width, []key.Binding{m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.All, m.keys.None, m.keys.Filter, m.keys.Cancel})
 	var actions []key.Binding
 	for _, a := range m.actions {
 		actions = append(actions, key.NewBinding(key.WithKeys(a.Key), key.WithHelp(a.Key, a.Help)))

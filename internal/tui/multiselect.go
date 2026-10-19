@@ -414,19 +414,22 @@ func footer(gaps int, sections ...[]string) []string {
 }
 
 // fitStatus returns how many of parts (none empty), joined with " · " into
-// a status line, to keep so that its truncation to width (0 = unknown)
-// leaves no dangling separator: a part cut off entirely is dropped with
-// the separator before it, as are the parts after it.
+// a status line, to keep within width (0 = unknown): the first part always
+// (truncated by the caller if need be), each next one only if it fits
+// whole with its separator, so that no part is cut partway (a cut part
+// could read as another number, "12 shown" as "12"); the parts after the
+// first that does not fit are dropped too.
 func fitStatus(width int, parts []string) int {
 	if len(parts) == 0 {
 		return 0
 	}
 	n, w := 1, lipgloss.Width(parts[0])
 	for ; n < len(parts); n++ {
-		if width > 0 && w+lipgloss.Width(" · ") >= width {
+		next := w + lipgloss.Width(" · "+parts[n])
+		if width > 0 && next > width {
 			break
 		}
-		w += lipgloss.Width(" · " + parts[n])
+		w = next
 	}
 	return n
 }
