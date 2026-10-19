@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,7 +16,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/hosting"
+	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/testutil"
 	"github.com/jponge/sheaf/internal/tui"
 )
@@ -917,20 +920,26 @@ func TestHomeRemovesSelectedWorktreesAfterOneConfirmation(t *testing.T) {
 	if code != 0 || exists(x) || exists(y) || !exists(filepath.Join(feat, "new.txt")) {
 		t.Fatalf("exit %d, x %v, y %v, feat %v\nstdout:\n%s\nstderr:\n%s", code, exists(x), exists(y), exists(feat), out.String(), errs)
 	}
+	// The dialog and the report view wrap long lines at their width: the
+	// paths, which may be long, are left out here (worktreeRemovalsLines is
+	// checked line by line in TestWorktreeRemovalsLines), and the refusal
+	// with its command is checked on standard error, where it is whole.
 	o := ansi.Strip(out.String())
 	for _, want := range []string{
 		"Remove 2 worktrees?",
-		"will remove worktree alpha/x [x] at " + x, "branch x is kept",
-		"will remove worktree beta/y [y] at " + y, "branch y is kept",
+		"will remove worktree alpha/x [x] at", "branch x is kept",
+		"will remove worktree beta/y [y] at", "branch y is kept",
 		"refusing to remove alpha/feat: 1 untracked file",
-		"run: sheaf wt rm --force --dir feat -- alpha",
 	} {
 		if !strings.Contains(o, want) {
 			t.Errorf("the output lacks %q:\n%s", want, o)
 		}
 	}
+	if want := "sheaf: refusing to remove worktree feat [feat] of alpha:\n  1 untracked file\nto remove anyway (what is listed above will be lost), run: sheaf wt rm --force --dir feat -- alpha\n"; !strings.Contains(errs, want) {
+		t.Errorf("stderr lacks %q:\n%s", want, errs)
+	}
 	report := o[strings.Index(o, "sheaf wt rm: "):]
-	for _, want := range []string{"removed worktree x [x] at " + x, "removed worktree y [y] at " + y, "refusing to remove worktree feat [feat] of alpha:"} {
+	for _, want := range []string{"removed worktree x [x] at ", "removed worktree y [y] at ", "refusing to remove worktree feat [feat] of alpha:"} {
 		if !strings.Contains(report, want) {
 			t.Errorf("the report lacks %q:\n%s", want, report)
 		}
@@ -939,6 +948,33 @@ func TestHomeRemovesSelectedWorktreesAfterOneConfirmation(t *testing.T) {
 		if strings.Contains(o, unwanted) {
 			t.Errorf("the output shows %q:\n%s", unwanted, o)
 		}
+	}
+}
+
+// The lines of the dialog of several removals, unwrapped: for each
+// worktree to remove its line with the path, then its plan indented; a
+// refusal on one line; another failure with its repository and target.
+func TestWorktreeRemovalsLines(t *testing.T) {
+	t.Parallel()
+	x := ops.WorktreeRemovePlan{Repo: "alpha", Worktree: ops.WorktreeInfo{Repo: "alpha", Dir: "x", Branch: "x", Path: "/some/long/bundle/alpha/x"},
+		Risks: []gitx.Risk{{Kind: gitx.RiskIgnoredFiles, Count: 2}}}
+	feat := ops.WorktreeRemovePlan{Repo: "alpha", Worktree: ops.WorktreeInfo{Repo: "alpha", Dir: "feat", Branch: "feat", Path: "/some/long/bundle/alpha/feat"},
+		Risks: []gitx.Risk{{Kind: gitx.RiskUntracked, Count: 1}}}
+	rs := []ops.WorktreeRemovalResult{
+		{WorktreeRemoval: ops.WorktreeRemoval{Repo: "alpha", Target: ops.WorktreeTarget{Name: "x"}}, Plan: &x},
+		{WorktreeRemoval: ops.WorktreeRemoval{Repo: "alpha", Target: ops.WorktreeTarget{Name: "feat"}}, Plan: &feat, Err: &ops.WorktreeRefusedError{Plan: feat}},
+		{WorktreeRemoval: ops.WorktreeRemoval{Repo: "beta", Target: ops.WorktreeTarget{Name: "gone"}}, Err: errors.New("no worktree \"gone\" in beta\ndetails")},
+	}
+	lines, removable := worktreeRemovalsLines(rs, false)
+	want := []string{
+		"will remove worktree alpha/x [x] at /some/long/bundle/alpha/x",
+		"  2 ignored files (informational, not blocking)",
+		"  branch x is kept",
+		"refusing to remove alpha/feat: 1 untracked file",
+		"cannot remove beta/gone: no worktree \"gone\" in beta",
+	}
+	if removable != 1 || !slices.Equal(lines, want) {
+		t.Fatalf("lines (%d removable):\n%s\nwant (1):\n%s", removable, strings.Join(lines, "\n"), strings.Join(want, "\n"))
 	}
 }
 
@@ -951,8 +987,12 @@ func TestHomeMultiRemoveHintsNameTheGivenBundle(t *testing.T) {
 	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "x"),
 		ovKeys(t, &out, "wt rm: 2 done, 0 cancelled, 1 failed", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out, "--bundle", e.cwd)
-	if want := "run: sheaf --bundle " + e.cwd + " wt rm --force --dir feat -- alpha"; code != 0 || !strings.Contains(ansi.Strip(out.String()), want) {
-		t.Fatalf("exit %d, want %q\nstdout:\n%s\nstderr:\n%s", code, want, out.String(), errs)
+	// The complete line on standard error, where the refusal is printed
+	// whole (the report view, which shows it too, wraps long lines at its
+	// width: the bundle path may be long).
+	want := ", run: sheaf --bundle " + e.cwd + " wt rm --force --dir feat -- alpha\n"
+	if code != 0 || !strings.Contains(errs, want) || !strings.Contains(out.String(), "sheaf wt rm: ") {
+		t.Fatalf("exit %d, want %q on stderr and the report view\nstdout:\n%s\nstderr:\n%s", code, want, out.String(), errs)
 	}
 }
 
