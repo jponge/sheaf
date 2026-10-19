@@ -9,6 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/ops"
 	"github.com/spf13/cobra"
 )
@@ -459,10 +460,17 @@ func worktreeRemoveCommand(ctx context.Context, repo string, target ops.Worktree
 }
 
 // worktreeRemovePlanLines describes a worktree removal plan: risks, what is
-// removed and what happens to the branch.
+// removed and what happens to the branch. The unpushed commits of the
+// repository's local branches are listed only when a branch is deleted
+// (with the branches carrying them, see ops.WorktreeRemovePlan): they
+// survive the removal of a worktree whose branch is kept.
 func worktreeRemovePlanLines(p ops.WorktreeRemovePlan, force bool) []string {
 	var lines []string
+	deleting := (p.MergedInto != "" || p.ContainedIn != "" || p.Unmerged != "") && p.BranchKept == ""
 	for _, r := range p.NonBlocking() {
+		if r.Kind == gitx.RiskUnpushedBranchCommits && !deleting {
+			continue
+		}
 		lines = append(lines, fmt.Sprintf("%v (informational, not blocking)", r))
 	}
 	if force {

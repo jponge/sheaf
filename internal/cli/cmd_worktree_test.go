@@ -135,6 +135,27 @@ func TestWorktreeRemoveNeedsYes(t *testing.T) {
 	}
 }
 
+// The unpushed commits of the repository's local branches (here on other)
+// do not concern the removal of a worktree, whose branch is kept: wt rm
+// mentions them only when it deletes a branch, naming the branches (B52
+// C2).
+func TestWorktreeRemoveNotesUnpushedCommitsOnlyWhenDeletingABranch(t *testing.T) {
+	t.Parallel()
+	e, _ := worktreeBundle(t)
+	other := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "other", "--no-fetch"))
+	testutil.CommitFile(t, other, "o.txt", "o\n", "local work")
+	e.mustRun(t, "wt", "add", "a", "x", "--no-fetch")
+	e.mustRun(t, "wt", "add", "a", "y", "--no-fetch")
+	_, errs, code := e.run(t, "wt", "rm", "a", "x", "--yes")
+	if code != 0 || strings.Contains(errs, "unpushed") || !strings.Contains(errs, "branch x is kept") {
+		t.Fatalf("without -d: exit %d, stderr:\n%s", code, errs)
+	}
+	_, errs, code = e.run(t, "wt", "rm", "a", "y", "--yes", "-d")
+	if code != 0 || !strings.Contains(errs, "1 unpushed commit on local branches: other (informational, not blocking)\n") || !strings.Contains(errs, "will delete branch y") {
+		t.Fatalf("-d: exit %d, stderr:\n%s", code, errs)
+	}
+}
+
 func TestWorktreeRemoveUnmergedBranchNeedsD(t *testing.T) {
 	t.Parallel()
 	e, root := worktreeBundle(t)

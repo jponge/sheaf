@@ -565,14 +565,20 @@ func nameUnpushedBranches(ctx context.Context, plan *RemovePlan, published []str
 				}
 				continue // the count alone
 			}
-			const maxListed = 5
-			if len(names) > maxListed {
-				names = append(names[:maxListed:maxListed], fmt.Sprintf("and %d more", len(names)-maxListed))
-			}
-			plan.Items[i].Risks[j].Detail = strings.Join(names, ", ")
+			plan.Items[i].Risks[j].Detail = branchList(names)
 		}
 	}
 	return nil
+}
+
+// branchList lists names for the Detail of an unpushed-commits risk: the
+// first five, then how many more.
+func branchList(names []string) string {
+	const maxListed = 5
+	if len(names) > maxListed {
+		names = append(names[:maxListed:maxListed], fmt.Sprintf("and %d more", len(names)-maxListed))
+	}
+	return strings.Join(names, ", ")
 }
 
 // fetchProblem describes a failed fetch. A lock file left behind (or held

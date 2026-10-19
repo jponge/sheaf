@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -461,5 +462,29 @@ func TestRemoveWorktreesFetchesNestedRepositories(t *testing.T) {
 	}
 	if res[1].Err != nil || exists(e.comp) {
 		t.Fatalf("comp: %v", res[1].Err)
+	}
+}
+
+// With a branch deletion the plan names the local branches carrying the
+// unpushed commits of the repository (B52 C2); without one it does not
+// look for them.
+func TestRemoveWorktreePlanNamesUnpushedBranchesWhenDeletingABranch(t *testing.T) {
+	t.Parallel()
+	e := newRemovalsEnv(t)
+	other := e.f.mustAddWT(t, "a", "other").Path
+	testutil.CommitFile(t, other, "o.txt", "o\n", "local work")
+	e.f.mustAddWT(t, "a", "x")
+	for _, deleteBr := range []bool{false, true} {
+		var plan WorktreeRemovePlan
+		if _, err := e.f.rmWT(t, "a", "x", WorktreeRemoveOptions{DeleteBranch: deleteBr, Confirm: func(p WorktreeRemovePlan) bool { plan = p; return false }}); !errors.Is(err, ErrNotConfirmed) {
+			t.Fatal(err)
+		}
+		want := gitx.Risk{Kind: gitx.RiskUnpushedBranchCommits, Count: 1}
+		if deleteBr {
+			want.Detail = "other"
+		}
+		if !slices.Contains(plan.Risks, want) {
+			t.Errorf("-d %v: risks %v, want %v", deleteBr, plan.Risks, want)
+		}
 	}
 }

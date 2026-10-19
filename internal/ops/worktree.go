@@ -1095,12 +1095,29 @@ func (x *worktreeRemoval) mkPlan(ctx context.Context) (WorktreeRemovePlan, error
 }
 
 // planFirst plans the removal: the plan to confirm, which apply checks
-// again.
+// again. With a branch deletion, the Detail of its unpushed-commits risk
+// names the branches carrying them (a repository-wide risk, which the
+// removal of the worktree alone does not concern).
 func (x *worktreeRemoval) planFirst(ctx context.Context) error {
 	x.ev(PhaseCheck, "checking for data at risk")
 	plan, err := x.mkPlan(ctx)
 	if err != nil {
 		return err
+	}
+	if x.deleteBr {
+		for i, r := range plan.Risks {
+			if r.Kind != gitx.RiskUnpushedBranchCommits {
+				continue
+			}
+			names, err := gitx.UnpushedBranches(ctx, x.primary, gitx.DeletionRisksOptions{UntrustedRemotes: x.distrust.untrusted()})
+			if err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				break // the count alone
+			}
+			plan.Risks[i].Detail = branchList(names)
+		}
 	}
 	x.plan = plan
 	return nil
