@@ -648,13 +648,14 @@ func (m Overview) View() tea.View {
 	var status, help []string
 	if l.status {
 		// The message follows the parts, unstyled; free text, it may be
-		// cut partway, but is dropped with its separator when not even
-		// its start fits.
+		// cut partway (ending with "…", see cutLines), but is dropped
+		// with its separator when not even its first character fits
+		// with the ellipsis.
 		parts := m.status()
 		parts = parts[:fitStatus(m.width, parts)]
 		line := st.Status.Render(joinStatus(parts...))
 		msg := sanitize(m.message)
-		if msg != "" && (m.width <= 0 || lipgloss.Width(joinStatus(parts...)+" · ") < m.width) {
+		if msg != "" && (m.width <= 0 || m.width-lipgloss.Width(joinStatus(parts...)+" · ") >= min(2, lipgloss.Width(msg))) {
 			line = joinStatus(line, msg)
 		}
 		status = []string{line}
@@ -663,12 +664,7 @@ func (m Overview) View() tea.View {
 		help = m.helpLines()
 	}
 	lines = append(lines, footer(gaps, status, help)...)
-	if m.width > 0 {
-		trunc := lipgloss.NewStyle().MaxWidth(m.width)
-		for i, line := range lines {
-			lines[i] = trunc.Render(line)
-		}
-	}
+	cutLines(lines, m.width)
 	v := tea.NewView(strings.Join(lines, "\n"))
 	v.AltScreen = m.altScreen
 	if m.mouse {

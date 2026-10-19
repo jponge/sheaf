@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 // Confirm is a bubbletea model asking a yes/no question, followed by detail
@@ -102,11 +101,6 @@ func (m Confirm) View() tea.View {
 	}
 	lines = append(lines, details...)
 
-	if m.width > 0 {
-		trunc := lipgloss.NewStyle().MaxWidth(m.width)
-		for i, l := range lines {
-			lines[i] = trunc.Render(l)
-		}
-	}
+	cutLines(lines, m.width)
 	return tea.NewView(strings.Join(lines, "\n"))
 }

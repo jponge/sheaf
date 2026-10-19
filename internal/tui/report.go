@@ -2,13 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -23,7 +23,9 @@ const ReportGrace = 250 * time.Millisecond
 // pgup/pgdown and b/space by a page, home/end and g/G to the top and the
 // bottom, the mouse wheel: see WithMouse) and a status line tells
 // which lines are shown; lines wider
-// than the window are wrapped. With an unknown size every line is shown.
+// than the window are wrapped, their continuation lines indented to their
+// text column (see textColumn and WithLevels), by at least 2 and at most
+// half the width. With an unknown size every line is shown.
 // Keys that end the report are ignored during the first ReportGrace
 // (ctrl+c excepted), so that a key typed ahead, e.g. while the work that
 // precedes the report ran, does not end it before it can be read; scroll
@@ -35,9 +37,12 @@ const ReportGrace = 250 * time.Millisecond
 type Report struct {
 	title string
 	lines []string
-	back  string
-	now   func() time.Time
-	start time.Time
+	// indents are the text columns of lines, to which their continuation
+	// lines are indented (see wrapped).
+	indents []int
+	back    string
+	now     func() time.Time
+	start   time.Time
 
 	width, height int  // 0 = unknown
 	offset        int  // index into wrapped() of the first rendered line
@@ -75,7 +80,9 @@ func NewReport(title string, lines []string, back string) Report {
 	h.Styles = st.Help
 	m := Report{title: title, back: back, now: time.Now, keys: newReportKeys(), help: h, styles: st}
 	for _, l := range lines {
-		m.lines = append(m.lines, sanitize(expandTabs(l)))
+		l = sanitize(expandTabs(l))
+		m.lines = append(m.lines, l)
+		m.indents = append(m.indents, textColumn(l))
 	}
 	m.start = m.now()
 	return m
@@ -92,17 +99,34 @@ type Mark struct {
 // classify marks (e.g. the level of a doctor check) is displayed in the
 // style of its level. classify receives each line as displayed (tabs
 // expanded, control characters replaced); a mark of LevelNone, or out of
-// the line's bounds, displays it unstyled.
+// the line's bounds, displays it unstyled. The text column of a marked
+// line follows the mark and the spaces after it.
 func (m Report) WithLevels(classify func(line string) Mark) Report {
 	lines := make([]string, len(m.lines))
+	indents := slices.Clone(m.indents)
 	for i, l := range m.lines {
 		lines[i] = l
 		if k := classify(l); k.Level != LevelNone && 0 <= k.Start && k.Start < k.End && k.End <= len(l) {
 			lines[i] = l[:k.Start] + m.styles.Level(k.Level).Render(l[k.Start:k.End]) + l[k.End:]
+			indents[i] = ansi.StringWidth(l[:k.End]) + len(l[k.End:]) - len(strings.TrimLeft(l[k.End:], " "))
 		}
 	}
-	m.lines = lines
+	m.lines, m.indents = lines, indents
 	return m
+}
+
+// textColumn returns the column at which the text of line l starts: after
+// its indentation and, when its first word ends with ":" (a label, e.g.
+// "hint:" or "sheaf:") or is followed by at least two spaces (a padded
+// column, e.g. "OK    "), after that word and the spaces following it.
+func textColumn(l string) int {
+	rest := strings.TrimLeft(l, " ")
+	col := len(l) - len(rest)
+	if word, _, ok := strings.Cut(rest, " "); ok && (strings.HasSuffix(word, ":") || strings.HasPrefix(rest[len(word):], "  ")) {
+		after := strings.TrimLeft(rest[len(word):], " ")
+		col += ansi.StringWidth(rest[:len(rest)-len(after)])
+	}
+	return col
 }
 
 // expandTabs replaces the tabs of s by spaces up to the next multiple of 8
@@ -201,14 +225,29 @@ func (m *Report) scroll(n int) {
 	m.offset = min(max(m.offset+n, 0), max(len(m.wrapped())-m.layout().rows, 0))
 }
 
-// wrapped returns the lines wrapped to the width, if known.
+// wrapped returns the lines wrapped to the width, if known, their
+// continuation lines indented to their text column (see Report).
 func (m Report) wrapped() []string {
 	if m.width <= 0 {
 		return m.lines
 	}
 	var out []string
-	for _, l := range m.lines {
-		out = append(out, strings.Split(ansi.Wrap(l, m.width, ""), "\n")...)
+	for i, l := range m.lines {
+		if ansi.StringWidth(l) <= m.width {
+			out = append(out, l)
+			continue
+		}
+		head, _, _ := strings.Cut(ansi.Wrap(l, m.width, ""), "\n")
+		out = append(out, head)
+		// The rest of the line, without the spaces it starts with (the
+		// cut may keep escape sequences before them).
+		rest := ansi.Cut(l, ansi.StringWidth(head), ansi.StringWidth(l))
+		plain := ansi.Strip(rest)
+		rest = ansi.Cut(rest, len(plain)-len(strings.TrimLeft(plain, " ")), ansi.StringWidth(rest))
+		indent := min(max(m.indents[i], 2), m.width/2)
+		for _, c := range strings.Split(ansi.Wrap(rest, m.width-indent, ""), "\n") {
+			out = append(out, strings.Repeat(" ", indent)+c)
+		}
 	}
 	return out
 }
@@ -302,12 +341,7 @@ func (m Report) View() tea.View {
 		})}
 	}
 	lines = append(lines, footer(gaps, status, help)...)
-	if m.width > 0 {
-		trunc := lipgloss.NewStyle().MaxWidth(m.width)
-		for i, line := range lines {
-			lines[i] = trunc.Render(line)
-		}
-	}
+	cutLines(lines, m.width)
 	v.SetContent(strings.Join(lines, "\n"))
 	if m.mouse {
 		v.MouseMode = tea.MouseModeCellMotion

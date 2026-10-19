@@ -462,7 +462,7 @@ func TestProgressHeaderDropOrder(t *testing.T) {
 		{lipgloss.Width(noAside), noAside},
 		{lipgloss.Width(noAside) - 1, short},
 		{lipgloss.Width(short), short},
-		{5, "Updat"},
+		{5, "Upda…"},
 	} {
 		p, _ := newTestProgress("Updating")
 		m, _ := feed(p.WithAside("fetch"), AsidePlannedMsg{Units: 1}, PlannedMsg{Units: 4},

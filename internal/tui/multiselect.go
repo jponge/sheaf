@@ -557,12 +557,7 @@ func (m MultiSelect) View() tea.View {
 	}
 	lines = append(lines, footer(gaps, status, help)...)
 
-	if m.width > 0 {
-		trunc := lipgloss.NewStyle().MaxWidth(m.width)
-		for i, line := range lines {
-			lines[i] = trunc.Render(line)
-		}
-	}
+	cutLines(lines, m.width)
 	return tea.NewView(strings.Join(lines, "\n"))
 }
 

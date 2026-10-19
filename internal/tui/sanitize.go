@@ -5,6 +5,7 @@ import (
 	"unicode"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // sanitize replaces control characters (C0, DEL, C1, including newlines and
@@ -82,4 +83,17 @@ func splitAtWidth(s string, width int) (string, string) {
 		w += rw
 	}
 	return s, ""
+}
+
+// cutLines cuts the lines wider than width (when known, > 0) at the width,
+// ending them with "…" so that the cut shows.
+func cutLines(lines []string, width int) {
+	if width <= 0 {
+		return
+	}
+	for i, l := range lines {
+		if lipgloss.Width(l) > width {
+			lines[i] = ansi.Truncate(l, width, "…")
+		}
+	}
 }

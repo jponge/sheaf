@@ -347,6 +347,66 @@ func TestHomeAge(t *testing.T) {
 	}
 }
 
+// The titles of the overview and of the report view shorten the home
+// directory ($HOME) to ~ (B52 E2); the lines of the report are what the
+// action printed, unchanged (its hints must stay pasteable: a quoted ~ is
+// not expanded).
+func TestHomeTitlesShortenHome(t *testing.T) {
+	t.Parallel()
+	e, _, _, _, _ := homeBundle(t)
+	root, err := filepath.EvalSymlinks(e.cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := e.deps()
+	d.Getenv = func(k string) string {
+		if k == "HOME" {
+			return filepath.Dir(root)
+		}
+		return ""
+	}
+	var out syncBuffer
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "q"), ovKeys(t, &out, "fetch: done", 1, "q"))
+	errs, code := runHomeWith(t, d, in, &out)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	text := ansi.Strip(out.String())
+	short := "~" + string(filepath.Separator) + filepath.Base(root)
+	for _, want := range []string{"sheaf: " + short, "sheaf fetch: " + short} {
+		if !strings.Contains(text, want) {
+			t.Errorf("no title %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, ": "+root) {
+		t.Errorf("a title names %s:\n%s", root, text)
+	}
+	if got := homeReport("doctor", short, "OK    bundle "+root+"\n", "doctor: done").View().Content; !strings.Contains(ansi.Strip(got), "bundle "+root) {
+		t.Errorf("report line changed:\n%s", got)
+	}
+}
+
+// tildePath shortens the home directory home at the start of path to ~.
+func TestTildePath(t *testing.T) {
+	t.Parallel()
+	sep := string(filepath.Separator)
+	home := filepath.Join(sep+"home", "u")
+	for _, tc := range []struct{ path, home, want string }{
+		{filepath.Join(home, "b"), home, "~" + sep + "b"},
+		{filepath.Join(home, "b", "c"), home + sep, "~" + sep + filepath.Join("b", "c")},
+		{home, home, "~"},
+		{home + "x" + sep + "b", home, home + "x" + sep + "b"},
+		{filepath.Join(sep+"srv", "b"), home, filepath.Join(sep+"srv", "b")},
+		{filepath.Join(home, "b"), "", filepath.Join(home, "b")},
+		{filepath.Join(home, "b"), sep, filepath.Join(home, "b")},
+		{filepath.Join(home, "b"), "relative", filepath.Join(home, "b")},
+	} {
+		if got := tildePath(tc.path, tc.home); got != tc.want {
+			t.Errorf("tildePath(%q, %q) = %q, want %q", tc.path, tc.home, got, tc.want)
+		}
+	}
+}
+
 func TestHomeCtrlCExits130(t *testing.T) {
 	t.Parallel()
 	e, _, _, _, _ := homeBundle(t)

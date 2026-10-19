@@ -90,6 +90,12 @@ func assertNoInjectedSGR(t *testing.T, m tea.Model) {
 func lineCount(v string) int { return strings.Count(v, "\n") + 1 }
 
 // hasLine reports whether v has a line equal to want.
+// tableLine matches the header and the rows of the table of newOv: cut
+// with "…" when wider than the window (B52 E2), unlike the key help.
+var tableLine = regexp.MustCompile(`^(      REPO|[> ] \[[ x]\] )`)
+
+func isTableLine(l string) bool { return tableLine.MatchString(l) }
+
 func hasLine(v, want string) bool {
 	return slices.Contains(strings.Split(v, "\n"), want)
 }

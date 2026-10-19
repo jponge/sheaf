@@ -7,7 +7,6 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 // Prompt is a bubbletea model asking for one line of text, in one of
@@ -171,11 +170,6 @@ func (m Prompt) View() tea.View {
 		}
 		lines = append(lines, m.help.ShortHelpView(append(bindings, m.keys.Cancel)))
 	}
-	if m.width > 0 {
-		trunc := lipgloss.NewStyle().MaxWidth(m.width)
-		for i, l := range lines {
-			lines[i] = trunc.Render(l)
-		}
-	}
+	cutLines(lines, m.width)
 	return tea.NewView(strings.Join(lines, "\n"))
 }

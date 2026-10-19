@@ -258,7 +258,10 @@ relative to the pull request head recorded by the last `wt pr` (e.g.
 changes or commits to push or pull (`dirty`, `↑`, `↓`); faint for
 `no upstream`; green otherwise (clean, in sync or detached). In a narrow
 terminal, BRANCH and then DIR are truncated (with `…`) so that STATE fits;
-lines that still do not fit are cut at the right.
+lines that still do not fit are cut at the right, ending with `…` (as in
+every view of the TUI). The title (`sheaf: <bundle>`) and that of the
+report view show the home directory as `~`; commands in hints keep
+absolute paths, so that they can be pasted.
 
 | Key | Action |
 |---|---|
@@ -302,7 +305,9 @@ as a log you see after quitting or after an interruption. It is then shown
 again (except for `b`, whose outcome fits in the overview's message) in a
 report view on the alternate screen, titled
 `sheaf <action>: <bundle>`, whether the action succeeded, failed or changed
-nothing: up/down (k/j) and the mouse wheel scroll it, pgup/pgdown
+nothing. Lines wider than the terminal wrap, their continuation lines
+indented under the text (after the level word or label, e.g. `OK`, `done`,
+`hint:`). Up/down (k/j) and the mouse wheel scroll it, pgup/pgdown
 (b/space) by a page, home/end (g/G) jump to the top or the bottom; q, esc or
 enter returns to the overview (other keys are ignored), ctrl+c exits with
 130. An action cancelled in its

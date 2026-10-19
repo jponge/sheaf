@@ -682,11 +682,6 @@ func (m Progress) renderRow(r progressRow, width int) string {
 }
 
 func (m Progress) truncate(lines []string) string {
-	if m.width > 0 {
-		trunc := lipgloss.NewStyle().MaxWidth(m.width)
-		for i, l := range lines {
-			lines[i] = trunc.Render(l)
-		}
-	}
+	cutLines(lines, m.width)
 	return strings.Join(lines, "\n")
 }

@@ -214,7 +214,7 @@ func (h *home) loop() error {
 			// cancelled before printing anything, nor after browse,
 			// whose outcome (the page opened, or the error) fits in the
 			// message.
-			report := homeReport(name, h.root, h.output.String(), h.message)
+			report := homeReport(name, h.displayRoot(), h.output.String(), h.message)
 			if h.s.controls {
 				report = report.WithMouse()
 			}
@@ -261,7 +261,7 @@ func (h *home) overview() (tui.Overview, error) {
 	// rows of a repository go after its checkouts, so that the rows of a
 	// repository are contiguous for the grouping.
 	slices.SortStableFunc(rows, func(a, b tui.Row) int { return strings.Compare(a.Cells[0], b.Cells[0]) })
-	ov := tui.NewOverview("sheaf: "+w.Root, []string{"REPO", "DIR", "BRANCH", "AGE", "STATE"}, rows, h.actions())
+	ov := tui.NewOverview("sheaf: "+h.displayRoot(), []string{"REPO", "DIR", "BRANCH", "AGE", "STATE"}, rows, h.actions())
 	ov = ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithFullHelp(h.fullHelp).WithAltScreen().WithGrouping().WithShrinkable(2, 1)
 	if h.s.controls {
 		// Mouse wheel scrolling, on a terminal that takes controls (see
@@ -770,7 +770,8 @@ func (h *home) outcome(name string, errs []error) string {
 }
 
 // homeReport returns the report view of the action name on the bundle
-// root, titled with the command it ran (see homeCommand), which printed output (see homeReportLines), with the level words
+// root (as titles display it, see displayRoot), titled with the command it
+// ran (see homeCommand), which printed output (see homeReportLines), with the level words
 // of its lines colored (see levelMark): the output is captured without
 // escape sequences.
 func homeReport(name, root, output, message string) tui.Report {
@@ -786,4 +787,33 @@ func homeReportLines(output, message string) []string {
 		return []string{message}
 	}
 	return strings.Split(output, "\n")
+}
+
+// tildePath returns the absolute path with the home directory home at its
+// start shortened to ~, for display: never in a command meant to be pasted,
+// where a quoted ~ is not expanded.
+func tildePath(path, home string) string {
+	home = filepath.Clean(home)
+	if path == home {
+		return "~"
+	}
+	if rest, ok := strings.CutPrefix(path, home+string(filepath.Separator)); ok {
+		return "~" + string(filepath.Separator) + rest
+	}
+	return path
+}
+
+// displayRoot returns the bundle root as titles show it, with the home
+// directory ($HOME, as given or with its symbolic links resolved, like the
+// root) shortened to ~ (see tildePath).
+func (h *home) displayRoot() string {
+	home := h.d.getenv("HOME")
+	if p := tildePath(h.root, home); p != h.root || home == "" {
+		return p
+	}
+	resolved, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		return h.root
+	}
+	return tildePath(h.root, resolved)
 }

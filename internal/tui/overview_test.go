@@ -572,7 +572,8 @@ func TestOverviewDropsSpacingToFitWithoutScrolling(t *testing.T) {
 }
 
 // A message cut off entirely by the truncation to the width leaves no
-// dangling separator on the status line.
+// dangling separator on the status line; one cut partway ends with "…"
+// after at least its first character (B52 E2), else it is dropped.
 func TestOverviewNarrowStatusLineHasNoDanglingSeparator(t *testing.T) {
 	t.Parallel()
 	for w := 10; w <= 20; w++ {
@@ -585,8 +586,12 @@ func TestOverviewNarrowStatusLineHasNoDanglingSeparator(t *testing.T) {
 		}
 	}
 	var m tea.Model = newOv().WithMessage("prune: nothing to prune")
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 17, Height: 24})
+	if !hasLine(view(m), "0/3 selected · p…") {
+		t.Errorf("width 17:\n%s", view(m))
+	}
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 16, Height: 24})
-	if !hasLine(view(m), "0/3 selected · p") {
+	if !hasLine(view(m), "0/3 selected") {
 		t.Errorf("width 16:\n%s", view(m))
 	}
 }
@@ -656,7 +661,7 @@ func TestOverviewKeyHelpWrapsToWidth(t *testing.T) {
 				}
 			}
 			for _, l := range strings.Split(v, "\n") {
-				if lipgloss.Width(l) > w || strings.Contains(l, "…") {
+				if lipgloss.Width(l) > w || !isTableLine(l) && strings.Contains(l, "…") {
 					t.Errorf("width %d, %s mode: line %q", w, mode.name, l)
 				}
 			}
@@ -794,7 +799,7 @@ func TestOverviewShrinksColumnsBeforeTheLast(t *testing.T) {
 		{100, []string{"      REPO   DIR               BRANCH                    AGE  STATE", "> [ ] alpha  feature-dir-long  feature/very-long-branch  2d   clean, ↑2 ↓1"}},
 		{60, []string{"      REPO   DIR               BRANCH      AGE  STATE", "> [ ] alpha  feature-dir-long  feature/v…  2d   clean, ↑2 ↓1", "  [ ] alpha  main              main        5m   dirty"}},
 		{50, []string{"      REPO   DIR       BRANCH    AGE  STATE", "> [ ] alpha  feature…  feature…  2d   clean, ↑2 ↓1"}},
-		{40, []string{"> [ ] alpha  feature…  feature…  2d   cl"}},
+		{40, []string{"> [ ] alpha  feature…  feature…  2d   c…"}},
 	} {
 		if v := at(shrinkable(), tc.width); !hasAllLines(v, tc.want) {
 			t.Errorf("width %d: view lacks one of %q:\n%s", tc.width, tc.want, v)
@@ -808,8 +813,8 @@ func TestOverviewShrinksColumnsBeforeTheLast(t *testing.T) {
 	if v := at(shrinkable().WithFilter("very-long"), 60); !strings.Contains(v, "1 shown") {
 		t.Errorf("filter on a truncated cell:\n%s", v)
 	}
-	// Without shrinkable columns the line is cut.
-	if v := at(NewOverview("t", header, rows, nil), 60); !hasLine(v, "> [ ] alpha  feature-dir-long  feature/very-long-branch  2d ") {
+	// Without shrinkable columns the line is cut, with an ellipsis (B52 E2).
+	if v := at(NewOverview("t", header, rows, nil), 60); !hasLine(v, "> [ ] alpha  feature-dir-long  feature/very-long-branch  2d…") {
 		t.Errorf("without shrinkable columns:\n%s", v)
 	}
 }
@@ -917,7 +922,7 @@ func TestOverviewCompactHelpLayout(t *testing.T) {
 			}
 		}
 		for _, l := range strings.Split(v, "\n") {
-			if lipgloss.Width(l) > w || strings.Contains(l, "…") {
+			if lipgloss.Width(l) > w || !isTableLine(l) && strings.Contains(l, "…") {
 				t.Errorf("width %d: line %q", w, l)
 			}
 		}

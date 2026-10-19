@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // newTestReport returns a Report of n lines "line 1".."line n" on a
@@ -138,6 +139,78 @@ func TestReportWrapsAndFitsSmallWindows(t *testing.T) {
 	s, _ := small.Update(tea.WindowSizeMsg{Width: 80, Height: 2})
 	if got := shownLines(s); len(got) == 0 || strings.Count(view(s), "\n") >= 2 {
 		t.Errorf("window of 2 lines:\n%s", view(s))
+	}
+}
+
+// A line wider than the window wraps with its continuation lines indented
+// to its text column (B52 E2: they started at column 0, under the level
+// words): after the level word marked by WithLevels and its padding, else
+// after the line's indentation and a first word ending with ":" (a label,
+// e.g. "hint:" or "sheaf:") or followed by two spaces or more (a padded
+// column), and at least 2 columns; at most half the width. Nothing is lost, and no line is wider than the window, at every
+// width from 20 to 200.
+func TestReportIndentsContinuationLines(t *testing.T) {
+	t.Parallel()
+	words := func(prefix string) string { return longText(prefix, 300) }
+	cases := []struct {
+		line   string
+		indent int
+	}{
+		{words("done     alpha: fetched"), len("done     ")},
+		{words("up to date  alpha/main"), len("up to date  ")},
+		{words("WARN  beta: no gh default repository:"), len("WARN  ")},
+		{words("      hint: cd /tmp/b/alpha/main &&"), len("      hint: ")},
+		{words("sheaf: wt add failed:"), len("sheaf: ")},
+		{words("removed /tmp/b/alpha"), 2},
+		{"/tmp/" + strings.Repeat("abcdefghij", 30), 2}, // one word: cut inside it
+	}
+	var lines []string
+	for _, c := range cases {
+		lines = append(lines, c.line)
+	}
+	classify := func(l string) Mark {
+		for _, w := range []string{"done", "WARN", "up to date"} {
+			if strings.HasPrefix(l, w+" ") {
+				return Mark{Start: 0, End: len(w), Level: LevelWarn}
+			}
+		}
+		return Mark{}
+	}
+	m0 := NewReport("t", lines, "back").WithLevels(classify)
+	for w := 20; w <= 200; w++ {
+		r := m0
+		r.width = w
+		got := r.wrapped()
+		i := 0
+		for k, c := range cases {
+			indent := min(c.indent, w/2)
+			var joined []string
+			for n := 0; i < len(got); n++ {
+				l := ansi.Strip(got[i])
+				if n > 0 && k+1 < len(cases) && strings.HasPrefix(l, cases[k+1].line[:10]) {
+					break // the next case
+				}
+				if lipgloss.Width(l) > w {
+					t.Fatalf("width %d: line of width %d: %q", w, lipgloss.Width(l), l)
+				}
+				if n > 0 && (!strings.HasPrefix(l, strings.Repeat(" ", indent)) || len(l) <= indent || l[indent] == ' ') {
+					t.Fatalf("width %d: continuation of %q not indented by %d: %q", w, c.line[:20], indent, l)
+				}
+				if n > 0 {
+					l = l[indent:]
+				}
+				joined = append(joined, l)
+				i++
+			}
+			// The words are kept, and a word cut at the width is cut, not
+			// split by a space.
+			if got := strings.Join(joined, ""); strings.Join(strings.Fields(got), "") != strings.Join(strings.Fields(c.line), "") {
+				t.Fatalf("width %d: line %q wrapped as %q", w, c.line, joined)
+			}
+		}
+		if i != len(got) {
+			t.Fatalf("width %d: %d wrapped lines, %d matched:\n%s", w, len(got), i, strings.Join(got, "\n"))
+		}
 	}
 }
 
