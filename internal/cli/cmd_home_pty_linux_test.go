@@ -334,7 +334,7 @@ func TestHomeOnPTYLeavesNoStaleOverviews(t *testing.T) {
 				n[1]++
 			case statusLine.MatchString(l):
 				n[2]++
-			case strings.Contains(l, "esc/q quit"):
+			case strings.Contains(l, "? more"):
 				n[3]++
 			}
 		}

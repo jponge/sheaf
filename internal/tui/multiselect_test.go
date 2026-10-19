@@ -649,6 +649,7 @@ func TestMultiSelectKeyHelpWrapsToWidth(t *testing.T) {
 	for w := 20; w <= 80; w++ {
 		var m tea.Model = NewMultiSelect("Pick", abc())
 		m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 24})
+		m, _ = press(m, "?") // the full help
 		for _, mode := range []struct {
 			name string
 			keys []string
@@ -672,12 +673,12 @@ func TestMultiSelectKeyHelpWrapsToWidth(t *testing.T) {
 	for h := 1; h <= 16; h++ {
 		var m tea.Model = NewMultiSelect("Pick", manyItems(20))
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 30, Height: h})
-		m, _ = press(m, "end")
+		m, _ = press(m, "?", "end")
 		if v := view(m); lineCount(v) > h || !strings.Contains(v, "> [ ] item19") {
 			t.Errorf("width 30, height %d: %d lines:\n%s", h, lineCount(v), v)
 		}
 	}
-	// At 80 columns the help takes two lines; on a short terminal the
+	// At 80 columns the full help takes two lines; on a short terminal the
 	// blank lines go first, then the help, title and status lines.
 	want := map[int]string{
 		10: "T _ R R R _ S _ K K",
@@ -693,10 +694,63 @@ func TestMultiSelectKeyHelpWrapsToWidth(t *testing.T) {
 	}
 	for h := 1; h <= 10; h++ {
 		m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 80, Height: h})
-		m, _ = press(m, "end")
+		m, _ = press(m, "?", "end")
 		if got := msShape(m); got != want[h] {
 			t.Errorf("width 80, height %d: shape %q, want %q:\n%s", h, got, want[h], view(m))
 		}
+	}
+}
+
+// The full key help of a menu wraps at 80 columns, so the help is one
+// short line by default (B45): toggle, confirm, filter, "? more" and
+// cancel; ? toggles the full list ("? less"), and back. In filter mode ?
+// is typed into the filter.
+func TestMultiSelectCompactHelpTogglesWithQuestionMark(t *testing.T) {
+	const short = "space toggle • enter confirm • / filter • ? more • esc/q cancel"
+	var m tea.Model = NewMultiSelect("Pick", abc())
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if got := msShape(m); got != "T _ R R R _ S _ K" || !hasLine(view(m), short) {
+		t.Fatalf("shape %q, want the compact help %q:\n%s", got, short, view(m))
+	}
+	m, cmd := press(m, "?")
+	v := view(m)
+	if isQuit(cmd) || msShape(m) != "T _ R R R _ S _ K K" {
+		t.Fatalf("full help: shape %q:\n%s", msShape(m), v)
+	}
+	for _, want := range []string{"↑/k up", "↓/j down", "space toggle", "a all", "n none", "/ filter", "enter confirm", "esc/q cancel", "? less"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("full help lacks %q:\n%s", want, v)
+		}
+	}
+	m, _ = press(m, "?")
+	if !hasLine(view(m), short) {
+		t.Errorf("help after ? ?:\n%s", view(m))
+	}
+	m, _ = press(m, "/", "?")
+	if v := view(m); !hasLine(v, "/?█") || strings.Contains(v, "? less") {
+		t.Errorf("filter mode:\n%s", v)
+	}
+	// Narrower than the line, it wraps rather than cut a key off.
+	for w := 20; w < 80; w++ {
+		var m tea.Model = NewMultiSelect("Pick", abc())
+		m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 24})
+		v := view(m)
+		for _, k := range []string{"space toggle", "enter confirm", "/ filter", "? more", "esc/q cancel"} {
+			if !strings.Contains(v, k) {
+				t.Errorf("width %d: compact help lacks %q:\n%s", w, k, v)
+			}
+		}
+		for _, l := range strings.Split(v, "\n") {
+			if lipgloss.Width(l) > w || strings.Contains(l, "…") {
+				t.Errorf("width %d: line %q", w, l)
+			}
+		}
+	}
+	// Several runes in one key event are handled one by one, ? included.
+	m, _ = NewMultiSelect("Pick", abc()).Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m, _ = press(m, "a?")
+	if v := view(m); !strings.Contains(v, "? less") || !strings.Contains(v, "3/3 selected") {
+		t.Errorf("runes a?:\n%s", v)
 	}
 }
 

@@ -132,6 +132,7 @@ type home struct {
 	jobs int
 
 	cursor, filter, message string
+	fullHelp                bool               // the last overview showed the full key help
 	rows                    map[string]homeRow // by row key, of the last overview
 	bundle                  *bundle.Bundle     // as read for the last overview
 	// selected are the selected rows of the next overview: those of the
@@ -177,7 +178,7 @@ func (h *home) loop() error {
 			return nil
 		}
 		name, targets := m.Chosen()
-		h.cursor, h.filter, h.selected = m.CurrentKey(), m.Filter(), m.SelectedKeys()
+		h.cursor, h.filter, h.selected, h.fullHelp = m.CurrentKey(), m.Filter(), m.SelectedKeys(), m.FullHelp()
 		switch name {
 		case "": // quit, or input closed
 			return nil
@@ -240,7 +241,7 @@ func (h *home) overview() (tui.Overview, error) {
 	// repository are contiguous for the grouping.
 	slices.SortStableFunc(rows, func(a, b tui.Row) int { return strings.Compare(a.Cells[0], b.Cells[0]) })
 	ov := tui.NewOverview("sheaf: "+w.Root, []string{"REPO", "DIR", "BRANCH", "AGE", "STATE"}, rows, h.actions())
-	return ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithAltScreen().WithGrouping().WithShrinkable(2, 1), nil
+	return ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithFullHelp(h.fullHelp).WithAltScreen().WithGrouping().WithShrinkable(2, 1), nil
 }
 
 // scope returns the scope of the action name.
@@ -412,10 +413,10 @@ func (h *home) actions() []tui.OverviewAction {
 		return "sent to the clipboard: " + path, tea.SetClipboard(path)
 	}
 	return []tui.OverviewAction{
-		{Key: "enter", Name: "cd", Help: "cd", Scope: tui.ScopeCurrent, Check: noProblem},
+		{Key: "enter", Name: "cd", Help: "cd", Short: true, Scope: tui.ScopeCurrent, Check: noProblem},
 		{Key: "y", Name: "copy", Help: "copy path", Scope: tui.ScopeCurrent, Check: copyable, Do: copyPath},
-		{Key: "u", Name: "update", Help: "update", Scope: tui.ScopeRows, Check: noProblem},
-		{Key: "f", Name: "fetch", Help: "fetch", Scope: tui.ScopeRows},
+		{Key: "u", Name: "update", Help: "update", Short: true, Scope: tui.ScopeRows, Check: noProblem},
+		{Key: "f", Name: "fetch", Help: "fetch", Short: true, Scope: tui.ScopeRows},
 		{Key: "w", Name: "add", Help: "add worktree", Scope: tui.ScopeCurrent},
 		{Key: "#", Name: "pr", Help: "check out PR", Scope: tui.ScopeCurrent, Check: onGitHub},
 		{Key: "b", Name: "browse", Help: "browse", Scope: tui.ScopeCurrent, Check: browsable},

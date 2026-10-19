@@ -42,6 +42,7 @@ type OverviewAction struct {
 	Key   string // as tea.KeyPressMsg.String(), e.g. "u" or "enter"
 	Name  string // returned by Overview.Chosen
 	Help  string // short description in the help line
+	Short bool   // also listed in the compact key help (see Overview)
 	Scope Scope
 	// Check, if set, may refuse the action for its targets: a non-empty
 	// message is displayed and the overview stays open.
@@ -63,8 +64,10 @@ const noRowMessage = "no row to act on"
 // selection of the current row; a selects and n deselects every visible
 // row (rows hidden by the filter keep their state, as in MultiSelect);
 // / enters filter mode (case-insensitive substring over the cells; editing
-// as in MultiSelect: enter keeps the filter, esc clears it); the keys of
-// the actions choose an action (or run it in place, see OverviewAction.Do);
+// as in MultiSelect: enter keeps the filter, esc clears it); ? toggles
+// the full key help (one short line by default, with the Short actions);
+// the keys of the actions choose an action (or run it in place, see
+// OverviewAction.Do);
 // q, esc and ctrl+c quit. In list mode esc first clears an applied filter and only
 // quits when no filter is set. Key events of several runes and bracketed
 // pastes are ignored in list mode, so pasted text never triggers actions.
@@ -92,6 +95,7 @@ type Overview struct {
 
 	filter    string
 	filtering bool
+	fullHelp  bool
 
 	chosen                 string
 	targets                []string
@@ -233,6 +237,17 @@ func (m Overview) CurrentKey() string {
 // Filter returns the filter.
 func (m Overview) Filter() string { return m.filter }
 
+// WithFullHelp returns a copy of m showing the full key help when full is
+// set, the compact one otherwise (see Overview), e.g. as a previous
+// overview did.
+func (m Overview) WithFullHelp(full bool) Overview {
+	m.fullHelp = full
+	return m
+}
+
+// FullHelp reports whether m shows the full key help.
+func (m Overview) FullHelp() bool { return m.fullHelp }
+
 func (m Overview) done() bool { return m.chosen != "" || m.cancelled }
 
 // Update implements tea.Model.
@@ -296,6 +311,9 @@ func (m Overview) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Filter):
 		m.filtering = true
 		m.scrollToCursor() // the filter line takes a row
+	case key.Matches(msg, m.keys.More):
+		m.fullHelp = !m.fullHelp
+		m.scrollToCursor() // the help lines changed
 	default:
 		m.move(msg)
 	}
@@ -632,19 +650,33 @@ func (m Overview) View() tea.View {
 	return v
 }
 
-// helpLines renders the key help: the movement keys and quit, then the
-// actions (the filter keys in filter mode), each wrapped to the width so
-// that none is cut off.
+// helpLines renders the key help, wrapped to the width so that no key is
+// cut off: in filter mode the filter keys; otherwise the compact help
+// (toggle, the Short actions, filter, ? more, quit), or with the full help
+// the movement keys and quit, then every action and ? less.
 func (m Overview) helpLines() []string {
 	if m.filtering {
 		return wrapHelp(m.help, m.width, []key.Binding{m.keys.ApplyFilter, m.keys.ClearFilter})
 	}
+	binding := func(a OverviewAction) key.Binding {
+		return key.NewBinding(key.WithKeys(a.Key), key.WithHelp(a.Key, a.Help))
+	}
+	if !m.fullHelp {
+		short := []key.Binding{m.keys.Toggle}
+		for _, a := range m.actions {
+			if a.Short {
+				short = append(short, binding(a))
+			}
+		}
+		quit := key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit"))
+		return wrapHelp(m.help, m.width, append(short, m.keys.Filter, m.keys.More, quit))
+	}
 	lines := wrapHelp(m.help, m.width, []key.Binding{m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.All, m.keys.None, m.keys.Filter, m.keys.Cancel})
 	var actions []key.Binding
 	for _, a := range m.actions {
-		actions = append(actions, key.NewBinding(key.WithKeys(a.Key), key.WithHelp(a.Key, a.Help)))
+		actions = append(actions, binding(a))
 	}
-	return append(lines, wrapHelp(m.help, m.width, actions)...)
+	return append(lines, wrapHelp(m.help, m.width, append(actions, m.keys.Less))...)
 }
 
 func (m Overview) renderRow(i int, widths []int) string {

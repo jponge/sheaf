@@ -22,8 +22,8 @@ func ovRows() []Row {
 
 func ovActions() []OverviewAction {
 	return []OverviewAction{
-		{Key: "enter", Name: "cd", Help: "cd", Scope: ScopeCurrent},
-		{Key: "u", Name: "update", Help: "update", Scope: ScopeRows},
+		{Key: "enter", Name: "cd", Help: "cd", Scope: ScopeCurrent, Short: true},
+		{Key: "u", Name: "update", Help: "update", Scope: ScopeRows, Short: true},
 		{Key: "w", Name: "add", Help: "add worktree", Scope: ScopeCurrent},
 		{Key: "p", Name: "prune", Help: "prune", Scope: ScopeNone},
 		{Key: "r", Name: "remove", Help: "remove worktree", Scope: ScopeRows, Check: func(targets []string) string {
@@ -73,7 +73,7 @@ func TestOverviewRendersAlignedTable(t *testing.T) {
 			t.Fatalf("view lacks line %q:\n%s", want, v)
 		}
 	}
-	if !strings.Contains(v, "enter cd") || !strings.Contains(v, "u update") || !strings.Contains(v, "esc/q quit") {
+	if !strings.Contains(v, "enter cd") || !strings.Contains(v, "u update") || !strings.Contains(v, "q quit") {
 		t.Fatalf("help line lacks the actions:\n%s", v)
 	}
 }
@@ -86,7 +86,7 @@ func TestOverviewHelpShowsEveryActionAt80Columns(t *testing.T) {
 		OverviewAction{Key: "f", Name: "fetch", Help: "fetch"},
 		OverviewAction{Key: "d", Name: "doctor", Help: "doctor", Scope: ScopeNone},
 		OverviewAction{Key: "s", Name: "sync", Help: "sync", Scope: ScopeNone})
-	var m tea.Model = NewOverview("t", []string{"REPO"}, ovRows(), actions)
+	var m tea.Model = NewOverview("t", []string{"REPO"}, ovRows(), actions).WithFullHelp(true)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	v := view(m)
 	for _, a := range actions {
@@ -414,7 +414,7 @@ func TestOverviewSelectAllAndNoneWithoutRows(t *testing.T) {
 
 func TestOverviewHelpShowsSelectAllAndNone(t *testing.T) {
 	t.Parallel()
-	var m tea.Model = newOv()
+	var m tea.Model = newOv().WithFullHelp(true)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	v := view(m)
 	for _, want := range []string{"space toggle", "a all", "n none", "w add worktree"} {
@@ -491,7 +491,7 @@ func TestOverviewSpacesTheFooter(t *testing.T) {
 	t.Parallel()
 	for _, size := range []tea.Msg{nil, tea.WindowSizeMsg{Width: 80, Height: 24}} {
 		for _, msg := range []string{"", "prune: nothing to prune"} {
-			var m tea.Model = newOv().WithMessage(msg)
+			var m tea.Model = newOv().WithFullHelp(true).WithMessage(msg)
 			if size != nil {
 				m, _ = m.Update(size)
 			}
@@ -536,7 +536,7 @@ func TestOverviewShortTerminalDropsSpacingFirst(t *testing.T) {
 		1:  "R",
 	}
 	for h := 1; h <= 10; h++ {
-		var m tea.Model = NewOverview("t", []string{"REPO", "DIR"}, rows, ovActions()).WithMessage("m")
+		var m tea.Model = NewOverview("t", []string{"REPO", "DIR"}, rows, ovActions()).WithFullHelp(true).WithMessage("m")
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
 		m, _ = press(m, "end")
 		v := view(m)
@@ -559,7 +559,7 @@ func TestOverviewDropsSpacingToFitWithoutScrolling(t *testing.T) {
 		7:  "T H R _ S K K",
 	}
 	for h := 7; h <= 11; h++ {
-		var m tea.Model = newOv().WithMessage("m")
+		var m tea.Model = newOv().WithFullHelp(true).WithMessage("m")
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
 		v := view(m)
 		if got := ovShape(m); got != want[h] || lineCount(v) > h {
@@ -640,7 +640,7 @@ func TestOverviewKeyHelpWrapsToWidth(t *testing.T) {
 	list := []string{"↑/k up", "↓/j down", "space toggle", "a all", "n none", "/ filter", "esc/q quit"}
 	filter := []string{"enter apply filter", "esc clear filter"}
 	for w := 18; w <= 80; w++ {
-		var m tea.Model = newOv()
+		var m tea.Model = newOv().WithFullHelp(true)
 		m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 30})
 		for _, mode := range []struct {
 			name string
@@ -664,7 +664,7 @@ func TestOverviewKeyHelpWrapsToWidth(t *testing.T) {
 	}
 	for _, filtering := range []bool{false, true} {
 		for h := 1; h <= 16; h++ {
-			var m tea.Model = newOv()
+			var m tea.Model = newOv().WithFullHelp(true)
 			if filtering {
 				m, _ = press(m, "/")
 			}
@@ -821,6 +821,109 @@ func hasAllLines(v string, want []string) bool {
 		}
 	}
 	return true
+}
+
+// The key help is one short line by default (B45): toggle, the Short
+// actions, filter, "? more" and quit; ? toggles the full list (every key,
+// "? less"), and back. In filter mode ? is typed into the filter.
+func TestOverviewCompactHelpTogglesWithQuestionMark(t *testing.T) {
+	t.Parallel()
+	const short = "space toggle • enter cd • u update • / filter • ? more • q quit"
+	var m tea.Model = newOv()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	helpOf := func(m tea.Model) []string {
+		var help []string
+		for _, l := range strings.Split(view(m), "\n") {
+			if strings.Contains(l, " • ") {
+				help = append(help, l)
+			}
+		}
+		return help
+	}
+	if got := helpOf(m); !slices.Equal(got, []string{short}) || asOv(t, m).FullHelp() {
+		t.Fatalf("compact help %q, want %q", got, short)
+	}
+	m, cmd := press(m, "?")
+	full := strings.Join(helpOf(m), "\n")
+	if isQuit(cmd) || !asOv(t, m).FullHelp() || len(helpOf(m)) != 2 {
+		t.Fatalf("full help (quit %v):\n%s", isQuit(cmd), full)
+	}
+	for _, want := range []string{"↑/k up", "↓/j down", "a all", "n none", "? less", "esc/q quit", "w add worktree", "p prune", "r remove worktree"} {
+		if !strings.Contains(full, want) {
+			t.Errorf("full help lacks %q:\n%s", want, full)
+		}
+	}
+	if strings.Contains(full, "? more") {
+		t.Errorf("full help offers more:\n%s", full)
+	}
+	m, _ = press(m, "?")
+	if got := helpOf(m); !slices.Equal(got, []string{short}) {
+		t.Errorf("help after ? ?: %q", got)
+	}
+	m, _ = press(m, "/", "?")
+	if o := asOv(t, m); o.Filter() != "?" || o.FullHelp() {
+		t.Errorf("filter mode: filter %q, full help %v", o.Filter(), o.FullHelp())
+	}
+	// WithFullHelp sets the state, e.g. that of a previous overview.
+	if o := newOv().WithFullHelp(true); !o.FullHelp() || !strings.Contains(view(o), "? less") {
+		t.Errorf("WithFullHelp(true):\n%s", view(o))
+	}
+}
+
+// The compact help is one line of the layout (help lines are chrome, see
+// fitGaps): the blank lines are kept or dropped as with the full help, and
+// toggling the full help on a short terminal keeps the cursor row shown.
+func TestOverviewCompactHelpLayout(t *testing.T) {
+	t.Parallel()
+	for _, size := range []tea.Msg{nil, tea.WindowSizeMsg{Width: 80, Height: 24}} {
+		var m tea.Model = newOv().WithMessage("m")
+		if size != nil {
+			m, _ = m.Update(size)
+		}
+		if got := ovShape(m); got != "T _ H R R R _ S _ K" {
+			t.Errorf("size %v: shape %q:\n%s", size, got, view(m))
+		}
+	}
+	want := map[int]string{
+		10: "T _ H R R R _ S _ K",
+		9:  "T _ H R R R _ S K",
+		8:  "T H R R R _ S K",
+		7:  "T H R R R S K",
+		6:  "T H R _ S K",
+	}
+	for h := 6; h <= 10; h++ {
+		var m tea.Model = newOv().WithMessage("m")
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
+		if got := ovShape(m); got != want[h] || lineCount(view(m)) > h {
+			t.Errorf("height %d: shape %q, want %q:\n%s", h, got, want[h], view(m))
+		}
+	}
+	// Narrower than the line, it wraps rather than cut a key off.
+	for w := 18; w < 80; w++ {
+		var m tea.Model = newOv()
+		m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 30})
+		v := view(m)
+		for _, k := range []string{"space toggle", "enter cd", "u update", "/ filter", "? more", "q quit"} {
+			if !strings.Contains(v, k) {
+				t.Errorf("width %d: compact help lacks %q:\n%s", w, k, v)
+			}
+		}
+		for _, l := range strings.Split(v, "\n") {
+			if lipgloss.Width(l) > w || strings.Contains(l, "…") {
+				t.Errorf("width %d: line %q", w, l)
+			}
+		}
+	}
+	var rows []Row
+	for i := range 30 {
+		rows = append(rows, Row{Key: fmt.Sprint(i), Cells: []string{fmt.Sprintf("r%02d", i), "main"}})
+	}
+	var m tea.Model = NewOverview("t", []string{"REPO", "DIR"}, rows, ovActions())
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	m, _ = press(m, "end", "?")
+	if v := view(m); lineCount(v) > 10 || !strings.Contains(v, "> [ ] r29") || !strings.Contains(v, "? less") {
+		t.Errorf("full help on a short terminal:\n%s", v)
+	}
 }
 
 // An action with Do runs in the overview (B44): its message is displayed,

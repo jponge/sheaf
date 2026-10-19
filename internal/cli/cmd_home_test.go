@@ -780,6 +780,27 @@ func TestHomeRefusesEnterAndUpdateOnProblemRows(t *testing.T) {
 	}
 }
 
+// The key help of the overview is one short line (B45); ? shows the full
+// list, and the next overviews of the home screen (here after a fetch)
+// keep it.
+func TestHomeCompactHelpAndKeptToggle(t *testing.T) {
+	t.Parallel()
+	e, _, _, _, _ := homeBundle(t)
+	var out syncBuffer
+	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "?"), key{keys: "f", wait: waitOutput(t, &out, "? less")}), keys(), reportKey(t, &out, "fetch", "x"), ovKeys(t, &out, "fetch: done", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	text := ansi.Strip(out.String())
+	if short := "space toggle • enter cd • u update • f fetch • / filter • ? more • q quit"; strings.Count(text, short) != 1 {
+		t.Errorf("want the compact help %q once (first overview):\n%s", short, text)
+	}
+	if n := strings.Count(text, "? less"); n != 2 {
+		t.Errorf("full help shown %d times, want 2 (after ?, and in the overview after the fetch):\n%s", n, text)
+	}
+}
+
 // y (copy the path, B44) is refused on a row with a problem, and on an
 // output that is not a terminal (a TUI forced on), where it sends no OSC 52
 // sequence; the overview stays open.

@@ -31,6 +31,9 @@ type multiSelectKeys struct {
 	Up, Down, PageUp, PageDown, Home, End key.Binding
 	Toggle, All, None, Filter             key.Binding
 	Confirm, Cancel, ForceQuit            key.Binding
+	// More and Less are the ? key, which toggles the full key help, as
+	// listed in the compact and in the full help.
+	More, Less key.Binding
 	// Filter mode.
 	ApplyFilter, ClearFilter key.Binding
 }
@@ -50,6 +53,8 @@ func newMultiSelectKeys() multiSelectKeys {
 		Confirm:     key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
 		Cancel:      key.NewBinding(key.WithKeys("esc", "q"), key.WithHelp("esc/q", "cancel")),
 		ForceQuit:   key.NewBinding(key.WithKeys("ctrl+c")),
+		More:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "more")),
+		Less:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "less")),
 		ApplyFilter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "apply filter")),
 		ClearFilter: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
 	}
@@ -60,7 +65,8 @@ func newMultiSelectKeys() multiSelectKeys {
 //
 // Keys: up/down/k/j, pgup/pgdown, home/end move; space toggles; a selects and
 // n deselects every visible enabled item; / enters filter mode; enter
-// confirms; esc/q/ctrl+c cancel. Printable runes delivered together in one
+// confirms; esc/q/ctrl+c cancel; ? toggles the full key help (one short
+// line by default). Printable runes delivered together in one
 // key event are handled one by one; a bracketed paste is ignored in list
 // mode. In filter mode typed or pasted text (without control characters)
 // edits the filter, backspace deletes a rune, ctrl+w a word and ctrl+u the
@@ -80,6 +86,7 @@ type MultiSelect struct {
 
 	filter    string
 	filtering bool
+	fullHelp  bool // see helpLines
 
 	confirmed, cancelled, interrupted bool
 
@@ -206,6 +213,9 @@ func (m MultiSelect) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Filter):
 		m.filtering = true
 		m.scrollToCursor() // the filter line takes a row
+	case key.Matches(msg, m.keys.More):
+		m.fullHelp = !m.fullHelp
+		m.scrollToCursor() // the help lines changed
 	default:
 		m.move(msg)
 	}
@@ -548,14 +558,19 @@ func (m MultiSelect) View() tea.View {
 }
 
 // helpLines renders the key help, wrapped to the width so that no key is
-// cut off.
+// cut off: in filter mode the filter keys; otherwise the compact help
+// (toggle, confirm, filter, ? more, cancel), or with the full help (?
+// toggles it) every key and ? less.
 func (m MultiSelect) helpLines() []string {
 	if m.filtering {
 		return wrapHelp(m.help, m.width, []key.Binding{m.keys.ApplyFilter, m.keys.ClearFilter})
 	}
+	if !m.fullHelp {
+		return wrapHelp(m.help, m.width, []key.Binding{m.keys.Toggle, m.keys.Confirm, m.keys.Filter, m.keys.More, m.keys.Cancel})
+	}
 	return wrapHelp(m.help, m.width, []key.Binding{
 		m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.All, m.keys.None,
-		m.keys.Filter, m.keys.Confirm, m.keys.Cancel,
+		m.keys.Filter, m.keys.Confirm, m.keys.Cancel, m.keys.Less,
 	})
 }
 

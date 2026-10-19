@@ -271,8 +271,16 @@ lines that still do not fit are cut at the right.
 | b | open the current row on GitHub, as `sheaf browse` run in its directory (the pull request of its branch, else the repository's home page); the outcome is the overview's message (`browse: opened o/r`, `browse failed: ...`), without a report view |
 | r | remove the selected worktrees (or the current one); not the primary |
 | p, d, s | `prune`, `doctor`, `sync` on the whole bundle |
+| ? | show every key in the key help, or only the main ones again |
 | q, esc | quit with status 0 (esc first clears an applied filter) |
 | ctrl+c | exit with status 130 |
+
+The key help below the table is one short line (`space toggle • enter cd •
+u update • f fetch • / filter • ? more • q quit`); `?` shows the full list,
+and the next overviews keep that choice until `?` is pressed again. The
+selection menus of the commands (e.g. `sync`, `init`) work the same way:
+their short line lists space, enter, `/`, `? more` and esc/q, and `?` shows
+the others (`a`/`n` to select or deselect every visible item, movement).
 
 The overview is drawn on the terminal's alternate screen, so each one starts
 on a clear screen. Actions run with the TUI of the corresponding command
