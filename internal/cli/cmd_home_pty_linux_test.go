@@ -97,7 +97,7 @@ func TestHomeOnPTYActionReturnsToOverview(t *testing.T) {
 	s.write("q")
 	wantTerminalRestored(t, s, "0")
 	out := s.output()
-	if i, j := strings.Index(out, "1 done, 0 skipped, 0 failed"), strings.LastIndex(out, "behind 2"); i < 0 || j < i {
+	if i, j := strings.Index(out, "1 done, 0 skipped, 0 failed"), strings.LastIndex(out, "↓2"); i < 0 || j < i {
 		t.Errorf("summary, then the refreshed overview expected:\n%q", out)
 	}
 }

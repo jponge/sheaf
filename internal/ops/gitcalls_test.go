@@ -121,6 +121,17 @@ var gitCallCommands = []struct {
 		_, err := CollectStatus(ctx, f.w, StatusOptions{Jobs: 4}, Discard)
 		return err
 	}},
+	// The home overview: status plus the date of each HEAD, one rev-list
+	// per repository.
+	{"overview", 40 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+		r, err := CollectStatus(ctx, f.w, StatusOptions{Jobs: 4, HeadTimes: true}, Discard)
+		for _, c := range r.Checkouts {
+			if err == nil && c.HeadTime.IsZero() {
+				err = fmt.Errorf("%s: no head time", c.Name())
+			}
+		}
+		return err
+	}},
 	{"wt list", 20 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		_, _, err := ListWorktrees(ctx, f.w, "")
 		return err

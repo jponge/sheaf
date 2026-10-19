@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jponge/sheaf/internal/testutil"
 )
@@ -260,4 +262,33 @@ func TestStatusSubmoduleWithOnlyUntrackedContent(t *testing.T) {
 	// A new commit inside the submodule is a real modification.
 	testutil.CommitFile(t, filepath.Join(dir, "sub"), "c.txt", "c\n", "in sub")
 	wantCounts(t, mustStatus(t, dir), 0, 1, 0, 0, true)
+}
+
+// CommitTimes returns the committer dates (not the author dates) of the
+// given commits with a single git process, and none without commits.
+func TestCommitTimes(t *testing.T) {
+	t.Parallel()
+	_, dir := cloneOrigin(t, testutil.OriginOpts{})
+	t1 := time.Date(2020, 5, 17, 10, 30, 0, 0, time.UTC)
+	t2 := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	c1 := testutil.CommitAt(t, dir, "one", t1)
+	c2 := testutil.CommitAt(t, dir, "two", t2)
+	ctx, counter := WithCallCounter(context.Background())
+	got, err := CommitTimes(ctx, dir, []string{c2, c1, c2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || !got[c1].Equal(t1) || !got[c2].Equal(t2) {
+		t.Errorf("CommitTimes = %v, want %s: %s, %s: %s", got, c1, t1, c2, t2)
+	}
+	if n := len(counter.Calls()); n != 1 {
+		t.Errorf("%d git processes, want 1", n)
+	}
+	got, err = CommitTimes(ctx, dir, nil)
+	if err != nil || len(got) != 0 || len(counter.Calls()) != 1 {
+		t.Errorf("no commits: %v %v, %d git processes", got, err, len(counter.Calls()))
+	}
+	if _, err := CommitTimes(context.Background(), dir, []string{strings.Repeat("e", len(c1))}); err == nil {
+		t.Error("no error for a missing commit")
+	}
 }

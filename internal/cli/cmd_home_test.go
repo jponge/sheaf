@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jponge/sheaf/internal/hosting"
@@ -164,14 +165,14 @@ func TestHomeShowsLocalStateAndQuits(t *testing.T) {
 			t.Fatalf("%q: exit %d\nstdout:\n%s\nstderr:\n%s", quit, code, out.String(), errs)
 		}
 		o := out.String()
-		for _, want := range []string{"alpha", "beta", "feat", "dirty", "behind 1", "clean", "REPO", "STATE"} {
+		for _, want := range []string{"alpha", "beta", "feat", "dirty", "↓1", "clean", "REPO", "AGE", "STATE"} {
 			if !strings.Contains(o, want) {
 				t.Errorf("%q: overview lacks %q:\n%s", quit, want, o)
 			}
 		}
 		// origin/main moved by two commits after the last fetch: the
 		// overview does not fetch.
-		if strings.Contains(o, "behind 2") {
+		if strings.Contains(o, "↓2") {
 			t.Errorf("the overview fetched:\n%s", o)
 		}
 	}
@@ -194,19 +195,64 @@ func TestHomeShowsProblems(t *testing.T) {
 // screen in bundle e, as rendered without a window size and colors.
 func overviewRows(t *testing.T, e *env) []string {
 	t.Helper()
-	h := &home{d: e.deps(), s: &tuiSession{ctx: context.Background()}, root: e.cwd, jobs: 4}
+	_, rows := overviewLines(t, e.deps(), e.cwd, 0)
+	return rows
+}
+
+// overviewLines returns the header and row lines of the first overview of
+// the home screen with deps d in bundle root, as rendered without colors in
+// a window width columns wide (0: no window size).
+func overviewLines(t *testing.T, d Deps, root string, width int) (header string, rows []string) {
+	t.Helper()
+	h := &home{d: d, s: &tuiSession{ctx: context.Background()}, root: root, jobs: 4}
 	ov, err := h.overview()
 	if err != nil {
 		t.Fatal(err)
 	}
+	var m tea.Model = ov
+	if width > 0 {
+		m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+	}
 	row := regexp.MustCompile(`^(> |  )\[[ x]\] `)
-	var rows []string
-	for _, l := range strings.Split(ansi.Strip(ov.View().Content), "\n") {
-		if row.MatchString(l) {
+	for _, l := range strings.Split(ansi.Strip(m.View().Content), "\n") {
+		switch {
+		case row.MatchString(l):
 			rows = append(rows, l)
+		case strings.Contains(l, "REPO"):
+			header = l
 		}
 	}
-	return rows
+	return header, rows
+}
+
+// STATE gives the commits to push and pull as arrows, from local refs, and
+// AGE the age of the HEAD commit of each checkout; a problem row has no
+// age.
+func TestHomeShowsAheadBehindAndAge(t *testing.T) {
+	t.Parallel()
+	e, alpha, feat, beta, _ := homeBundle(t)
+	now := time.Now().Truncate(time.Second)
+	testutil.CommitAt(t, alpha, "local", now.Add(-50*time.Hour))
+	testutil.CommitAt(t, feat, "local", now.Add(-3*time.Hour-time.Minute))
+	testutil.CommitAt(t, beta, "local", now.Add(-8*7*24*time.Hour))
+	d := e.deps()
+	d.now = func() time.Time { return now }
+	header, rows := overviewLines(t, d, e.cwd, 0)
+	want := []string{
+		"> [ ] alpha  main  main    2d   clean, ↑1",
+		"  [ ]        feat  feat    3h   dirty, ↑1 ↓1",
+		"  [ ] beta   main  main    1mo  clean, ↑1",
+	}
+	if header != "      REPO   DIR   BRANCH  AGE  STATE" || !slices.Equal(rows, want) {
+		t.Errorf("overview:\n%s\n%s\nwant rows:\n%s", header, strings.Join(rows, "\n"), strings.Join(want, "\n"))
+	}
+	if err := os.RemoveAll(feat); err != nil {
+		t.Fatal(err)
+	}
+	_, rows = overviewLines(t, d, e.cwd, 0)
+	if len(rows) != 3 || !strings.HasPrefix(rows[1], "  [ ]        feat  -            problem: ") {
+		t.Errorf("problem row with an age:\n%s", strings.Join(rows, "\n"))
+	}
 }
 
 // The overview groups rows by repository: the rows of a repository are
@@ -233,6 +279,66 @@ func TestHomeGroupsRowsByRepository(t *testing.T) {
 	want(rows, "> [ ] alpha  main ", "  [ ]        feat ", "  [ ] beta   main ")
 	if !strings.Contains(rows[1], "problem: worktree directory missing") {
 		t.Errorf("row 1 is not the problem: %q", rows[1])
+	}
+}
+
+// In a narrow window, BRANCH and then DIR are truncated so that STATE
+// fits.
+func TestHomeTruncatesBranchThenDir(t *testing.T) {
+	t.Parallel()
+	e, alpha, _, _, _ := homeBundle(t)
+	testutil.Git(t, alpha, "worktree", "add", "-q", "-b", "feature/a-very-long-branch", filepath.Join(filepath.Dir(alpha), "a-very-long-directory"))
+	row := func(width int) string {
+		t.Helper()
+		_, rows := overviewLines(t, e.deps(), e.cwd, width)
+		for _, r := range rows {
+			if strings.Contains(r, "a-very-") {
+				return r
+			}
+		}
+		t.Fatalf("width %d: no row of the worktree in\n%s", width, strings.Join(rows, "\n"))
+		return ""
+	}
+	if r := row(70); !strings.Contains(r, " a-very-long-directory  feature/…  ") || !strings.HasSuffix(r, "  clean, no upstream") {
+		t.Errorf("width 70: %q", r)
+	}
+	if r := row(55); !strings.Contains(r, " a-very-…  feature…  ") {
+		t.Errorf("width 55: %q", r)
+	}
+}
+
+// The AGE column uses the largest unit that fits, rounded down; see
+// homeAge for the scale.
+func TestHomeAge(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	day := 24 * time.Hour
+	for _, tc := range []struct {
+		age  time.Duration
+		want string
+	}{
+		{-time.Hour, "now"},
+		{0, "now"},
+		{59 * time.Second, "now"},
+		{time.Minute, "1m"},
+		{time.Hour - time.Second, "59m"},
+		{time.Hour, "1h"},
+		{day - time.Second, "23h"},
+		{day, "1d"},
+		{7*day - time.Second, "6d"},
+		{7 * day, "1w"},
+		{30*day - time.Second, "4w"},
+		{30 * day, "1mo"},
+		{365*day - time.Second, "12mo"},
+		{365 * day, "1y"},
+		{800 * day, "2y"},
+	} {
+		if got := homeAge(now, now.Add(-tc.age)); got != tc.want {
+			t.Errorf("age %v: %q, want %q", tc.age, got, tc.want)
+		}
+	}
+	if got := homeAge(now, time.Time{}); got != "" {
+		t.Errorf("unknown date: %q, want empty", got)
 	}
 }
 
@@ -342,7 +448,7 @@ func TestHomeFetchCurrentRepository(t *testing.T) {
 		t.Errorf("summary or message missing:\n%s", out.String())
 	}
 	// After the fetch, the refreshed overview shows alpha/main behind.
-	if !strings.Contains(out.String(), "behind 2") {
+	if !strings.Contains(out.String(), "↓2") {
 		t.Errorf("overview not refreshed:\n%s", out.String())
 	}
 }

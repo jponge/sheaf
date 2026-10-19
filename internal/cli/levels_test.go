@@ -318,3 +318,36 @@ func TestHomeLevel(t *testing.T) {
 		}
 	}
 }
+
+// The STATE cell gives the commits to push and pull as arrows (local refs
+// only), omitting a zero side, and nothing when in sync.
+func TestHomeState(t *testing.T) {
+	t.Parallel()
+	st := func(mod func(s *gitx.RepoStatus)) ops.CheckoutStatus {
+		s := &gitx.RepoStatus{Upstream: "origin/main"}
+		if mod != nil {
+			mod(s)
+		}
+		return ops.CheckoutStatus{Checkout: ops.Checkout{Repo: "a", Branch: "main"}, Status: s}
+	}
+	detached := st(func(s *gitx.RepoStatus) { s.Upstream = "" })
+	detached.Detached = true
+	for _, tc := range []struct {
+		c    ops.CheckoutStatus
+		want string
+	}{
+		{st(nil), "clean"},
+		{detached, "clean"},
+		{st(func(s *gitx.RepoStatus) { s.Upstream = "" }), "clean, no upstream"},
+		{st(func(s *gitx.RepoStatus) { s.Ahead = 2 }), "clean, ↑2"},
+		{st(func(s *gitx.RepoStatus) { s.Unstaged, s.Behind = 1, 3 }), "dirty, ↓3"},
+		{st(func(s *gitx.RepoStatus) { s.Ahead, s.Behind = 2, 1 }), "clean, ↑2 ↓1"},
+		{st(func(s *gitx.RepoStatus) { s.Untracked, s.Ahead, s.Behind = 1, 12, 345 }), "dirty, ↑12 ↓345"},
+		{st(func(s *gitx.RepoStatus) { s.UpstreamGone = true }), "clean, upstream gone"},
+		{ops.CheckoutStatus{Checkout: ops.Checkout{Repo: "a"}, Err: errors.New("boom\nmore")}, "error: boom"},
+	} {
+		if got := homeState(tc.c); got != tc.want {
+			t.Errorf("homeState = %q, want %q", got, tc.want)
+		}
+	}
+}

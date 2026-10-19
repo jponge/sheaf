@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jponge/sheaf/internal/gitx"
 )
@@ -23,6 +24,9 @@ type StatusOptions struct {
 	Jobs  int
 	// Interactive fetches in interactive git mode (see gitx.Net).
 	Interactive bool
+	// HeadTimes sets CheckoutStatus.HeadTime, with one more git process
+	// per repository.
+	HeadTimes bool
 
 	// fetchHook, when set by a test, runs while a repository fetch holds
 	// its per-repository lock (see fetchRepo).
@@ -34,6 +38,10 @@ type CheckoutStatus struct {
 	Checkout
 	Status *gitx.RepoStatus // nil when Err is set
 	Err    error
+	// HeadTime is the committer date of HEAD, with StatusOptions.HeadTimes;
+	// zero when unknown (no commit yet, or the status or the date could not
+	// be read).
+	HeadTime time.Time
 }
 
 // Clean reports whether the status is known and the work tree has no
@@ -125,9 +133,42 @@ func CollectStatus(ctx context.Context, w *Workspace, opts StatusOptions, rep Re
 	forEach(opts.Jobs, len(cs), func(i int) {
 		cs[i].Status, cs[i].Err = gitx.Status(ctx, cs[i].Path)
 	})
+	if opts.HeadTimes {
+		headTimes(ctx, sets, cs, opts.Jobs)
+	}
 	if opts.DirtyOnly {
 		cs = slices.DeleteFunc(cs, CheckoutStatus.Clean)
 	}
 	sortProblems(probs)
 	return StatusReport{Checkouts: cs, Problems: probs}, nil
+}
+
+// headTimes sets the HeadTime of cs, the checkouts of sets in order, with
+// one gitx.CommitTimes per repository, up to jobs at a time. The dates are
+// best effort: when they cannot be read, they stay unknown.
+func headTimes(ctx context.Context, sets []*repoCheckouts, cs []CheckoutStatus, jobs int) {
+	starts := make([]int, len(sets))
+	n := 0
+	for i, s := range sets {
+		starts[i] = n
+		n += len(s.checkouts)
+	}
+	forEach(jobs, len(sets), func(i int) {
+		repo := cs[starts[i] : starts[i]+len(sets[i].checkouts)]
+		var oids []string
+		for _, c := range repo {
+			if c.Status != nil && c.Status.Head != "" {
+				oids = append(oids, c.Status.Head)
+			}
+		}
+		times, err := gitx.CommitTimes(ctx, sets[i].primary, oids)
+		if err != nil {
+			return
+		}
+		for j := range repo {
+			if repo[j].Status != nil {
+				repo[j].HeadTime = times[repo[j].Status.Head]
+			}
+		}
+	})
 }

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
@@ -164,13 +165,15 @@ func (h *home) loop() error {
 	}
 }
 
-// overview reads the bundle and the local state of its checkouts.
+// overview reads the bundle and the local state of its checkouts. When the
+// table is wider than the window, BRANCH, then DIR, are truncated before
+// STATE is cut.
 func (h *home) overview() (tui.Overview, error) {
 	w, err := ops.OpenWorkspace(h.root)
 	if err != nil {
 		return tui.Overview{}, err
 	}
-	r, err := ops.CollectStatus(h.s.ctx, w, ops.StatusOptions{Jobs: h.jobs}, ops.Discard)
+	r, err := ops.CollectStatus(h.s.ctx, w, ops.StatusOptions{Jobs: h.jobs, HeadTimes: true}, ops.Discard)
 	if err != nil {
 		return tui.Overview{}, err
 	}
@@ -178,24 +181,25 @@ func (h *home) overview() (tui.Overview, error) {
 		return tui.Overview{}, err
 	}
 	h.rows = map[string]homeRow{}
+	now := h.d.clock()
 	var rows []tui.Row
 	for i := range r.Checkouts {
 		cs := &r.Checkouts[i]
 		h.rows[cs.Path] = homeRow{checkout: cs}
-		rows = append(rows, tui.Row{Key: cs.Path, Cells: []string{cs.Repo, displayDir(cs.Checkout), homeBranch(*cs), homeState(*cs)}, Alert: cs.Err != nil, Level: homeLevel(*cs)})
+		rows = append(rows, tui.Row{Key: cs.Path, Cells: []string{cs.Repo, displayDir(cs.Checkout), homeBranch(*cs), homeAge(now, cs.HeadTime), homeState(*cs)}, Alert: cs.Err != nil, Level: homeLevel(*cs)})
 	}
 	for i := range r.Problems {
 		p := &r.Problems[i]
 		key := "problem:" + p.Path
 		h.rows[key] = homeRow{problem: p}
-		rows = append(rows, tui.Row{Key: key, Cells: []string{p.Repo, filepath.Base(p.Path), "-", "problem: " + firstLine(p.Err.Error())}, Alert: true})
+		rows = append(rows, tui.Row{Key: key, Cells: []string{p.Repo, filepath.Base(p.Path), "-", "", "problem: " + firstLine(p.Err.Error())}, Alert: true})
 	}
 	// Checkouts and problems are each sorted by repository: the problem
 	// rows of a repository go after its checkouts, so that the rows of a
 	// repository are contiguous for the grouping.
 	slices.SortStableFunc(rows, func(a, b tui.Row) int { return strings.Compare(a.Cells[0], b.Cells[0]) })
-	ov := tui.NewOverview("sheaf: "+w.Root, []string{"REPO", "DIR", "BRANCH", "STATE"}, rows, h.actions())
-	return ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithAltScreen().WithGrouping(), nil
+	ov := tui.NewOverview("sheaf: "+w.Root, []string{"REPO", "DIR", "BRANCH", "AGE", "STATE"}, rows, h.actions())
+	return ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithAltScreen().WithGrouping().WithShrinkable(2, 1), nil
 }
 
 // scope returns the scope of the action name.
@@ -256,16 +260,52 @@ func homeState(c ops.CheckoutStatus) string {
 	case s.Upstream != "" && s.UpstreamGone:
 		parts = append(parts, "upstream gone")
 	case s.Upstream != "":
+		var ab []string
 		if s.Ahead > 0 {
-			parts = append(parts, "ahead "+strconv.Itoa(s.Ahead))
+			ab = append(ab, "↑"+strconv.Itoa(s.Ahead))
 		}
 		if s.Behind > 0 {
-			parts = append(parts, "behind "+strconv.Itoa(s.Behind))
+			ab = append(ab, "↓"+strconv.Itoa(s.Behind))
+		}
+		if len(ab) > 0 {
+			parts = append(parts, strings.Join(ab, " "))
 		}
 	case !c.Detached:
 		parts = append(parts, "no upstream")
 	}
 	return strings.Join(parts, ", ")
+}
+
+// homeAge returns the age at now of a commit dated t, for the AGE column:
+// "now" under a minute (and for a date in the future, e.g. clock skew),
+// then the whole number of minutes ("5m") under an hour, hours ("3h")
+// under a day, days ("2d") under a week, weeks ("4w") under 30 days,
+// months of 30 days ("11mo") under 365 days and years of 365 days ("2y");
+// empty for a zero t (unknown).
+func homeAge(now, t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	const day = 24 * time.Hour
+	d := now.Sub(t)
+	if d < time.Minute {
+		return "now"
+	}
+	for _, u := range []struct {
+		unit, below time.Duration
+		suffix      string
+	}{
+		{time.Minute, time.Hour, "m"},
+		{time.Hour, day, "h"},
+		{day, 7 * day, "d"},
+		{7 * day, 30 * day, "w"},
+		{30 * day, 365 * day, "mo"},
+	} {
+		if d < u.below {
+			return strconv.Itoa(int(d/u.unit)) + u.suffix
+		}
+	}
+	return strconv.Itoa(int(d/(365*day))) + "y"
 }
 
 // actions are the actions of the overview.

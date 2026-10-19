@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // RepoStatus is a snapshot of a work tree's state, as reported by
@@ -76,6 +77,33 @@ func status(ctx context.Context, dir string, extra ...string) (*RepoStatus, erro
 		return nil, fmt.Errorf("gitx: status in %s: %w", dir, err)
 	}
 	return st, nil
+}
+
+// CommitTimes returns the committer dates of the commits oids (full commit
+// ids) of the repository containing dir, by commit id, starting one git
+// process at most (none without oids). It fails when one of them is not a
+// commit of the repository.
+func CommitTimes(ctx context.Context, dir string, oids []string) (map[string]time.Time, error) {
+	times := map[string]time.Time{}
+	if len(oids) == 0 {
+		return times, nil
+	}
+	// rev-list is plumbing: unlike log, configuration such as
+	// log.showSignature does not change its output.
+	args := append([]string{"rev-list", "--no-walk=unsorted", "--no-commit-header", "--format=%H %ct", "--end-of-options"}, oids...)
+	out, err := Run(ctx, dir, append(args, "--")...)
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		oid, ct, ok := strings.Cut(line, " ")
+		secs, err := strconv.ParseInt(ct, 10, 64)
+		if !ok || err != nil {
+			return nil, fmt.Errorf("gitx: commit times in %s: malformed line %q", dir, line)
+		}
+		times[oid] = time.Unix(secs, 0)
+	}
+	return times, nil
 }
 
 // parseStatus parses NUL-separated porcelain v2 output. Paths are never

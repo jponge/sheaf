@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // OriginOpts configures NewOrigin.
@@ -144,6 +145,18 @@ func CommitFile(t *testing.T, repoDir, path, content, msg string) {
 	}
 	Git(t, repoDir, "add", "--", path)
 	Git(t, repoDir, "commit", "-q", "-m", msg)
+}
+
+// CommitAt makes an empty commit with msg in repoDir whose committer date
+// is committed (the author date is the current time) and returns its id.
+func CommitAt(t *testing.T, repoDir, msg string, committed time.Time) string {
+	t.Helper()
+	requireMain(t, "CommitAt")
+	env := append(os.Environ(), fmt.Sprintf("GIT_COMMITTER_DATE=@%d +0000", committed.Unix()))
+	if _, err := gitEnv(env, repoDir, "commit", "-q", "--allow-empty", "-m", msg); err != nil {
+		t.Fatal(err)
+	}
+	return Git(t, repoDir, "rev-parse", "HEAD")
 }
 
 // NewOrigin builds a work repository according to opts, then clones it as a

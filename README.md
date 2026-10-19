@@ -231,15 +231,26 @@ sheaf prune                            # list worktrees whose branch is gone or 
 
 `sheaf` without a command, inside a bundle, with standard input and output
 on a terminal, opens an overview of every checkout of the bundle (columns
-REPO, DIR, BRANCH, STATE). It reads local state only; nothing is fetched
+REPO, DIR, BRANCH, AGE, STATE). It reads local state only; nothing is fetched
 when it opens. Checkouts that cannot be inspected are shown as problem rows.
 Rows are grouped by repository (primary first, problem rows last): REPO is
 only shown on the first row of each group, and on the first row on screen
 when the list is scrolled or filtered (the filter still matches it).
-STATE is coloured by its worst part: red for a divergence (`ahead` and
-`behind`), `upstream gone`, errors and problem rows; yellow for local
-changes or commits to push or pull (`dirty`, `ahead`, `behind`); faint for
-`no upstream`; green otherwise (clean, in sync or detached).
+
+AGE is the age of the last commit of the checkout (the committer date of
+HEAD), rounded down: `now` under a minute, then minutes (`5m`), hours
+(`3h`), days (`2d`), weeks under 30 days (`4w`), months of 30 days under a
+year (`11mo`) and years of 365 days (`2y`). It is empty on problem rows.
+STATE is `clean` or `dirty` (anything not committed, untracked files
+included), followed by `↑N ↓M`, the commits to push and to pull relative to
+the upstream as of the last fetch (e.g. `clean, ↑2 ↓1`; a zero side is
+omitted, nothing is shown when in sync), or by `upstream gone` or
+`no upstream`. STATE is coloured by its worst part: red for a divergence
+(`↑` and `↓`), `upstream gone`, errors and problem rows; yellow for local
+changes or commits to push or pull (`dirty`, `↑`, `↓`); faint for
+`no upstream`; green otherwise (clean, in sync or detached). In a narrow
+terminal, BRANCH and then DIR are truncated (with `…`) so that STATE fits;
+lines that still do not fit are cut at the right.
 
 | Key | Action |
 |---|---|

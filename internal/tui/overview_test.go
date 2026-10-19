@@ -758,3 +758,63 @@ func TestOverviewGroupsRowsByFirstCell(t *testing.T) {
 	// Without grouping every row shows its first cell.
 	wantLines(NewOverview("t", []string{"REPO", "DIR", "STATE"}, rows, nil), "  [ ] alpha  feat-x  dirty")
 }
+
+// Shrinkable columns are truncated, in their order and down to a minimum
+// width, before the last column is cut at the window width; the width of
+// the last column ignores alert rows.
+func TestOverviewShrinksColumnsBeforeTheLast(t *testing.T) {
+	t.Parallel()
+	rows := []Row{
+		{Key: "1", Cells: []string{"alpha", "feature-dir-long", "feature/very-long-branch", "2d", "clean, ↑2 ↓1"}},
+		{Key: "2", Cells: []string{"alpha", "main", "main", "5m", "dirty"}},
+		{Key: "3", Cells: []string{"beta", "x", "-", "", "problem: " + strings.Repeat("long text ", 8)}, Alert: true},
+	}
+	header := []string{"REPO", "DIR", "BRANCH", "AGE", "STATE"}
+	at := func(m Overview, width int) string {
+		t.Helper()
+		var tm tea.Model = m
+		tm, _ = tm.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+		v := view(tm)
+		for _, l := range strings.Split(v, "\n") {
+			if w := lipgloss.Width(l); w > width {
+				t.Errorf("width %d: line of width %d: %q", width, w, l)
+			}
+		}
+		return v
+	}
+	shrinkable := func() Overview { return NewOverview("t", header, rows, nil).WithShrinkable(2, 1) }
+	for _, tc := range []struct {
+		width int
+		want  []string
+	}{
+		{100, []string{"      REPO   DIR               BRANCH                    AGE  STATE", "> [ ] alpha  feature-dir-long  feature/very-long-branch  2d   clean, ↑2 ↓1"}},
+		{60, []string{"      REPO   DIR               BRANCH      AGE  STATE", "> [ ] alpha  feature-dir-long  feature/v…  2d   clean, ↑2 ↓1", "  [ ] alpha  main              main        5m   dirty"}},
+		{50, []string{"      REPO   DIR       BRANCH    AGE  STATE", "> [ ] alpha  feature…  feature…  2d   clean, ↑2 ↓1"}},
+		{40, []string{"> [ ] alpha  feature…  feature…  2d   cl"}},
+	} {
+		if v := at(shrinkable(), tc.width); !hasAllLines(v, tc.want) {
+			t.Errorf("width %d: view lacks one of %q:\n%s", tc.width, tc.want, v)
+		}
+	}
+	// The last column is never shrunk.
+	if v := at(NewOverview("t", header, rows, nil).WithShrinkable(4, 2, 1), 60); !hasLine(v, "> [ ] alpha  feature-dir-long  feature/v…  2d   clean, ↑2 ↓1") {
+		t.Errorf("last column listed as shrinkable:\n%s", v)
+	}
+	// The filter matches the whole cells.
+	if v := at(shrinkable().WithFilter("very-long"), 60); !strings.Contains(v, "1 shown") {
+		t.Errorf("filter on a truncated cell:\n%s", v)
+	}
+	// Without shrinkable columns the line is cut.
+	if v := at(NewOverview("t", header, rows, nil), 60); !hasLine(v, "> [ ] alpha  feature-dir-long  feature/very-long-branch  2d ") {
+		t.Errorf("without shrinkable columns:\n%s", v)
+	}
+}
+
+func hasAllLines(v string, want []string) bool {
+	for _, w := range want {
+		if !hasLine(v, w) {
+			return false
+		}
+	}
+	return true
+}

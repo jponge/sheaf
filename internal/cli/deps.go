@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/jponge/sheaf/internal/gitx"
@@ -65,6 +66,9 @@ type Deps struct {
 	// spin is the working indicator on standard error, nil when it is not
 	// a terminal (see NewRootCmdWithDeps).
 	spin *spinner
+	// now replaces time.Now for the AGE column of the home screen; tests
+	// only.
+	now func() time.Time
 }
 
 // reportUnchanged tells d.unchanged, if set, that the command changed
@@ -102,6 +106,13 @@ func (d Deps) hosting() hosting.Hosting {
 		h = spinHosting{h, d.spin}
 	}
 	return h
+}
+
+func (d Deps) clock() time.Time {
+	if d.now != nil {
+		return d.now()
+	}
+	return time.Now()
 }
 
 func (d Deps) getwd() (string, error) {

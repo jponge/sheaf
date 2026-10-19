@@ -1,10 +1,12 @@
 package testutil
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIsolateGit(t *testing.T) {
@@ -52,6 +54,21 @@ func TestCommitFileAndGit(t *testing.T) {
 	}
 	if got := Git(t, dir, "status", "--porcelain"); got != "" {
 		t.Fatalf("tree dirty: %q", got)
+	}
+}
+
+func TestCommitAt(t *testing.T) {
+	t.Parallel()
+	IsolateGit(t)
+	dir := t.TempDir()
+	Git(t, dir, "init")
+	when := time.Date(2020, 5, 17, 10, 30, 0, 0, time.UTC)
+	id := CommitAt(t, dir, "dated", when)
+	if got := Git(t, dir, "log", "-1", "--format=%H %ct %s"); got != fmt.Sprintf("%s %d dated", id, when.Unix()) {
+		t.Fatalf("commit = %q, want id %s committed at %d", got, id, when.Unix())
+	}
+	if got := Git(t, dir, "log", "-1", "--format=%at"); got == fmt.Sprint(when.Unix()) {
+		t.Fatalf("author date = %s, want the current time", got)
 	}
 }
 

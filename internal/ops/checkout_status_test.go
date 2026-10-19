@@ -84,6 +84,50 @@ func TestCollectStatusFetchesOnlyWithFetchOption(t *testing.T) {
 	}
 }
 
+// With HeadTimes, each checkout has the committer date of its HEAD,
+// detached or not; without it, none.
+func TestCollectStatusHeadTimes(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	_, alpha := addRepoWith(t, f, "alpha", "feat")
+	_, beta := addRepoWith(t, f, "beta")
+	feat := addWorktree(t, alpha, "feat", "feat", true)
+	t1 := time.Date(2020, 5, 17, 10, 30, 0, 0, time.UTC)
+	t2 := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	t3 := time.Date(2025, 7, 8, 9, 10, 11, 0, time.UTC)
+	c1 := testutil.CommitAt(t, alpha, "one", t1)
+	testutil.CommitAt(t, feat, "two", t2)
+	testutil.Git(t, alpha, "worktree", "add", "-q", "--detach", filepath.Join(filepath.Dir(alpha), "pinned"), c1)
+	testutil.CommitAt(t, beta, "three", t3)
+
+	r, err := CollectStatus(context.Background(), f.w, StatusOptions{Jobs: 4, HeadTimes: true}, Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]time.Time{}
+	for _, c := range r.Checkouts {
+		got[c.Name()] = c.HeadTime
+	}
+	want := map[string]time.Time{"alpha/main": t1, "alpha/feat": t2, "alpha/pinned": t1, "beta/main": t3}
+	if len(got) != len(want) {
+		t.Fatalf("head times = %v, want %v", got, want)
+	}
+	for name, w := range want {
+		if !got[name].Equal(w) {
+			t.Errorf("%s: head time %v, want %v", name, got[name], w)
+		}
+	}
+	r, err = CollectStatus(context.Background(), f.w, StatusOptions{Jobs: 4}, Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range r.Checkouts {
+		if !c.HeadTime.IsZero() {
+			t.Errorf("%s: head time %v without HeadTimes", c.Name(), c.HeadTime)
+		}
+	}
+}
+
 func TestCollectStatusReportsProblems(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

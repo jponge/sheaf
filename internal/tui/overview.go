@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Row is one row of an Overview table.
@@ -81,7 +82,8 @@ type Overview struct {
 
 	width, height int // 0 = unknown
 	altScreen     bool
-	grouped       bool // see WithGrouping
+	grouped       bool  // see WithGrouping
+	shrink        []int // see WithShrinkable
 
 	filter    string
 	filtering bool
@@ -142,6 +144,21 @@ func (m Overview) WithGrouping() Overview {
 	m.grouped = true
 	return m
 }
+
+// WithShrinkable returns a copy of m in which the columns cols (indices,
+// not the last column) are narrowed, in that order, when the table is wider
+// than the window: their cells are truncated with an ellipsis, down to
+// minShrunkWidth, so that the last column fits. The width of the last
+// column is taken over the rows without Alert (their free text, e.g. an
+// error, may be long); lines that still do not fit are cut at the window
+// width.
+func (m Overview) WithShrinkable(cols ...int) Overview {
+	m.shrink = slices.Clone(cols)
+	return m
+}
+
+// minShrunkWidth is the width down to which WithShrinkable narrows a column.
+const minShrunkWidth = 8
 
 // WithCursor returns a copy of m whose cursor is on the row key, if visible.
 func (m Overview) WithCursor(key string) Overview {
@@ -464,7 +481,8 @@ func (m *Overview) scrollToCursor() {
 }
 
 // columnWidths returns the width of each column over the header and every
-// row (not only the visible ones, so that filtering does not shift them).
+// row (not only the visible ones, so that filtering does not shift them),
+// the shrinkable columns narrowed to the window width (see WithShrinkable).
 func (m Overview) columnWidths() []int {
 	var w []int
 	grow := func(cells []string) {
@@ -479,15 +497,47 @@ func (m Overview) columnWidths() []int {
 	for _, r := range m.rows {
 		grow(r.Cells)
 	}
+	if m.width <= 0 || len(w) == 0 {
+		return w
+	}
+	last := len(w) - 1
+	excess := len("> [ ] ") + 2*last - m.width
+	for _, cw := range w[:last] {
+		excess += cw
+	}
+	lastWidth := 0
+	if last < len(m.header) {
+		lastWidth = lipgloss.Width(sanitize(m.header[last]))
+	}
+	for _, r := range m.rows {
+		if !r.Alert && len(r.Cells) == len(w) {
+			lastWidth = max(lastWidth, lipgloss.Width(sanitize(r.Cells[last])))
+		}
+	}
+	excess += lastWidth
+	for _, c := range m.shrink {
+		if excess <= 0 {
+			break
+		}
+		if c >= 0 && c < last {
+			cut := min(excess, max(0, w[c]-minShrunkWidth))
+			w[c] -= cut
+			excess -= cut
+		}
+	}
 	return w
 }
 
-// cells pads the cells to the column widths (not the last one) and joins
-// them; style, if set, renders the last cell.
+// cells pads the cells to the column widths (not the last one), truncating
+// those wider than their column, and joins them; style, if set, renders the
+// last cell.
 func cells(cs []string, widths []int, last *lipgloss.Style) string {
 	var b strings.Builder
 	for i, c := range cs {
 		c = sanitize(c)
+		if i < len(cs)-1 && lipgloss.Width(c) > widths[i] {
+			c = ansi.Truncate(c, widths[i], "…")
+		}
 		if i > 0 {
 			b.WriteString("  ")
 		}
