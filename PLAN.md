@@ -233,6 +233,15 @@ What to do differently
 | B39 | Open a repository on the web (user, 2026-10-19): `sheaf browse [repo]` (default: repository of the current directory) and home key `b` (current row), via gh (`gh repo view --web`; `gh pr view --web` for `wt pr` worktrees; `--branch` opens the current branch's tree; fork clones open the reference, `--fork` the fork); GitHub only; result in the overview message, no report view | done (gh stdout/stderr not piped, so a lingering browser cannot stall it; spinner; no default-branch lookup only on the reference remote, push remote not considered); review decisions (user): --branch opens the branch's upstream remote and branch (refused with a hint when none); worktrees without a recorded PR ask gh by branch, else home page |
 | B40 | looksLikeGitHubAlias treats GHES-like hosts (e.g. github.mycorp.com) as github.com: wt pr, `#` and browse then run gh against the default host (pre-existing heuristic; found in step 5 review) | open (recorded) |
 | B41 | Blank line between a view's title and its table/header (user, 2026-10-19, overview screenshot; "could apply to other screens") | open: overview, MultiSelect, report view (progress view if it has a title above rows); same rule as B28: kept unless dropping it lets the whole list fit |
+| B42 | Terminal window title `sheaf: <bundle>` (tea.View.WindowTitle) (user, 2026-10-19) | open: step A |
+| B43 | Native tab/taskbar progress during update/fetch (tea.View.ProgressBar, OSC 9;4); terminal support unverified (user, 2026-10-19) | open: step A |
+| B44 | `y` copies the current row's path to the clipboard (tea.SetClipboard, OSC 52) (user, 2026-10-19) | open: step B |
+| B45 | Compact key help: one short line, `?` toggles the full list (bubbles help ShowAll) (user, 2026-10-19) | open: step B |
+| B46 | Clickable repository/PR links (lipgloss Style.Hyperlink, OSC 8) (user, 2026-10-19) | open: step C |
+| B47 | Branch/tag suggestions in the `w` prompt (bubbles textinput ShowSuggestions) (user, 2026-10-19) | open: step C |
+| B48 | Progress bar (bubbles progress) next to the progress view header (user, 2026-10-19) | open: step A |
+| B49 | Mouse wheel scrolling in the overview and report view (no click) (user, 2026-10-19) | open: step B |
+| B50 | README demo recorded with vhs (v0.12.1): demo/sheaf.tape + demo/setup.sh (temp bundle, local bare remotes, no network) + `make demo`; local features only; rendered on the user's Mac, GIF committed and embedded (user, 2026-10-19) | open: running in parallel |
 
 Order for the high-priority items: B3 → B6 (review sees the merged code) → B2 → B1 (docs describe the final behaviour).
 - Decisions 2026-10-16 (user) for B2: bare `sheaf` in a bundle with a TTY opens an overview (checkouts table from local status, no network at open; multi-select, filter) with actions update/fetch/wt add/wt rm/prune/doctor/sync reusing the per-command TUIs and returning to the overview; enter on a row cds there through the shell-init wrapper (prints the path without it). Outside a bundle: help plus a create/init hint. --no-tui or non-TTY: help, unchanged.
