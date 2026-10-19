@@ -298,7 +298,7 @@ func homeBranch(c ops.CheckoutStatus) string {
 // worst of: failed for an error, an upstream gone or a divergence (ahead
 // and behind); warning for local changes or commits to push or pull (ahead,
 // behind); info for no upstream; ok otherwise (clean, in sync or
-// detached).
+// detached). The STATE column of status has the same colors.
 func homeLevel(c ops.CheckoutStatus) tui.Level {
 	if c.Err != nil {
 		return tui.LevelFail

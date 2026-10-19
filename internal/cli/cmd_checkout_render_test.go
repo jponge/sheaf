@@ -13,6 +13,7 @@ import (
 	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/testutil"
+	"github.com/jponge/sheaf/internal/tui"
 )
 
 // Failures keep git's full (multi-line) error in the update summary.
@@ -55,6 +56,46 @@ func TestStatusTableStashOnFirstSuccessfulRow(t *testing.T) {
 	}
 	if f := strings.Fields(lines[3]); f[len(f)-2] == "2" {
 		t.Errorf("stash count repeated:\n%s", b.String())
+	}
+}
+
+// The STATE cell of status ("clean" or "dirty", or the error) is colored
+// with the level of the overview's STATE (B52 E1, see homeLevel): red for a
+// divergence, an upstream gone or an error, yellow for local changes or
+// commits to push or pull, faint without upstream, green otherwise.
+func TestStatusTableStateLevels(t *testing.T) {
+	t.Parallel()
+	row := func(dir string, detached bool, s gitx.RepoStatus) ops.CheckoutStatus {
+		return ops.CheckoutStatus{Checkout: ops.Checkout{Repo: "a", Dir: dir, Branch: dir, Detached: detached}, Status: &s}
+	}
+	up := "origin/x"
+	r := ops.StatusReport{Checkouts: []ops.CheckoutStatus{
+		row("clean", false, gitx.RepoStatus{Upstream: up}),
+		row("diverged", false, gitx.RepoStatus{Upstream: up, Ahead: 1, Behind: 2}),
+		row("gone", false, gitx.RepoStatus{Upstream: up, UpstreamGone: true}),
+		row("dirty", false, gitx.RepoStatus{Upstream: up, Unstaged: 1}),
+		row("ahead", false, gitx.RepoStatus{Upstream: up, Ahead: 1}),
+		row("behind", false, gitx.RepoStatus{Upstream: up, Behind: 1}),
+		row("local", false, gitx.RepoStatus{}),
+		row("det", true, gitx.RepoStatus{}),
+		{Checkout: ops.Checkout{Repo: "a", Dir: "err", Branch: "err"}, Err: errors.New("boom")},
+	}}
+	want := map[string]string{
+		"clean": "<OK clean>", "diverged": "<FAIL clean>", "gone": "<FAIL clean>", "dirty": "<WARN dirty>",
+		"ahead": "<WARN clean>", "behind": "<WARN clean>", "local": "<INFO clean>", "det": "<OK clean>", "err": "<FAIL error: boom>",
+	}
+	names := map[tui.Level]string{tui.LevelOK: "OK", tui.LevelInfo: "INFO", tui.LevelWarn: "WARN", tui.LevelFail: "FAIL"}
+	var b bytes.Buffer
+	writeStatusTable(&b, r, func(l tui.Level, s string) string { return "<" + names[l] + " " + s + ">" })
+	lines := strings.Split(strings.TrimSpace(b.String()), "\n")[1:]
+	if len(lines) != len(want) {
+		t.Fatalf("%d rows, want %d:\n%s", len(lines), len(want), b.String())
+	}
+	for _, l := range lines {
+		dir := strings.Fields(l)[1]
+		if !strings.HasSuffix(l, want[dir]) {
+			t.Errorf("%s: row %q, want the state %s", dir, l, want[dir])
+		}
 	}
 }
 

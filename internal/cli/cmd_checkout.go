@@ -229,10 +229,12 @@ func writeStatusTable(out io.Writer, r ops.StatusReport, paint func(tui.Level, s
 		if stashShown != c.Repo {
 			stashes, stashShown = strconv.Itoa(s.Stashes), c.Repo
 		}
-		state := paintWith(paint, tui.LevelOK, "clean")
+		// Colored with the level of the overview's STATE (see homeLevel).
+		state := "clean"
 		if !c.Clean() {
-			state = paintWith(paint, tui.LevelWarn, "dirty")
+			state = "dirty"
 		}
+		state = paintWith(paint, homeLevel(c), state)
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\n", c.Repo, displayDir(c.Checkout), branch, upstream, ahead, behind,
 			s.Staged, s.Unstaged, s.Untracked, s.Conflicted, stashes, state)
 	}

@@ -128,21 +128,23 @@ func TestStatusTable(t *testing.T) {
 
 // status colors its states like the level words of the other commands
 // (see leveled): in TUI mode on a terminal whose color profile allows it;
-// not with NO_COLOR, CLICOLOR=0, --no-tui (plain mode), when not on a
-// terminal, nor with --json.
+// not with NO_COLOR, CLICOLOR=0 (text attributes kept: faint), --no-tui
+// (plain mode), when not on a terminal, nor with --json.
 func TestStatusColor(t *testing.T) {
 	t.Parallel()
 	e := newBundleEnv(t)
 	_, alpha := e.addRepo(t, "alpha", "feat")
 	wt := addWorktree(t, alpha, "feat", "feat")
 	writeFile(t, filepath.Join(wt, "u.txt"), "u\n")
+	testutil.Git(t, alpha, "worktree", "add", "-q", "-b", "local", filepath.Join(filepath.Dir(alpha), "local"))
 	d := e.deps()
 	plain, _, _ := runDeps(t, d, "status")
 	out, _, code := runColored(t, d, true, colorTTY, "status")
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
-	for _, want := range []string{sgrGreen + "clean" + sgrReset, sgrYellow + "dirty" + sgrReset} {
+	// As the overview's STATE (B52 E1): faint without upstream.
+	for _, want := range []string{sgrGreen + "clean" + sgrReset, sgrYellow + "dirty" + sgrReset, sgrFaint + "clean" + sgrReset} {
 		if !strings.Contains(out, want) {
 			t.Errorf("colored status lacks %q:\n%q", want, out)
 		}
@@ -163,8 +165,17 @@ func TestStatusColor(t *testing.T) {
 		{"json", true, colorTTY, []string{"status", "--json"}},
 	} {
 		got, _, _ := runColored(t, d, tc.tuiMode, tc.environ, tc.args...)
-		if strings.Contains(got, "\x1b") {
+		noColor := tc.name == "NO_COLOR" || tc.name == "CLICOLOR=0"
+		if colorSGR.MatchString(got) || !noColor && strings.Contains(got, "\x1b") {
 			t.Errorf("%s: escape sequences in\n%q", tc.name, got)
+		}
+		if noColor {
+			// No colors, text attributes kept (see tui.Painter), as for
+			// doctor: no upstream is faint, like INFO.
+			if !strings.Contains(got, sgrFaint+"clean"+sgrReset) {
+				t.Errorf("%s: no faint state in\n%q", tc.name, got)
+			}
+			got = ansi.Strip(got)
 		}
 		if tc.name != "json" && got != plain {
 			t.Errorf("%s: output changed:\n%q\nwant\n%q", tc.name, got, plain)
