@@ -297,12 +297,14 @@ as a log you see after quitting or after an interruption. It is then shown
 again (except for `b`, whose outcome fits in the overview's message) in a
 report view on the alternate screen, titled
 `sheaf <action>: <bundle>`, whether the action succeeded, failed or changed
-nothing: up/down (k/j), pgup/pgdown, home/end and the mouse wheel scroll it, any other key
-returns to the overview, ctrl+c exits with 130. An action cancelled in its
+nothing: up/down (k/j) and the mouse wheel scroll it, pgup/pgdown
+(b/space) by a page, home/end (g/G) jump to the top or the bottom; q, esc or
+enter returns to the overview (other keys are ignored), ctrl+c exits with
+130. An action cancelled in its
 dialog, menu or prompt (enter in the `sync` menu with nothing selected
 counts as cancelled) shows no report view, unless it printed something
-(e.g. the warnings of `sync` before its menu). Keys other than the scroll
-keys pressed during the first quarter second of the view (e.g. typed while
+(e.g. the warnings of `sync` before its menu). q, esc and enter
+pressed during the first quarter second of the view (e.g. typed while
 the action ran) are ignored, so the report is not skipped unseen. The
 overview then shows the outcome (e.g. `prune: nothing to prune` when
 nothing changed, `add failed: ...`); quitting afterwards still exits with

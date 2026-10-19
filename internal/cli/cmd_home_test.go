@@ -401,7 +401,7 @@ func TestHomeUpdateSelectedCheckoutThenReturns(t *testing.T) {
 	writeFile(t, filepath.Join(feat, "new.txt"), "") // untracked files do not block update
 	oldMain := testutil.Git(t, alpha, "rev-parse", "HEAD")
 	var out syncBuffer
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", " ", "u"), keys(), reportKey(t, &out, "update", "x"), ovKeys(t, &out, "update: done", 1, "q"))
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", " ", "u"), keys(), reportKey(t, &out, "update", "q"), ovKeys(t, &out, "update: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -438,7 +438,7 @@ func TestHomeFetchCurrentRepository(t *testing.T) {
 	e, alpha, _, beta, o := homeBundle(t)
 	before := testutil.Git(t, beta, "rev-parse", "origin/main")
 	var out syncBuffer
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "x"), ovKeys(t, &out, "fetch: done", 1, "q"))
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "q"), ovKeys(t, &out, "fetch: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -464,7 +464,7 @@ func TestHomeOnNonTerminalSetsNoWindowTitle(t *testing.T) {
 	t.Parallel()
 	e, _, _, _, _ := homeBundle(t)
 	var out syncBuffer
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "x"), ovKeys(t, &out, "fetch: done", 1, "q"))
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "q"), ovKeys(t, &out, "fetch: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || !strings.Contains(out.String(), "Fetching") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -482,7 +482,7 @@ func TestHomeOnNonTerminalEnablesNoMouse(t *testing.T) {
 	t.Parallel()
 	e, _, _, _, _ := homeBundle(t)
 	var out syncBuffer
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "x"), ovKeys(t, &out, "fetch: done", 1, "q"))
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "q"), ovKeys(t, &out, "fetch: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || !strings.Contains(out.String(), "sheaf fetch: ") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -505,8 +505,8 @@ func TestHomeAddWorktreeForBranchAndTag(t *testing.T) {
 		return k
 	}
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "w"), hinted("an existing local or remote branch, else a new branch from the default branch", "t", "o", "p", "i", "c", "/", "y", "\r"), reportKey(t, &out, "wt add", "x"),
-		ovKeys(t, &out, "wt add: done", 1, "w"), append(keys("v", "1", "\t"), hinted("a tag: a detached worktree pinned at it", "\r")...), reportKey(t, &out, "wt add", "x"),
+		ovKeys(t, &out, "STATE", 1, "w"), hinted("an existing local or remote branch, else a new branch from the default branch", "t", "o", "p", "i", "c", "/", "y", "\r"), reportKey(t, &out, "wt add", "q"),
+		ovKeys(t, &out, "wt add: done", 1, "w"), append(keys("v", "1", "\t"), hinted("a tag: a detached worktree pinned at it", "\r")...), reportKey(t, &out, "wt add", "q"),
 		ovKeys(t, &out, "wt add: done", 2, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
@@ -541,9 +541,9 @@ func TestHomeSelectAllAndNoneAndAddWithW(t *testing.T) {
 	e, alpha, _, _, _ := homeBundle(t)
 	var out syncBuffer
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "a", "f"), keys(), reportKey(t, &out, "fetch", "x"),
-		ovKeys(t, &out, "fetch: done", 1, "a", "n", "f"), keys(), reportKey(t, &out, "fetch", "x"),
-		ovKeys(t, &out, "fetch: done", 2, "w"), keys("t", "o", "p", "i", "c", "/", "z", "\r"), reportKey(t, &out, "wt add", "x"),
+		ovKeys(t, &out, "STATE", 1, "a", "f"), keys(), reportKey(t, &out, "fetch", "q"),
+		ovKeys(t, &out, "fetch: done", 1, "a", "n", "f"), keys(), reportKey(t, &out, "fetch", "q"),
+		ovKeys(t, &out, "fetch: done", 2, "w"), keys("t", "o", "p", "i", "c", "/", "z", "\r"), reportKey(t, &out, "wt add", "q"),
 		ovKeys(t, &out, "wt add: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
@@ -570,7 +570,7 @@ func TestHomeScriptSegmentsBelongToTheirProgram(t *testing.T) {
 	var out syncBuffer
 	q := keys("q")
 	q[0].wait = waitOutput(t, &out, "wt add: done")
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("x", "y", "\r"), reportKey(t, &out, "wt add", "x"), q)
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("x", "y", "\r"), reportKey(t, &out, "wt add", "q"), q)
 	in.holdFirstEnd = true
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || !strings.Contains(out.String(), "wt add: done") || !exists(filepath.Join(filepath.Dir(alpha), "xy", ".git")) {
@@ -586,7 +586,7 @@ func TestHomeAddWorktreeFailureIsShownAndReturns(t *testing.T) {
 	var out syncBuffer
 	// main is the primary's branch: wt add refuses it.
 	errs, code := runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), keys("m", "a", "i", "n", "\r"),
-		reportKey(t, &out, "wt add", "x"), ovKeys(t, &out, "wt add failed", 1, "q")), &out)
+		reportKey(t, &out, "wt add", "q"), ovKeys(t, &out, "wt add failed", 1, "q")), &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
@@ -629,7 +629,7 @@ func TestHomeDoctorShowsReportView(t *testing.T) {
 		t.Parallel()
 		e, _, _, _, _ := homeBundle(t)
 		var out syncBuffer
-		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), reportKey(t, &out, "doctor", "x"), ovKeys(t, &out, "doctor: done", 1, "q"))
+		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), reportKey(t, &out, "doctor", "q"), ovKeys(t, &out, "doctor: done", 1, "q"))
 		errs, code := runHomeWith(t, probeDeps(e, hosting.ErrGHNotFound), in, &out)
 		if o := out.String(); code != 0 || errs != "" || !strings.Contains(o, "sheaf doctor: ") || !strings.Contains(o, "WARN  gh not found") {
 			t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, o, errs)
@@ -642,7 +642,7 @@ func TestHomeDoctorShowsReportView(t *testing.T) {
 			t.Fatal(err)
 		}
 		var out syncBuffer
-		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), reportKey(t, &out, "doctor", "x"), ovKeys(t, &out, "doctor failed", 1, "q"))
+		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), reportKey(t, &out, "doctor", "q"), ovKeys(t, &out, "doctor failed", 1, "q"))
 		errs, code := runHomeWith(t, probeDeps(e, hosting.ErrGHNotFound), in, &out)
 		o := out.String()
 		if code != 0 || !strings.Contains(errs, "sheaf: doctor found problems (FAIL)") {
@@ -684,10 +684,10 @@ func TestHomeShowsReportAfterActionsThatRan(t *testing.T) {
 	}
 	var out syncBuffer
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "x"),
+		ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "q"),
 		ovKeys(t, &out, "fetch: done", 1, "w"), keys("x", "\x1b"),
 		ovKeys(t, &out, "wt add: cancelled", 1, "j", "r"), declineRemoval(t, &out),
-		ovKeys(t, &out, "wt rm: cancelled", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}}, reportKey(t, &out, "prune", "x"),
+		ovKeys(t, &out, "wt rm: cancelled", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}}, reportKey(t, &out, "prune", "q"),
 		ovKeys(t, &out, "prune: nothing to prune", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	o := out.String()
@@ -717,7 +717,7 @@ func TestHomeRemoveWorktreeConfirmsAndRefusesPrimary(t *testing.T) {
 	}
 	var out syncBuffer
 	// r on the primary is refused in the overview; then r on feat, confirmed.
-	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "r"), key{keys: "j", wait: waitOutput(t, &out, "primary checkout")}, key{keys: "r"}), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "wt rm", "x"), ovKeys(t, &out, "wt rm: done", 1, "q"))
+	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "r"), key{keys: "j", wait: waitOutput(t, &out, "primary checkout")}, key{keys: "r"}), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "wt rm", "q"), ovKeys(t, &out, "wt rm: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -739,7 +739,7 @@ func TestHomeActionHintsDoNotNameThePassedBundle(t *testing.T) {
 	t.Parallel()
 	e, _, _, _, _ := homeBundle(t)
 	var out syncBuffer
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", "r"), keys(), reportKey(t, &out, "wt rm", "x"), ovKeys(t, &out, "wt rm failed", 1, "q"))
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", "r"), keys(), reportKey(t, &out, "wt rm", "q"), ovKeys(t, &out, "wt rm failed", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || !strings.Contains(out.String(), "run: sheaf wt rm --force --dir feat -- alpha") || strings.Contains(out.String(), "--bundle") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -767,9 +767,9 @@ func TestHomePruneDoctorAndSync(t *testing.T) {
 	d := probeDeps(e, nil)
 	var out syncBuffer
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "p"), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "prune", "x"),
-		ovKeys(t, &out, "prune: done", 1, "d"), reportKey(t, &out, "doctor", "x"),
-		ovKeys(t, &out, "doctor: done", 1, "s"), keys(" ", "\r"), keys("\r"), keys(), reportKey(t, &out, "sync", "x"),
+		ovKeys(t, &out, "STATE", 1, "p"), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "prune", "q"),
+		ovKeys(t, &out, "prune: done", 1, "d"), reportKey(t, &out, "doctor", "q"),
+		ovKeys(t, &out, "doctor: done", 1, "s"), keys(" ", "\r"), keys("\r"), keys(), reportKey(t, &out, "sync", "q"),
 		ovKeys(t, &out, "sync: done", 1, "q"))
 	errs, code := runHomeWith(t, d, in, &out)
 	if code != 0 {
@@ -849,7 +849,7 @@ func TestHomeUpdateSkipsSelectedProblemRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out syncBuffer
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "a", "u"), keys(), reportKey(t, &out, "update", "x"),
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "a", "u"), keys(), reportKey(t, &out, "update", "q"),
 		ovKeys(t, &out, "update: done · skipped 1 problem row (alpha/feat)", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
@@ -873,7 +873,7 @@ func TestHomeRemoveSkipsSelectedProblemRows(t *testing.T) {
 	testutil.Git(t, alpha, "worktree", "add", "-q", "-b", "other", other)
 	var out syncBuffer
 	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", " ", "j", " ", "r"),
-		[]key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "wt rm", "x"),
+		[]key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "wt rm", "q"),
 		ovKeys(t, &out, "wt rm: done · skipped 1 problem row (alpha/feat)", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || exists(other) {
@@ -914,7 +914,7 @@ func TestHomeRemovesSelectedWorktreesAfterOneConfirmation(t *testing.T) {
 	t.Parallel()
 	e, feat, x, y := multiRemoveBundle(t)
 	var out syncBuffer
-	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "x"),
+	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "q"),
 		ovKeys(t, &out, "wt rm: 2 done, 0 cancelled, 1 failed", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || exists(x) || exists(y) || !exists(filepath.Join(feat, "new.txt")) {
@@ -984,7 +984,7 @@ func TestHomeMultiRemoveHintsNameTheGivenBundle(t *testing.T) {
 	t.Parallel()
 	e, _, _, _ := multiRemoveBundle(t)
 	var out syncBuffer
-	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "x"),
+	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "q"),
 		ovKeys(t, &out, "wt rm: 2 done, 0 cancelled, 1 failed", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out, "--bundle", e.cwd)
 	// The complete line on standard error, where the refusal is printed
@@ -1002,7 +1002,7 @@ func TestHomeMultiRemoveDialogListsTheRefusedWorktree(t *testing.T) {
 	t.Parallel()
 	e, _, _, _ := multiRemoveBundle(t)
 	var out syncBuffer
-	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "x"),
+	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "q"),
 		ovKeys(t, &out, "wt rm: 2 done, 0 cancelled, 1 failed", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	o := ansi.Strip(out.String())
@@ -1023,7 +1023,7 @@ func TestHomeMultiRemoveRefusesTheWorkingDirectory(t *testing.T) {
 	d := e.deps()
 	d.Getwd = func() (string, error) { return x, nil }
 	var out syncBuffer
-	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "x"),
+	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "q"),
 		ovKeys(t, &out, "wt rm: 2 done, 0 cancelled, 1 failed", 1, "q"))
 	errs, code := runHomeWith(t, d, in, &out)
 	if code != 0 || !exists(x) || exists(y) || exists(feat) || !strings.Contains(ansi.Strip(out.String()), "it contains the current working directory") {
@@ -1058,7 +1058,7 @@ func TestHomeCompactHelpAndKeptToggle(t *testing.T) {
 	t.Parallel()
 	e, _, _, _, _ := homeBundle(t)
 	var out syncBuffer
-	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "?"), key{keys: "f", wait: waitOutput(t, &out, "? less")}), keys(), reportKey(t, &out, "fetch", "x"), ovKeys(t, &out, "fetch: done", 1, "q"))
+	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "?"), key{keys: "f", wait: waitOutput(t, &out, "? less")}), keys(), reportKey(t, &out, "fetch", "q"), ovKeys(t, &out, "fetch: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -1130,8 +1130,8 @@ func TestHomeReportsActionsThatChangedNothing(t *testing.T) {
 	// "prune: " is in the title of the report view, then in the message
 	// of the overview; likewise for sync.
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}}, reportKey(t, &out, "prune", "x"),
-		ovKeys(t, &out, "prune: ", 2, "s"), keys("\r"), reportKey(t, &out, "sync", "x"),
+		ovKeys(t, &out, "STATE", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}}, reportKey(t, &out, "prune", "q"),
+		ovKeys(t, &out, "prune: ", 2, "s"), keys("\r"), reportKey(t, &out, "sync", "q"),
 		ovKeys(t, &out, "sync: ", 2, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
@@ -1160,7 +1160,7 @@ func TestHomeKeepsSelectionAfterCancelledRemoval(t *testing.T) {
 	var out syncBuffer
 	in := newScript(t, false,
 		ovKeys(t, &out, "STATE", 1, "j", " ", "r"), declineRemoval(t, &out),
-		ovKeys(t, &out, "wt rm: cancelled", 1, "r"), ovKeys(t, &out, "[y/N]", 2, "y"), reportKey(t, &out, "wt rm", "x"),
+		ovKeys(t, &out, "wt rm: cancelled", 1, "r"), ovKeys(t, &out, "[y/N]", 2, "y"), reportKey(t, &out, "wt rm", "q"),
 		ovKeys(t, &out, "wt rm: done", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || exists(feat) {
@@ -1184,9 +1184,9 @@ func TestHomeClearsSelectionAfterSuccessAndForgetsEarlierNotes(t *testing.T) {
 	e, _, _, _, _ := homeBundle(t) // nothing to prune
 	var out syncBuffer
 	in := newScript(t, false,
-		ovKeys(t, &out, "STATE", 1, "a", "f"), keys(), reportKey(t, &out, "fetch", "x"),
-		ovKeys(t, &out, "fetch: done", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}}, reportKey(t, &out, "prune", "x"),
-		ovKeys(t, &out, "prune: nothing to prune", 1, "f"), keys(), reportKey(t, &out, "fetch", "x"),
+		ovKeys(t, &out, "STATE", 1, "a", "f"), keys(), reportKey(t, &out, "fetch", "q"),
+		ovKeys(t, &out, "fetch: done", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}}, reportKey(t, &out, "prune", "q"),
+		ovKeys(t, &out, "prune: nothing to prune", 1, "f"), keys(), reportKey(t, &out, "fetch", "q"),
 		ovKeys(t, &out, "fetch: done", 2, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
@@ -1232,7 +1232,7 @@ func TestHomeSyncOutputIsLiveAndInReport(t *testing.T) {
 	for _, k := range []string{"\r", "\x1b"} {
 		e, _ := syncBundle(t)
 		var out syncBuffer
-		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "s"), keys(k), reportKey(t, &out, "sync", "x"), ovKeys(t, &out, "sync: cancelled", 1, "q"))
+		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "s"), keys(k), reportKey(t, &out, "sync", "q"), ovKeys(t, &out, "sync: cancelled", 1, "q"))
 		errs, code := runHomeWith(t, e.deps(), in, &out)
 		o := out.String()
 		if code != 0 || !strings.Contains(errs, "listing repositories of ") {

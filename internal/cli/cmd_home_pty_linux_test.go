@@ -92,7 +92,7 @@ func dismissReport(t *testing.T, s *ptyShell, name string, n int) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	time.Sleep(tui.ReportGrace)
-	s.write("x")
+	s.write("q")
 }
 
 // An action runs its own TUI (progress view), then its report view, and the
@@ -213,7 +213,7 @@ func TestHomeOnPTYOverviewOnAlternateScreen(t *testing.T) {
 			strings.Contains(normal, "Fetching: finished in") && strings.Contains(normal, "done     alpha: fetched origin")
 	})
 	time.Sleep(tui.ReportGrace)
-	s.write("x")
+	s.write("q")
 	vt := waitScreenState(t, s, "the overview after fetch on the alternate screen", overviewShown("fetch: done"))
 	if normal := strings.Join(vt.normalLines(), "\n"); !strings.Contains(normal, "Fetching: finished in") ||
 		strings.Index(normal, "done     alpha: fetched origin") < strings.Index(normal, "Fetching: finished in") {
@@ -234,7 +234,7 @@ func TestHomeOnPTYOverviewOnAlternateScreen(t *testing.T) {
 // the overview then comes back with the failure as message. ctrl+c in the
 // view interrupts sheaf (exit 130).
 func TestHomeOnPTYFailureShowsReportView(t *testing.T) {
-	for _, tc := range []struct{ key, exit string }{{"x", "0"}, {"\x03", "130"}} {
+	for _, tc := range []struct{ key, exit string }{{"q", "0"}, {"\x03", "130"}} {
 		e, _, _, _, _ := homeBundle(t)
 		s := startPTYShell(t, e.cwd, `B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
 		s.waitFor(`STATE`)
@@ -277,7 +277,7 @@ func TestHomeOnPTYTypeAheadDoesNotSkipReport(t *testing.T) {
 	s.waitFor(`New worktree of alpha`)
 	s.write("main\r") // the primary's branch: wt add refuses it
 	time.Sleep(50 * time.Millisecond)
-	s.write("x")
+	s.write("q")
 	reportShown := func(vt *vtScreen) bool {
 		alt := vt.altLines()
 		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf wt add: ")
@@ -289,7 +289,7 @@ func TestHomeOnPTYTypeAheadDoesNotSkipReport(t *testing.T) {
 	if !reportShown(vt) {
 		t.Fatalf("the key typed ahead ended the report view: alternate screen %v\nalternate screen:\n%s", vt.altActive(), strings.Join(vt.altLines(), "\n"))
 	}
-	s.write("x")
+	s.write("q")
 	waitScreenState(t, s, "the overview with the failure", func(vt *vtScreen) bool {
 		return vt.altActive() && slices.ContainsFunc(vt.altLines(), func(l string) bool { return strings.HasPrefix(overviewMessage(l), "wt add failed: ") })
 	})
@@ -483,7 +483,7 @@ func TestHomeOnPTYDoctorReportScrolls(t *testing.T) {
 		return st[1] == "1" && len(lines) > 0 && lines[0] == first
 	})
 	time.Sleep(tui.ReportGrace)
-	s.write("x")
+	s.write("q")
 	waitScreenStateRows(t, s, 10, "the overview after doctor", func(vt *vtScreen) bool {
 		alt := vt.altLines()
 		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf: ") && slices.ContainsFunc(alt, func(l string) bool { return overviewMessage(l) == "doctor: done" })
@@ -789,7 +789,7 @@ func TestHomeOnPTYWheelScrollsTheReport(t *testing.T) {
 	time.Sleep(tui.ReportGrace)
 	s.write("\x1b[<65;20;6M\x1b[<0;20;6M\x1b[<0;20;6m") // wheel and click: the report stays
 	doctorView(t, s, e.cwd, "lines 4- after the grace period", from("4"))
-	s.write("x")
+	s.write("q")
 	waitScreenStateRows(t, s, 10, "the overview after doctor", func(vt *vtScreen) bool {
 		return vt.altActive() && slices.ContainsFunc(vt.altLines(), func(l string) bool { return overviewMessage(l) == "doctor: done" })
 	})

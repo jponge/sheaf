@@ -17,10 +17,11 @@ import (
 const ReportGrace = 250 * time.Millisecond
 
 // Report is a bubbletea model displaying a title and lines of text (e.g.
-// what a command printed) on the alternate screen until a key other than the
-// scroll keys is pressed: any such key ends it, ctrl+c as an interruption.
-// A report longer than the window scrolls (up/down/k/j, pgup/pgdown,
-// home/end, the mouse wheel: see WithMouse) and a status line tells
+// what a command printed) on the alternate screen until q, esc or enter is
+// pressed, or ctrl+c, which ends it as an interruption; other keys are
+// ignored. A report longer than the window scrolls (up/down/k/j by a line,
+// pgup/pgdown and b/space by a page, home/end and g/G to the top and the
+// bottom, the mouse wheel: see WithMouse) and a status line tells
 // which lines are shown; lines wider
 // than the window are wrapped. With an unknown size every line is shown.
 // Keys that end the report are ignored during the first ReportGrace
@@ -43,9 +44,27 @@ type Report struct {
 	mouse         bool // see WithMouse
 
 	done, interrupted bool
-	keys              multiSelectKeys
+	keys              reportKeys
 	help              help.Model
 	styles            Styles
+}
+
+// reportKeys are the keys of a Report.
+type reportKeys struct {
+	Up, Down, PageUp, PageDown, Top, Bottom, Back, ForceQuit key.Binding
+}
+
+func newReportKeys() reportKeys {
+	return reportKeys{
+		Up:        key.NewBinding(key.WithKeys("up", "k")),
+		Down:      key.NewBinding(key.WithKeys("down", "j")),
+		PageUp:    key.NewBinding(key.WithKeys("pgup", "b")),
+		PageDown:  key.NewBinding(key.WithKeys("pgdown", "space")),
+		Top:       key.NewBinding(key.WithKeys("home", "g")),
+		Bottom:    key.NewBinding(key.WithKeys("end", "G", "shift+g")),
+		Back:      key.NewBinding(key.WithKeys("q", "esc", "enter")),
+		ForceQuit: key.NewBinding(key.WithKeys("ctrl+c")),
+	}
 }
 
 // NewReport returns a Report of lines under title; back describes what the
@@ -54,7 +73,7 @@ func NewReport(title string, lines []string, back string) Report {
 	st := DefaultStyles()
 	h := help.New()
 	h.Styles = st.Help
-	m := Report{title: title, back: back, now: time.Now, keys: newMultiSelectKeys(), help: h, styles: st}
+	m := Report{title: title, back: back, now: time.Now, keys: newReportKeys(), help: h, styles: st}
 	for _, l := range lines {
 		m.lines = append(m.lines, sanitize(expandTabs(l)))
 	}
@@ -165,11 +184,11 @@ func (m Report) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.scroll(-page)
 		case key.Matches(msg, m.keys.PageDown):
 			m.scroll(page)
-		case key.Matches(msg, m.keys.Home):
+		case key.Matches(msg, m.keys.Top):
 			m.scroll(-len(m.wrapped()))
-		case key.Matches(msg, m.keys.End):
+		case key.Matches(msg, m.keys.Bottom):
 			m.scroll(len(m.wrapped()))
-		case m.now().Sub(m.start) >= ReportGrace:
+		case key.Matches(msg, m.keys.Back) && m.now().Sub(m.start) >= ReportGrace:
 			m.done = true
 			return m, tea.Quit
 		}
@@ -277,7 +296,9 @@ func (m Report) View() tea.View {
 	if l.help {
 		help = []string{m.help.ShortHelpView([]key.Binding{
 			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll")),
-			key.NewBinding(key.WithKeys(""), key.WithHelp("any other key:", m.back)),
+			key.NewBinding(key.WithKeys("space", "b"), key.WithHelp("space/b", "page")),
+			key.NewBinding(key.WithKeys("g", "G"), key.WithHelp("g/G", "top/bottom")),
+			key.NewBinding(key.WithKeys("q", "enter"), key.WithHelp("q/enter", m.back)),
 		})}
 	}
 	lines = append(lines, footer(gaps, status, help)...)

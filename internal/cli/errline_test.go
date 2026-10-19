@@ -56,7 +56,7 @@ func TestHomeRefusedRemovalMessageSummarizes(t *testing.T) {
 	t.Parallel()
 	e, _, _, _, _ := homeBundle(t)
 	var out syncBuffer
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", "r"), keys(), reportKey(t, &out, "wt rm", "x"), ovKeys(t, &out, "wt rm failed", 1, "q"))
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", "r"), keys(), reportKey(t, &out, "wt rm", "q"), ovKeys(t, &out, "wt rm failed", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if want := "wt rm failed: refusing to remove alpha/feat: 1 untracked file (see report)"; code != 0 || !strings.Contains(out.String(), want) {
 		t.Fatalf("exit %d, want the message %q\nstdout:\n%s\nstderr:\n%s", code, want, out.String(), errs)

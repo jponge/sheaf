@@ -57,9 +57,9 @@ func installHome(root *cobra.Command, d Deps) {
 // there as a log (also on an interruption). That output is also captured
 // and, unless the action was cancelled without printing anything or is
 // browse (whose outcome is the overview's message), shown in
-// a scrollable report view on the alternate screen until a key is pressed
-// (keys typed ahead are ignored, see tui.Report); the overview then comes
-// back. Enter on a checkout ends sheaf: the path of the checkout is
+// a scrollable report view on the alternate screen until q, esc or enter
+// is pressed (keys typed ahead are ignored, see tui.Report); the overview
+// then comes back. Enter on a checkout ends sheaf: the path of the checkout is
 // written to the file named by $SHEAF_CD_FILE, set by the shell function
 // of shell-init, which then changes the directory; without it the path is
 // printed. On a terminal, the programs of the home screen and of its
@@ -207,7 +207,7 @@ func (h *home) loop() error {
 			return err // interrupted during the action: exit 130
 		}
 		if (h.ran || h.output.Len() > 0) && name != "browse" {
-			// What the action printed, in a view until a key is pressed
+			// What the action printed, in a view until q, esc or enter is pressed
 			// (ctrl+c interrupts, as in the action's dialogs; input
 			// ending returns to the overview); none after an action
 			// cancelled before printing anything, nor after browse,

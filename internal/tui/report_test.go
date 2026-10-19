@@ -59,13 +59,14 @@ func TestReportShowsTitleLinesAndHelp(t *testing.T) {
 	if got := shownLines(m); !slices.Equal(got, span(1, 30)) {
 		t.Errorf("lines shown %v, want 1-30", got)
 	}
-	if last := lines[len(lines)-1]; !strings.Contains(last, "↑/↓") || !strings.Contains(last, "scroll") || !strings.Contains(last, "any other key") || !strings.Contains(last, "back to the overview") {
+	if last := lines[len(lines)-1]; last != "↑/↓ scroll • space/b page • g/G top/bottom • q/enter back to the overview" {
 		t.Errorf("help line %q", last)
 	}
 }
 
 // A report longer than the window scrolls with up/down/k/j, pgup/pgdown and
-// home/end, within its bounds; a status line tells which lines are shown.
+// space/b (a page), home/end and g/G (to the top, to the bottom), within
+// its bounds; a status line tells which lines are shown.
 // Scrolling works during the grace period.
 func TestReportScrolls(t *testing.T) {
 	t.Parallel()
@@ -86,6 +87,14 @@ func TestReportScrolls(t *testing.T) {
 		{[]string{"end"}, 24, 30},
 		{[]string{"down", "pgdown"}, 24, 30},
 		{[]string{"home"}, 1, 7},
+		{[]string{"space"}, 8, 14},
+		{[]string{"space", "b"}, 8, 14},
+		{[]string{"G"}, 24, 30},
+		{[]string{"space"}, 24, 30},
+		{[]string{"b"}, 17, 23},
+		{[]string{"g"}, 1, 7},
+		{[]string{"b"}, 1, 7},
+		{[]string{"shift+g"}, 24, 30},
 	} {
 		var cmd tea.Cmd
 		if len(step.keys) > 0 {
@@ -132,13 +141,12 @@ func TestReportWrapsAndFitsSmallWindows(t *testing.T) {
 	}
 }
 
-// Any key other than the scroll keys ends a Report after the grace period,
-// ctrl+c as an interruption; its view is then empty, still on the
-// alternate screen. During the grace period such keys are ignored, except
-// ctrl+c.
-func TestReportEndsOnOtherKeysAfterGrace(t *testing.T) {
+// q, esc and enter end a Report after the grace period, ctrl+c as an
+// interruption; its view is then empty, still on the alternate screen.
+// During the grace period they are ignored, except ctrl+c.
+func TestReportEndsOnBackKeysAfterGrace(t *testing.T) {
 	t.Parallel()
-	for _, k := range []string{"x", "enter", "esc", "space", "q", "ctrl+c"} {
+	for _, k := range []string{"enter", "esc", "q", "ctrl+c"} {
 		m, c := newTestReport(3)
 		if k != "ctrl+c" {
 			next, cmd := press(m, k)
@@ -162,6 +170,23 @@ func TestReportEndsOnOtherKeysAfterGrace(t *testing.T) {
 	m, _ := newTestReport(3)
 	if next, cmd := press(m, "ctrl+c"); !isQuit(cmd) || !next.(Report).Interrupted() {
 		t.Errorf("ctrl+c during the grace period: quit %v, interrupted %v", isQuit(cmd), next.(Report).Interrupted())
+	}
+}
+
+// Keys other than the scroll keys and q, esc, enter and ctrl+c are ignored,
+// after the grace period too (D1: G, space, g and b used to end it).
+func TestReportIgnoresOtherKeys(t *testing.T) {
+	t.Parallel()
+	for _, k := range []string{"x", "a", "Q", "1", "?", "/", "tab", "backspace", "space", "b", "g", "G"} {
+		m, c := newTestReport(3)
+		c.t = c.t.Add(ReportGrace)
+		next, cmd := press(m, k)
+		if cmd != nil || next.(Report).Done() {
+			t.Errorf("%s ended the report", k)
+		}
+		if got := shownLines(next); !slices.Equal(got, span(1, 3)) {
+			t.Errorf("%s: lines %v", k, got)
+		}
 	}
 }
 
@@ -209,7 +234,7 @@ func reportShape(m tea.Model) string {
 			return "L"
 		case status.MatchString(l):
 			return "S"
-		case strings.Contains(l, "any other key"):
+		case strings.Contains(l, "back to the overview"):
 			return "K"
 		}
 		return "?"
@@ -347,7 +372,7 @@ func TestReportMouseWheelScrolls(t *testing.T) {
 	if got := shownLines(m); m.(Report).Done() || !slices.Equal(got, span(24, 30)) {
 		t.Fatalf("after the grace period: lines %v, done %v", got, m.(Report).Done())
 	}
-	m, _ = press(m, "x")
+	m, _ = press(m, "q")
 	if v := m.View(); !m.(Report).Done() || v.MouseMode != tea.MouseModeNone {
 		t.Errorf("final view: done %v, mouse mode %v", m.(Report).Done(), v.MouseMode)
 	}
