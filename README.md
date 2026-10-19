@@ -475,7 +475,7 @@ repository (`upstream`); `--fork` opens the home page of your fork
   (branch `pr/<number>`, tracking `refs/pull/<number>/head` of the
   repository): the pull request (`gh pr view <number> --repo <slug> --web`);
 - for a branch tracking another branch of the repository or of your fork,
-  except the default branch: the pull request of that branch, which gh looks
+  except the repository's default branch: the pull request of that branch, which gh looks
   up (`gh pr view <branch> --repo <slug> --web`, `<fork owner>:<branch>` for
   a branch of your fork); when there is none, the home page (the message
   says `(no pull request for branch ...)`);
@@ -483,11 +483,12 @@ repository (`upstream`); `--fork` opens the home page of your fork
   (`gh repo view <slug> --web`).
 
 `--branch` opens the tree of the branch the checkout's branch tracks, under
-its remote name, on the repository it is pushed to (the repository or your
-fork): `gh browse --repo <slug> --branch <branch>`. It is refused for a
-branch without upstream (push it first), one tracking a pull request, one
-tracking a remote sheaf does not know, and with `--fork`. Repositories of
-other hosts are refused.
+its remote name, on the repository of its upstream remote
+(`branch.<name>.remote`: the repository or your fork; a separate push remote
+is not considered): `gh browse --repo <slug> --branch <branch>`. It is
+refused for a branch without upstream (push it first), one tracking a pull
+request, one tracking a remote sheaf does not know, and with `--fork`.
+Repositories of other hosts are refused.
 
 ### Maintenance
 

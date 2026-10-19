@@ -25,10 +25,10 @@ func newBrowseCmd(d Deps) *cobra.Command {
 			"the home page of your fork (origin). In a worktree of a pull request from a fork\n" +
 			"checked out by `sheaf wt pr` (branch pr/<number>), the pull request opens. For a\n" +
 			"branch tracking another branch of the repository or of your fork (except the\n" +
-			"default branch), gh looks for the pull request of that branch, and the home page\n" +
+			"repository's default branch), gh looks for the pull request of that branch, and the home page\n" +
 			"of the repository opens when there is none; otherwise the home page opens.\n\n" +
 			"--branch opens the tree of the branch the checkout's branch tracks, on the\n" +
-			"repository it is pushed to (the repository or your fork); it is refused for a\n" +
+			"repository of its upstream remote (the repository or your fork); it is refused for a\n" +
 			"branch without upstream and with --fork. Repositories of other hosts are refused.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
