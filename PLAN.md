@@ -241,7 +241,7 @@ What to do differently
 | B47 | Branch/tag suggestions in the `w` prompt (bubbles textinput ShowSuggestions) (user, 2026-10-19) | open: step C |
 | B48 | Progress bar (bubbles progress) next to the progress view header (user, 2026-10-19) | open: step A |
 | B49 | Mouse wheel scrolling in the overview and report view (no click) (user, 2026-10-19) | open: step B |
-| B50 | README demo recorded with vhs (v0.12.1): demo/sheaf.tape + demo/setup.sh (temp bundle, local bare remotes, no network) + `make demo`; local features only; rendered on the user's Mac, GIF committed and embedded (user, 2026-10-19) | open: running in parallel |
+| B50 | README demo recorded with vhs (v0.12.1): demo/sheaf.tape + demo/setup.sh (temp bundle, local bare remotes, no network) + `make demo`; local features only; rendered on the user's Mac, GIF committed and embedded (user, 2026-10-19) | done (scripts and tape; gh and GIT_* isolated, gh stubbed, symlinks and trailing . refused); GIF to render on the user's Mac and commit before pushing (README embeds it) |
 
 Order for the high-priority items: B3 → B6 (review sees the merged code) → B2 → B1 (docs describe the final behaviour).
 - Decisions 2026-10-16 (user) for B2: bare `sheaf` in a bundle with a TTY opens an overview (checkouts table from local status, no network at open; multi-select, filter) with actions update/fetch/wt add/wt rm/prune/doctor/sync reusing the per-command TUIs and returning to the overview; enter on a row cds there through the shell-init wrapper (prints the path without it). Outside a bundle: help plus a create/init hint. --no-tui or non-TTY: help, unchanged.
