@@ -52,8 +52,11 @@ type RowUpdate struct {
 type TitleMsg struct{ Title string }
 
 // FinishMsg ends a Progress: it quits the program, and its final view is
-// the header only, with the elapsed time frozen (the caller prints the
-// detailed summary itself). Pending questions are answered no.
+// the title only, with how it ended and the elapsed time frozen: "<title>:
+// finished in 1.2s", "interrupted after", or "cancelled after" when every
+// row was cancelled. It has no counts: the caller prints the summary of
+// the results itself, which they would repeat or contradict. Pending
+// questions are answered no.
 type FinishMsg struct{}
 
 // AskMsg makes a Progress display a yes/no question (see Confirm) below its
@@ -366,7 +369,14 @@ func (m Progress) header() string {
 		counts += fmt.Sprintf(", %d interrupted", interrupted)
 	}
 	if m.finished {
-		return m.styles.Title.Render(sanitize(m.title)) + fmt.Sprintf(": %s in %v", counts, m.elapsed())
+		end := "finished in"
+		switch {
+		case m.interrupts > 0:
+			end = "interrupted after"
+		case cancelled > 0 && running+done+skipped+failed+interrupted == 0:
+			end = "cancelled after"
+		}
+		return m.styles.Title.Render(sanitize(m.title)) + fmt.Sprintf(": %s %v", end, m.elapsed())
 	}
 	return m.styles.Title.Render(sanitize(m.title)) + m.styles.Status.Render(
 		fmt.Sprintf(" · %s%d running, %s · %v", m.asideCounts(), running, counts, m.elapsed()))

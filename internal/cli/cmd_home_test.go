@@ -69,7 +69,7 @@ func reportKey(t *testing.T, out *syncBuffer, name, k string) []key {
 // view, which a terminal never leads to.
 func declineRemoval(t *testing.T, out *syncBuffer) []key {
 	t.Helper()
-	return []key{{keys: "n", wait: waitOutput(t, out, "[y/N]")}, {keys: "x", wait: waitOutput(t, out, "1 cancelled")}}
+	return []key{{keys: "n", wait: waitOutput(t, out, "[y/N]")}, {keys: "x", wait: waitOutput(t, out, "cancelled after")}}
 }
 
 // homeBundle has repositories alpha (primary main, worktree feat tracking

@@ -162,10 +162,10 @@ func TestProgressFinishQuitsAndRendersSummaryOnly(t *testing.T) {
 	if !strings.HasSuffix(v, "\n") || lineCount(strings.TrimSuffix(v, "\n")) != 1 {
 		t.Fatalf("final view = %q, want the header only, followed by a newline", v)
 	}
-	for _, want := range []string{"Updating", "1 done", "1 skipped", "1 failed", "3s"} {
-		if !strings.Contains(v, want) {
-			t.Errorf("final view %q lacks %q", v, want)
-		}
+	// No counts: the caller prints the summary of the results, which the
+	// counts of the rows would repeat, or contradict (B52 B2).
+	if want := "Updating: finished in 3s\n"; v != want {
+		t.Errorf("final view %q, want %q", v, want)
 	}
 	if m2, cmd := m.Update(RowUpdate{Key: "d", Label: "delta", State: RowRunning}); cmd != nil || strings.Contains(view(m2), "delta") {
 		t.Error("updates after the finish are not ignored")
@@ -334,7 +334,7 @@ func TestProgressCancelledRowAndTitleChange(t *testing.T) {
 		t.Errorf("header does not count the cancelled row:\n%s", v)
 	}
 	m, _ = feed(m, FinishMsg{})
-	if v := view(m); !strings.HasPrefix(v, "Removing alpha: 0 done, 0 skipped, 0 failed, 1 cancelled in ") {
+	if v := view(m); !strings.HasPrefix(v, "Removing alpha: cancelled after ") {
 		t.Errorf("final view:\n%s", v)
 	}
 }
@@ -546,6 +546,20 @@ func TestProgressSpacesTheHeader(t *testing.T) {
 		if got := progressShape(m); got != "H _" {
 			t.Errorf("%d rows, height %d: final shape %q, want %q", c.rows, c.height, got, "H _")
 		}
+	}
+}
+
+// The final view of an interrupted progress says so (B52 B2), whatever
+// its rows.
+func TestProgressFinishAfterInterruption(t *testing.T) {
+	t.Parallel()
+	p, clock := newTestProgress("Fetching")
+	m, _ := feed(p, RowUpdate{Key: "a", Label: "alpha", State: RowDone}, RowUpdate{Key: "b", Label: "beta", State: RowCancelled},
+		InterruptedMsg{Count: 1}, RowUpdate{Key: "c", Label: "gamma", State: RowInterrupted})
+	clock.t = clock.t.Add(1200 * time.Millisecond)
+	m, _ = feed(m, FinishMsg{})
+	if v, want := view(m), "Fetching: interrupted after 1.2s\n"; v != want {
+		t.Errorf("final view %q, want %q", v, want)
 	}
 }
 

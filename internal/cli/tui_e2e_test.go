@@ -305,7 +305,7 @@ func TestTUISyncAddsSelectedWithoutExclusionStep(t *testing.T) {
 	// one reads it, fail fast instead of blocking.
 	in := newScript(t, true, keys(" ", "\r"), []key{{wait: func() {
 		deadline := time.Now().Add(20 * time.Second)
-		for o := out.String(); !strings.Contains(o, "1 done, 0 skipped, 0 failed in"); o = out.String() {
+		for o := out.String(); !strings.Contains(o, "Syncing: finished in"); o = out.String() {
 			if strings.Contains(o, "Exclude") || time.Now().After(deadline) {
 				t.Errorf("no progress summary after the menu:\n%s", o)
 				return
@@ -581,7 +581,7 @@ func TestTUIPruneConfirms(t *testing.T) {
 	wt := addWorktree(t, primary, "feat", "feat")
 	testutil.Git(t, o.Path, "branch", "-D", "feat") // gone upstream
 	var out syncBuffer
-	in := newScript(t, true, []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}, {keys: "x", wait: waitScreen(t, &out, "Pruning: 1 done")}})
+	in := newScript(t, true, []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}, {keys: "x", wait: waitScreen(t, &out, "Pruning: finished in")}})
 	errs, code := e.runTUI(t, in, &out, "prune")
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -595,6 +595,32 @@ func TestTUIPruneConfirms(t *testing.T) {
 	for _, want := range []string{"Prune 1 candidate?", "will remove worktree alpha/feat", "1 removed, 0 kept, 0 failed"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// The final line of the progress view does not repeat the counts of the
+// summary that follows it, nor contradicts them (B52 B2): update counted
+// pinned checkouts as skipped there.
+func TestTUIProgressFinalLineHasNoCounts(t *testing.T) {
+	t.Parallel()
+	e := newBundleEnv(t)
+	o, primary := e.addRepo(t, "alpha")
+	testutil.Git(t, primary, "tag", "v1")
+	e.mustRun(t, "wt", "add", "alpha", "--tag", "v1", "--no-fetch")
+	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
+	for _, tc := range []struct {
+		args        []string
+		final, sums string
+	}{
+		{[]string{"fetch"}, "Fetching: finished in ", "1 done, 0 skipped, 0 failed"},
+		{[]string{"update"}, "Updating: finished in ", "1 fast-forwarded, 0 up to date, 1 pinned, 0 skipped, 0 failed"},
+	} {
+		var out syncBuffer
+		errs, code := e.runTUI(t, newScript(t, true), &out, tc.args...)
+		o := out.String()
+		if code != 0 || !strings.Contains(o, tc.final) || !strings.Contains(o, tc.sums) || strings.Count(o, " failed") != 1 {
+			t.Errorf("%v: exit %d, want the final line %q and one count line %q\nstdout:\n%s\nstderr:\n%s", tc.args, code, tc.final, tc.sums, o, errs)
 		}
 	}
 }
@@ -732,9 +758,9 @@ func TestTUIDeletionTitlesCheckingThenRemovingOrCancelled(t *testing.T) {
 			_, primary := e.addRepo(t, "alpha")
 			testutil.Git(t, primary, "worktree", "add", "-q", "-b", "feat", filepath.Join(e.cwd, "alpha", "feat"))
 			var out syncBuffer
-			final := tc.checking + ": 0 done, 0 skipped, 0 failed, 1 cancelled in "
+			final := tc.checking + ": cancelled after "
 			if answer == "y" {
-				final = tc.removing + ": 1 done, 0 skipped, 0 failed in "
+				final = tc.removing + ": finished in "
 			}
 			// The second key keeps the input open until the final view.
 			in := newScript(t, true, []key{{keys: answer, wait: waitOutput(t, &out, "[y/N]")}, {keys: "x", wait: waitScreen(t, &out, final)}})
