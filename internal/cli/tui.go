@@ -151,13 +151,15 @@ func (d Deps) termOf(c *cobra.Command) io.Writer {
 // render inline (no alternate screen; the overview of the home screen is
 // the exception), so their last frame stays in the terminal; bubbletea's
 // own signal handler is disabled: signals go through
-// execute's interruptCtl, like ctrl+c in a progress view.
+// execute's interruptCtl, like ctrl+c in a progress view. With a title
+// (Deps.windowTitle, on a terminal only), the programs set the window title.
 type tuiSession struct {
 	ctx       context.Context
 	ctl       *interruptCtl
 	in        io.Reader
 	out, errw io.Writer
 	spin      *spinner // held while a program runs
+	title     string
 }
 
 func newTUISession(c *cobra.Command, d Deps) *tuiSession {
@@ -174,7 +176,19 @@ func newTUISession(c *cobra.Command, d Deps) *tuiSession {
 		// bubbletea needs the terminal itself to know its size.
 		out = p.w
 	}
-	return &tuiSession{ctx: ctx, ctl: ctl, in: c.InOrStdin(), out: out, errw: d.leveled(c, c.ErrOrStderr()), spin: d.spin}
+	s := &tuiSession{ctx: ctx, ctl: ctl, in: c.InOrStdin(), out: out, errw: d.leveled(c, c.ErrOrStderr()), spin: d.spin}
+	if isTerminal(out) {
+		s.title = d.windowTitle
+	}
+	return s
+}
+
+// titled returns m wrapped to set the window title of s, if any.
+func (s *tuiSession) titled(m tea.Model) tea.Model {
+	if s.title == "" {
+		return m
+	}
+	return tui.Titled{Model: m, Title: s.title}
 }
 
 // run runs a menu or confirmation program. An interruption (signal) kills
@@ -189,7 +203,7 @@ func (s *tuiSession) runModel(m tea.Model) (tea.Model, error) {
 	}
 	flush(s.errw) // the program owns the terminal
 	s.spin.hold()
-	final, err := tui.Run(m, s.in, s.out, tea.WithContext(s.ctx), tea.WithoutSignalHandler())
+	final, err := tui.Run(s.titled(m), s.in, s.out, tea.WithContext(s.ctx), tea.WithoutSignalHandler())
 	s.spin.release()
 	if cerr := s.ctx.Err(); cerr != nil {
 		return nil, cerr
@@ -269,7 +283,7 @@ func (s *tuiSession) progress(title string, o progressOpts, work func(ctx contex
 	if isTerminal(s.out) {
 		model = model.WithTerminalProgress()
 	}
-	p, err := tui.NewProgram(model, s.in, s.out, tea.WithoutSignalHandler())
+	p, err := tui.NewProgram(s.titled(model), s.in, s.out, tea.WithoutSignalHandler())
 	if err != nil {
 		fmt.Fprintf(s.errw, "sheaf: cannot start the progress view (%v); plain output follows\n", err)
 		work(s.ctx, plain, func(string, []string) bool { return false })
@@ -457,8 +471,12 @@ func (k keepLastLine) View() tea.View {
 	return v
 }
 
-// unwrapModel returns the model wrapped by keepLastLine, or m itself.
+// unwrapModel returns the model wrapped by tui.Titled and keepLastLine, or
+// m itself.
 func unwrapModel(m tea.Model) tea.Model {
+	if t, ok := m.(tui.Titled); ok {
+		m = t.Model
+	}
 	if k, ok := m.(keepLastLine); ok {
 		return k.Model
 	}

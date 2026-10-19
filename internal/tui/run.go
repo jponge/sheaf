@@ -327,6 +327,28 @@ func (e *errAfterData) Read(b []byte) (int, error) {
 	return n, err
 }
 
+// Titled wraps a model whose views set the terminal window title to Title
+// (see tea.View.WindowTitle), with control characters replaced by U+FFFD.
+// bubbletea clears the title (sets an empty one) when the program ends: it
+// does not restore the previous one.
+type Titled struct {
+	tea.Model
+	Title string
+}
+
+// Update implements tea.Model: the updated model is wrapped too.
+func (t Titled) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m, cmd := t.Model.Update(msg)
+	return Titled{m, t.Title}, cmd
+}
+
+// View implements tea.Model.
+func (t Titled) View() tea.View {
+	v := t.Model.View()
+	v.WindowTitle = sanitize(t.Title)
+	return v
+}
+
 // ErrInputNotTerminal is returned by Run for an *os.File input that is not a
 // terminal.
 var ErrInputNotTerminal = errors.New("tui: input file is not a terminal")

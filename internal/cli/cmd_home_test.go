@@ -455,6 +455,24 @@ func TestHomeFetchCurrentRepository(t *testing.T) {
 	}
 }
 
+// On an output that is not a terminal (a TUI forced on), the home screen
+// and its actions never set the window title (OSC 0, 2).
+func TestHomeOnNonTerminalSetsNoWindowTitle(t *testing.T) {
+	t.Parallel()
+	e, _, _, _, _ := homeBundle(t)
+	var out syncBuffer
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "x"), ovKeys(t, &out, "fetch: done", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 || !strings.Contains(out.String(), "Fetching") {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	for _, seq := range []string{"\x1b]0;", "\x1b]2;"} {
+		if strings.Contains(out.String(), seq) {
+			t.Errorf("output contains %q:\n%q", seq, out.String())
+		}
+	}
+}
+
 func TestHomeAddWorktreeForBranchAndTag(t *testing.T) {
 	t.Parallel()
 	e, alpha, _, _, o := homeBundle(t)

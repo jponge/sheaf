@@ -261,6 +261,10 @@ func TestTUIProgressDrivesTerminalProgress(t *testing.T) {
 	s.write("\x03")
 	wantTerminalRestored(t, s, "130")
 	wantTerminalProgressReset(t, s.output())
+	// Only the home screen sets the window title (B42).
+	if titles := windowTitles(s.output()); len(titles) > 0 {
+		t.Errorf("window titles %q set by a command run alone", titles)
+	}
 }
 
 // The emergency stop (a second ctrl+c while git ignores the first) kills
@@ -280,7 +284,7 @@ func TestTUIEmergencyStopResetsTerminalProgress(t *testing.T) {
 }
 
 // Without the TUI (--no-tui) nothing drives the terminal's progress
-// indicator.
+// indicator nor sets the window title.
 func TestPlainFetchOnPTYLeavesTerminalProgressAlone(t *testing.T) {
 	e := newBundleEnv(t)
 	e.addRepo(t, "alpha")
@@ -288,6 +292,9 @@ func TestPlainFetchOnPTYLeavesTerminalProgressAlone(t *testing.T) {
 	s.waitFor(`SHEAF-EXIT=0`)
 	if all := terminalProgress.FindAllString(s.output(), -1); len(all) > 0 {
 		t.Errorf("terminal progress sequences %q in plain mode", all)
+	}
+	if titles := windowTitles(s.output()); len(titles) > 0 {
+		t.Errorf("window titles %q in plain mode", titles)
 	}
 }
 

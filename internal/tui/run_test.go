@@ -417,3 +417,24 @@ func TestNewProgramClaimsInputSegment(t *testing.T) {
 	assertKeys(t, m1, "a")
 	assertKeys(t, m2, "c")
 }
+
+// Titled sets the window title of the views of the model it wraps, with
+// control characters replaced, and keeps wrapping it across updates.
+func TestTitledSetsWindowTitle(t *testing.T) {
+	t.Parallel()
+	var m tea.Model = Titled{Model: NewConfirm("Q?", nil), Title: "sheaf: a\x07b\x1b]2;x"}
+	if got := m.View().WindowTitle; got != "sheaf: a�b�]2;x" {
+		t.Fatalf("window title %q", got)
+	}
+	m, _ = m.Update(keyMsg("y"))
+	tm, ok := m.(Titled)
+	if !ok {
+		t.Fatalf("model is %T after an update, want Titled", m)
+	}
+	if c, ok := tm.Model.(Confirm); !ok || !c.Confirmed() {
+		t.Fatalf("wrapped model %#v not updated", tm.Model)
+	}
+	if got := m.View().WindowTitle; got != "sheaf: a�b�]2;x" {
+		t.Fatalf("window title %q after an update", got)
+	}
+}

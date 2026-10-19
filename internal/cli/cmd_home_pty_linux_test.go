@@ -70,12 +70,13 @@ func TestHomeOnPTYCtrlCExits130(t *testing.T) {
 }
 
 // dismissReport waits until the output of s contains the title of the
-// report view of the action name n times, then for the grace period of the
-// view, and presses a key.
+// report view of the action name n times (window titles, which name the
+// action too, do not count), then for the grace period of the view, and
+// presses a key.
 func dismissReport(t *testing.T, s *ptyShell, name string, n int) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
-	for strings.Count(s.output(), "sheaf "+name+": ") < n {
+	for strings.Count(windowTitleSeq.ReplaceAllString(s.output(), ""), "sheaf "+name+": ") < n {
 		if time.Now().After(deadline) {
 			t.Fatalf("output never contained the report view of %s %d times:\n%q", name, n, s.output())
 		}
@@ -569,6 +570,56 @@ func TestHomeOnPTYInterruptedActionLeavesItsOutput(t *testing.T) {
 	}
 	if n != 1 || !slices.ContainsFunc(normal, func(l string) bool { return strings.HasPrefix(l, "failed   alpha") }) {
 		t.Errorf("the summary of the interrupted fetch is not on the normal screen once (%d times):\n%s", n, strings.Join(normal, "\n"))
+	}
+}
+
+// windowTitleSeq matches the sequences setting the window title (OSC 0
+// and 2); the submatch is the title.
+var windowTitleSeq = regexp.MustCompile(`\x1b\][02];([^\x07\x1b]*)(?:\x07|\x1b\\)`)
+
+// windowTitles returns the window titles that out sets, in order.
+func windowTitles(out string) []string {
+	var titles []string
+	for _, m := range windowTitleSeq.FindAllStringSubmatch(out, -1) {
+		titles = append(titles, m[1])
+	}
+	return titles
+}
+
+// The home screen sets the window title (B42): "sheaf: <bundle>" in the
+// overview and the report views, "sheaf <action>: <bundle>" in the programs
+// of an action (here the progress views of fetch and update, the prompt of
+// add); bubbletea clears it when each program ends, hence last.
+func TestHomeOnPTYSetsWindowTitle(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	b := filepath.Base(e.cwd)
+	s := startPTYShell(t, e.cwd, `B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	s.write("f")
+	dismissReport(t, s, "fetch", 1)
+	s.waitFor(`fetch: done`)
+	s.write("u")
+	dismissReport(t, s, "update", 1)
+	s.waitFor(`update: done`)
+	s.write("w")
+	s.waitFor(`New worktree of alpha`)
+	s.write("\x1b")
+	s.waitFor(`add: cancelled`)
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
+	titles := windowTitles(s.output())
+	for _, want := range []string{"sheaf: " + b, "sheaf fetch: " + b, "sheaf update: " + b, "sheaf add: " + b} {
+		if !slices.Contains(titles, want) {
+			t.Errorf("window titles %q lack %q", titles, want)
+		}
+	}
+	for _, got := range titles {
+		if got != "" && !strings.HasPrefix(got, "sheaf") || !strings.HasSuffix(got, ": "+b) && got != "" {
+			t.Errorf("unexpected window title %q in %q", got, titles)
+		}
+	}
+	if len(titles) == 0 || titles[len(titles)-1] != "" {
+		t.Errorf("window titles %q: want the last one cleared", titles)
 	}
 }
 

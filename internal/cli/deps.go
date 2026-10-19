@@ -57,6 +57,10 @@ type Deps struct {
 	// programs render and which decides the TUI mode (see tuiMode): the
 	// home screen captures what its actions print for its report view.
 	term io.Writer
+	// windowTitle, if set, is the terminal window title of the TUI programs
+	// of the commands (see tuiSession): the home screen names itself and
+	// its actions.
+	windowTitle string
 	// stdinTTY replaces isTerminal for standard input (interactive git
 	// mode); tests only.
 	stdinTTY func(io.Reader) bool

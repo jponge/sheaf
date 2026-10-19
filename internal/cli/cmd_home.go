@@ -60,7 +60,9 @@ func installHome(root *cobra.Command, d Deps) {
 // back. Enter on a checkout ends sheaf: the path of the checkout is
 // written to the file named by $SHEAF_CD_FILE, set by the shell function
 // of shell-init, which then changes the directory; without it the path is
-// printed.
+// printed. On a terminal, the programs of the home screen and of its
+// actions set the window title (see homeTitle); bubbletea clears it when
+// each program ends.
 func runHome(c *cobra.Command, d Deps) error {
 	if !d.tuiMode(c) {
 		return c.Help()
@@ -84,8 +86,19 @@ func runHome(c *cobra.Command, d Deps) error {
 	if o.Jobs < 1 {
 		return fmt.Errorf("invalid --jobs %d: must be at least 1", o.Jobs)
 	}
+	d.windowTitle = homeTitle("", root)
 	h := &home{c: c, d: d, s: newTUISession(c, d), root: root, jobs: o.Jobs}
 	return h.loop()
+}
+
+// homeTitle returns the window title of the home screen on the bundle
+// root, "sheaf: <name of root>", or that of its action name, "sheaf
+// <name>: <name of root>" (see tuiSession).
+func homeTitle(name, root string) string {
+	if name != "" {
+		name = " " + name
+	}
+	return "sheaf" + name + ": " + filepath.Base(root)
 }
 
 // home is the state of the home screen between two overviews.
@@ -102,6 +115,8 @@ type home struct {
 	// selected are the selected rows of the next overview: those of the
 	// last one, unless its action applied to them and succeeded.
 	selected []string
+	// action is the name of the running action.
+	action string
 	// succeeded tells whether every run of the last action succeeded, and
 	// ran whether one ran, i.e. was not cancelled (see outcome).
 	succeeded, ran bool
@@ -386,6 +401,7 @@ func (h *home) cd(r homeRow) error {
 // act runs the action name on targets and returns the message the next
 // overview displays.
 func (h *home) act(name string, targets []string) string {
+	h.action = name
 	h.unchanged = ""
 	h.output.Reset()
 	var repos []string
@@ -410,7 +426,7 @@ func (h *home) act(name string, targets []string) string {
 			c.SetErr(teeWriter{io.MultiWriter(h.c.ErrOrStderr(), &h.output), h.c.ErrOrStderr()})
 			c.SetContext(h.s.ctx)
 			d := h.d
-			d.ctl, d.term = h.s.ctl, h.s.out
+			d.ctl, d.term, d.windowTitle = h.s.ctl, h.s.out, homeTitle(name, h.root)
 			opts := ops.UpdateOptions{Filter: ops.CheckoutFilter{Repos: repos, Paths: paths}, Jobs: h.jobs}
 			err = tuiUpdate(c, d, w, opts, false)
 		}
@@ -451,7 +467,7 @@ func (h *home) add(repo string) string {
 	prompt := tui.NewPrompt("New worktree of "+repo, []string{"branch", "tag"}).WithHints(
 		"an existing local or remote branch, else a new branch from the default branch",
 		"a tag: a detached worktree pinned at it")
-	final, err := h.s.run(prompt)
+	final, err := h.session().run(prompt)
 	if err != nil {
 		return h.outcome("add", []error{err})
 	}
@@ -476,7 +492,7 @@ func (h *home) pr(repo string) string {
 		}
 		return ""
 	})
-	final, err := h.s.run(prompt)
+	final, err := h.session().run(prompt)
 	if err != nil {
 		return h.outcome("pr", []error{err})
 	}
@@ -485,6 +501,16 @@ func (h *home) pr(repo string) string {
 		return h.outcome("pr", []error{errCancelled})
 	}
 	return h.outcome("pr", []error{h.command("wt", "pr", "--", repo, strings.TrimSpace(p.Value()))})
+}
+
+// session returns the TUI session of the home screen with the window title
+// of the running action.
+func (h *home) session() *tuiSession {
+	s := *h.s
+	if s.title != "" {
+		s.title = homeTitle(h.action, h.root)
+	}
+	return &s
 }
 
 // command runs `sheaf <args>` (global options of this run, the bundle of
@@ -507,6 +533,7 @@ func (h *home) commandIn(dir string, args ...string) error {
 	}
 	d.ctl = h.s.ctl // the home screen's controller, with its context
 	d.term = h.s.out
+	d.windowTitle = homeTitle(h.action, h.root)
 	d.unchanged = func(note string) { h.unchanged = note }
 	cancelled := false
 	d.cancelled = func() { cancelled = true }
