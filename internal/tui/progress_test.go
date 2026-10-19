@@ -549,6 +549,34 @@ func TestProgressSpacesTheHeader(t *testing.T) {
 	}
 }
 
+// With WithAside, the header counts the aside rows apart, as "<phase>
+// <finished>/<total>" before the counts of the other rows (B52 B1): the
+// fetch of update or prune is not hidden behind "0 running". Without aside
+// rows, or without a name for them, the header is unchanged.
+func TestProgressHeaderCountsAsideRows(t *testing.T) {
+	t.Parallel()
+	p, _ := newTestProgress("Updating")
+	rows := []tea.Msg{
+		RowUpdate{Key: "a", Label: "a (fetch)", State: RowRunning, Aside: true},
+		RowUpdate{Key: "b", Label: "b (fetch)", State: RowRunning, Aside: true},
+		RowUpdate{Key: "c", Label: "c (fetch)", State: RowFailed, Aside: true},
+		RowUpdate{Key: "d", Label: "d (fetch)", State: RowDone, Aside: true},
+		RowUpdate{Key: "d/main", Label: "d/main", State: RowRunning},
+	}
+	m, _ := feed(p.WithAside("fetch"), rows...)
+	if h := strings.Split(view(m), "\n")[0]; !strings.HasPrefix(h, "Updating · fetch 2/4 · 1 running, 0 done, 0 skipped, 0 failed · ") {
+		t.Errorf("header = %q, want the aside rows counted apart", h)
+	}
+	m, _ = feed(p, rows...)
+	if h := strings.Split(view(m), "\n")[0]; !strings.HasPrefix(h, "Updating · 1 running, 0 done, 0 skipped, 0 failed · ") {
+		t.Errorf("header without WithAside = %q", h)
+	}
+	m, _ = feed(p.WithAside("fetch"), RowUpdate{Key: "x", Label: "x", State: RowRunning})
+	if h := strings.Split(view(m), "\n")[0]; !strings.HasPrefix(h, "Updating · 1 running, 0 done, 0 skipped, 0 failed · ") {
+		t.Errorf("header without aside rows = %q", h)
+	}
+}
+
 // Rows stopped by an interruption (B52 A6) have a state of their own: an
 // "!" marker and the word interrupted with the row's note, counted apart
 // from the failures in the header, and leaving the terminal's progress

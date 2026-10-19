@@ -599,6 +599,25 @@ func TestTUIPruneConfirms(t *testing.T) {
 	}
 }
 
+// The header counts the fetch preceding the plan (aside rows) apart, so
+// that it does not read "0 running" next to the fetch rows (B52 B1).
+func TestTUIPruneHeaderCountsTheFetch(t *testing.T) {
+	t.Parallel()
+	e := newBundleEnv(t)
+	o, primary := e.addRepo(t, "alpha", "feat")
+	addWorktree(t, primary, "feat", "feat")
+	testutil.Git(t, o.Path, "branch", "-D", "feat") // gone upstream
+	var out syncBuffer
+	in := newScript(t, true, []key{{keys: "n", wait: waitOutput(t, &out, "[y/N]")}})
+	errs, code := e.runTUI(t, in, &out, "prune")
+	if code != 1 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	if asking := out.String()[:strings.Index(out.String(), "[y/N]")]; !strings.Contains(asking, "Checking prune candidates · fetch 1/1 · 0 running, 0 done, 0 skipped, 0 failed ·") {
+		t.Errorf("header while asking does not count the fetch:\n%s", asking)
+	}
+}
+
 func TestTUIInitAdoptsSelectedCandidates(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)

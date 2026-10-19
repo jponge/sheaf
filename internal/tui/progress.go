@@ -36,8 +36,10 @@ const (
 // Label is used when the row is created. A zero State keeps the row's state
 // (a new row starts running); a non-empty Message replaces the row's
 // message, as does any Message with RowInterrupted (the message of the
-// running work does not describe the interrupted one). Aside rows are displayed faint and not counted in the header
-// (e.g. the fetch preceding the fast-forwards of a repository).
+// running work does not describe the interrupted one). Aside rows are
+// displayed faint and not counted with the others in the header (only
+// apart, see WithAside) nor by the progress bars (e.g. the fetch preceding
+// the fast-forwards of a repository).
 type RowUpdate struct {
 	Key, Label string
 	State      RowState
@@ -109,6 +111,8 @@ type Progress struct {
 
 	planned int // rows announced by PlannedMsg; 0: unknown
 
+	asideName string // see WithAside
+
 	now          func() time.Time
 	start, ended time.Time
 	interrupt    func()
@@ -159,6 +163,15 @@ func (m Progress) WithInterrupt(f func()) Progress {
 // reset it, as it does when the program is killed.
 func (m Progress) WithTerminalProgress() Progress {
 	m.terminalProgress = true
+	return m
+}
+
+// WithAside returns a copy of m whose header counts the aside rows apart,
+// as name (their phase) followed by the finished ones over all of them,
+// before the counts of the other rows: "fetch 2/5". The progress bars
+// still count the other rows only (see PlannedMsg).
+func (m Progress) WithAside(name string) Progress {
+	m.asideName = name
 	return m
 }
 
@@ -356,7 +369,26 @@ func (m Progress) header() string {
 		return m.styles.Title.Render(sanitize(m.title)) + fmt.Sprintf(": %s in %v", counts, m.elapsed())
 	}
 	return m.styles.Title.Render(sanitize(m.title)) + m.styles.Status.Render(
-		fmt.Sprintf(" · %d running, %s · %v", running, counts, m.elapsed()))
+		fmt.Sprintf(" · %s%d running, %s · %v", m.asideCounts(), running, counts, m.elapsed()))
+}
+
+// asideCounts returns the aside rows counted apart in the header, followed
+// by its separator: "fetch 2/5 · " (see WithAside); "" without a name for
+// them or without such rows.
+func (m Progress) asideCounts() string {
+	finished, all := 0, 0
+	for _, r := range m.rows {
+		if r.aside {
+			all++
+			if r.state != RowRunning {
+				finished++
+			}
+		}
+	}
+	if m.asideName == "" || all == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s %d/%d · ", sanitize(m.asideName), finished, all)
 }
 
 // ratio returns the finished rows (aside rows excluded) over the planned

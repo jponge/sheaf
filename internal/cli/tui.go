@@ -90,7 +90,7 @@ func candidateItems(cs []ops.Candidate) []tui.Item {
 // eventRow maps an ops event to a progress row update: one row per
 // repository, or per checkout when Worktree is set. Events of the aside
 // phase (e.g. the fetch preceding update's fast-forwards) go to a separate
-// row of the repository, displayed but not counted.
+// row of the repository, counted apart (see progressOpts).
 func eventRow(e ops.Event, aside string) tui.RowUpdate {
 	who := e.Repo
 	if e.Worktree != "" {
@@ -271,7 +271,8 @@ func (s *tuiSession) confirm(question string, details []string) error {
 type askFunc func(question string, details []string) bool
 
 // progressOpts configures progress: events of the Aside phase go to rows
-// that are not counted (see eventRow); with Single set, every event goes to
+// that are counted apart (see eventRow, tui.Progress.WithAside); with
+// Single set, every event goes to
 // one row labelled Single (an operation on one repository), which is all
 // the planned work; Confirmed, if
 // set, replaces the title once a question is answered yes (e.g. "Checking
@@ -294,6 +295,9 @@ type progressOpts struct {
 func (s *tuiSession) progress(title string, o progressOpts, work func(ctx context.Context, rep ops.Reporter, ask askFunc)) {
 	plain := checkoutRenderer{plainRenderer{s.errw}}
 	model := tui.NewProgress(title).WithInterrupt(s.ctl.interrupt)
+	if o.Aside != "" {
+		model = model.WithAside(o.Aside)
+	}
 	if s.controls {
 		model = model.WithTerminalProgress()
 	}
