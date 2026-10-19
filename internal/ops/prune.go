@@ -244,7 +244,11 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 			skips = append(skips, PruneSkip{Repo: r.Name, Branch: b.Name, Path: path, Reason: reason + ", but " + msg})
 		}
 		if n, ok := b.PullRequest(); ok {
-			skip("", fmt.Sprintf("it is the branch of pull request #%d (never pruned; remove it with `sheaf wt rm`)", n))
+			why := fmt.Sprintf("it is the branch of pull request #%d (never pruned)", n)
+			if in, ok := checkedOut[b.Name]; ok && !in.Primary && !in.Outside {
+				why += "; to remove its worktree, run: " + CommandLine("wt", "rm", "--dir", in.Dir, "--", r.Name)
+			}
+			skip("", why)
 			continue
 		}
 		if u, busy := busyUse(inUse[b.Name]); busy {
@@ -278,13 +282,20 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 		case opts.IncludeBranches:
 			cands = append(cands, c)
 		default:
-			skip("", "it has no worktree (pass --include-branches to delete such branches)")
+			args := []string{"prune", "--include-branches"}
+			if opts.Offline {
+				args = append(args, "--offline")
+			}
+			for _, name := range opts.Repos {
+				args = append(args, "--repo", name)
+			}
+			skip("", "it has no worktree; to delete such branches, run: "+CommandLine(args...))
 		}
 	}
 	for _, in := range infos {
 		if in.Tag != "" {
 			skips = append(skips, PruneSkip{Repo: r.Name, Tag: in.Tag, Path: in.Path,
-				Reason: "pinned at tag " + in.Tag + " (tag worktrees are never pruned; remove it with `sheaf wt rm`)"})
+				Reason: "pinned at tag " + in.Tag + " (tag worktrees are never pruned); to remove it, run: " + CommandLine("wt", "rm", "--dir", in.Dir, "--", r.Name)})
 		}
 	}
 	return cands, skips, probs, distrust
@@ -445,7 +456,7 @@ func pruneWorktree(ctx context.Context, w *Workspace, c PruneCandidate, opts Pru
 		}
 		res.Notes = riskNotes(refused.Plan.Risks)
 		res.Outcome = PruneKept
-		res.Message = "kept worktree " + describe(refused.Plan.Worktree) + ": " + strings.Join(why, "; ") + " (review it, then use `sheaf wt rm`)"
+		res.Message = "kept worktree " + describe(refused.Plan.Worktree) + ": " + strings.Join(why, "; ") + "; review it, then run: " + CommandLine("wt", "rm", "--dir", c.Dir, "--", c.Repo)
 	case errors.Is(err, ErrNotConfirmed):
 		res.Outcome, res.Message = PruneKept, "kept: "+changed+"; run prune again"
 	case errors.Is(err, errNoWorktree):

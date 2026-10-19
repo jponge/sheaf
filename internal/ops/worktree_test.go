@@ -476,10 +476,14 @@ func TestRemoveWorktreeDeleteBranch(t *testing.T) {
 	p := f.mustAddWT(t, "a", "work").Path
 	testutil.CommitFile(t, p, "w.txt", "w\n", "work")
 	var re *WorktreeRefusedError
+	wantHint := map[bool]string{
+		false: "run: sheaf wt rm -D --dir work -- a",
+		true:  "run: sheaf wt rm --force -D --dir work -- a",
+	}
 	for _, force := range []bool{false, true} {
 		_, err := f.rmWT(t, "a", "work", WorktreeRemoveOptions{DeleteBranch: true, Force: force})
 		if !errors.As(err, &re) || !strings.Contains(err.Error(), "branch work is not merged") ||
-			!strings.Contains(err.Error(), "1 commit") || !strings.Contains(err.Error(), "(use -D to delete anyway)") {
+			!strings.Contains(err.Error(), "1 commit") || !strings.HasSuffix(err.Error(), wantHint[force]) {
 			t.Fatalf("unmerged (force %v): err = %v", force, err)
 		}
 		if !exists(p) || !branchExists(t, primary, "work") {

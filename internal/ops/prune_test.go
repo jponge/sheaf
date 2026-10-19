@@ -229,7 +229,8 @@ func TestPlanPruneSkipsPullRequestBranches(t *testing.T) {
 	if len(plan.Candidates) != 0 {
 		t.Fatalf("candidates %v", candidateNames(plan))
 	}
-	if s, ok := skipFor(plan, "pr/9"); !ok || !strings.Contains(s.Reason, "pull request") {
+	if s, ok := skipFor(plan, "pr/9"); !ok || !strings.Contains(s.Reason, "pull request") ||
+		!strings.HasSuffix(s.Reason, "; to remove its worktree, run: sheaf wt rm --dir pr-9 -- a") {
 		t.Fatalf("skip = %+v, %v", s, ok)
 	}
 }
@@ -260,7 +261,8 @@ func TestApplyPruneRemovesWorktreesKeepsBranches(t *testing.T) {
 			t.Errorf("%s: %+v (dir exists %v, branch exists %v)", b, r, exists(r.Path), branchExists(t, primary, b))
 		}
 	}
-	if r, _ := resultFor(rs, "feat"); r.Outcome != PruneKept || !exists(r.Path) || !strings.Contains(r.Message, "unstaged") {
+	if r, _ := resultFor(rs, "feat"); r.Outcome != PruneKept || !exists(r.Path) || !strings.Contains(r.Message, "unstaged") ||
+		!strings.HasSuffix(r.Message, "; review it, then run: sheaf wt rm --dir feat -- a") {
 		t.Errorf("dirty feat: %+v", r)
 	}
 	// Branch candidates: deleted only when merged or contained (-d).

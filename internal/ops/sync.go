@@ -498,7 +498,12 @@ func SyncRemoveGone(ctx context.Context, w *Workspace, props []Proposal, sopts S
 			continue
 		}
 		if p.MassRemoval && !sopts.AllowMassRemoval {
-			tasks = append(tasks, failedTask(p.Name, fmt.Errorf("refusing to remove %s: most repositories of %s look gone, which is more likely an incomplete listing (authentication scope) than real deletions; check, then pass --allow-mass-removal", p.Slug, p.Org)))
+			args := []string{"sync", "--org", p.Org, "--remove-gone", "--yes"}
+			if opts.Force {
+				args = append(args, "--force")
+			}
+			tasks = append(tasks, failedTask(p.Name, fmt.Errorf("refusing to remove %s: most repositories of %s look gone, which is more likely an incomplete listing (authentication scope) than real deletions; check, then run: %s",
+				p.Slug, p.Org, CommandLine(append(args, "--allow-mass-removal")...))))
 			continue
 		}
 		tasks = append(tasks, Task{Repo: p.Name, Phase: PhaseRemove, Run: func(ctx context.Context, emit func(Event)) (string, error) {

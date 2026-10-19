@@ -722,7 +722,7 @@ func TestHomeRemoveWorktreeConfirmsAndRefusesPrimary(t *testing.T) {
 	if exists(feat) || !exists(alpha) {
 		t.Fatalf("feat not removed or primary removed\nstdout:\n%s\nstderr:\n%s", out.String(), errs)
 	}
-	for _, want := range []string{"primary checkout", "Remove worktree feat of alpha?", "wt rm: done"} {
+	for _, want := range []string{"primary checkout, not a worktree; run: sheaf remove -- alpha", "Remove worktree feat of alpha?", "wt rm: done"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out.String())
 		}

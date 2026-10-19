@@ -417,7 +417,7 @@ func (h *home) actions() []tui.OverviewAction {
 		for _, k := range checkouts {
 			switch c := h.rows[k].checkout; {
 			case c.Primary:
-				return "the primary checkout cannot be removed (use `sheaf remove " + c.Repo + "`)"
+				return "primary checkout, not a worktree; run: " + ops.CommandLine("remove", "--", c.Repo)
 			case c.Outside:
 				return "the worktree " + c.Path + " is outside its repository directory: remove it with git"
 			}
@@ -442,7 +442,7 @@ func (h *home) actions() []tui.OverviewAction {
 			return why
 		}
 		if c := h.rows[targets[0]].checkout; c.Outside {
-			return "the worktree " + c.Path + " is outside its repository directory: use `sheaf browse " + c.Repo + "`"
+			return "worktree outside its repository directory; run: " + ops.CommandLine("browse", "--", c.Repo)
 		}
 		return ""
 	}

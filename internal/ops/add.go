@@ -222,14 +222,14 @@ func selectFromOrg(ctx context.Context, h hosting.Hosting, req AddRequest) ([]ho
 					return nil, "", err
 				}
 				if got.Archived && !req.IncludeArchived {
-					return nil, "", fmt.Errorf("repository %s is archived; pass --include-archived to add it", got.Slug())
+					return nil, "", fmt.Errorf("repository %s is archived; to add it, run: %s", got.Slug(), includeArchivedCommand(req, name))
 				}
 				r, ok = got, true
 			}
 		}
 		if !ok {
 			if a, ok := findRepo(listed, name); ok && a.Archived {
-				return nil, "", fmt.Errorf("repository %s is archived; pass --include-archived to add it", a.Slug())
+				return nil, "", fmt.Errorf("repository %s is archived; to add it, run: %s", a.Slug(), includeArchivedCommand(req, name))
 			}
 			return nil, "", fmt.Errorf("%s has no repository %q: %w", org, name, hosting.ErrNotFound)
 		}
@@ -358,6 +358,37 @@ func looksLikeGitHubAlias(host string) bool {
 	return !strings.Contains(host, ".") || strings.Contains(strings.ToLower(host), "github")
 }
 
+// includeArchivedCommand returns the command line adding the archived
+// repository name of req's organization (see CommandLine).
+func includeArchivedCommand(req AddRequest, name string) string {
+	args := []string{"add", "--org", req.Org, "--include-archived"}
+	if req.NoFork {
+		args = append(args, "--no-fork")
+	}
+	if req.As != "" {
+		args = append(args, "--as", req.As)
+	}
+	return CommandLine(append(args, "--repo", name)...)
+}
+
+// noForkCommand returns the command line adding entry without its fork,
+// from the organization source if not empty (see CommandLine).
+func noForkCommand(entry bundle.Repository, source string) string {
+	name := entry.Slug[strings.LastIndex(entry.Slug, "/")+1:]
+	args := []string{"add"}
+	if source != "" {
+		args = append(args, "--org", source)
+	}
+	args = append(args, "--no-fork")
+	if entry.Name != name {
+		args = append(args, "--as", entry.Name)
+	}
+	if source != "" {
+		return CommandLine(append(args, "--repo", name)...)
+	}
+	return CommandLine(append(args, "--", entry.Slug)...)
+}
+
 // cloneRepo creates <root>/<name> (which must not exist), clones into it and
 // records the entry, then sets the gh default repository through gd. On any
 // failure of the clone or the record the repository directory is removed.
@@ -375,7 +406,7 @@ func cloneRepo(ctx context.Context, w *Workspace, net gitx.Net, entry bundle.Rep
 		emit(Event{Message: fmt.Sprintf("using your fork %s as origin and %s as upstream", entry.Fork.Slug, entry.Slug)})
 		emit(Event{Message: "cloning " + entry.URL + " (upstream) and " + entry.Fork.URL + " (origin) into " + dest})
 		if err = net.CloneFork(ctx, entry.URL, entry.Fork.URL, dest, entry.DefaultBranch); err != nil && ctx.Err() == nil {
-			err = fmt.Errorf("%w (to clone %s without your fork, pass --no-fork)", err, entry.Slug)
+			err = fmt.Errorf("%w; to clone %s without your fork, run: %s", err, entry.Slug, noForkCommand(entry, source))
 		}
 	} else {
 		emit(Event{Message: "cloning " + entry.URL + " into " + dest})

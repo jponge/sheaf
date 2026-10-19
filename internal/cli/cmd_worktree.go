@@ -411,7 +411,7 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 		opts.Interactive = d.singleRepoInteractiveGit(c)
 		msg, err := ops.RemoveWorktree(c.Context(), w, repo, target, opts, emit)
 		if errors.Is(err, ops.ErrNotConfirmed) {
-			return fmt.Errorf("removing worktree %s of %s needs confirmation: pass --yes (sheaf never prompts in CLI mode)", target.Name, repo)
+			return fmt.Errorf("removing worktree %s of %s needs confirmation (sheaf never prompts in CLI mode); run: %s", target.Name, repo, worktreeRemoveCommand(repo, target, opts))
 		}
 		if err != nil {
 			return err
@@ -426,6 +426,35 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 	f.BoolVar(&opts.Offline, "offline", false, "do not fetch first (the remote state may be stale)")
 	f.BoolVarP(&yes, "yes", "y", false, "confirm the removal (required in CLI mode)")
 	return cmd
+}
+
+// worktreeRemoveCommand returns the command line of wt rm for target of
+// repo with opts, confirmed with --yes (see ops.CommandLine).
+func worktreeRemoveCommand(repo string, target ops.WorktreeTarget, opts ops.WorktreeRemoveOptions) string {
+	args := []string{"wt", "rm"}
+	if opts.Force {
+		args = append(args, "--force")
+	}
+	switch {
+	case opts.ForceDeleteBranch:
+		args = append(args, "-D")
+	case opts.DeleteBranch:
+		args = append(args, "-d")
+	}
+	if opts.Offline {
+		args = append(args, "--offline")
+	}
+	switch target.Kind {
+	case ops.TargetDir:
+		args = append(args, "--dir", target.Name)
+	case ops.TargetBranch:
+		args = append(args, "--branch", target.Name)
+	}
+	args = append(args, "--yes", "--", repo)
+	if target.Kind == ops.TargetAny && target.Name != "" {
+		args = append(args, target.Name)
+	}
+	return ops.CommandLine(args...)
 }
 
 // worktreeRemovePlanLines describes a worktree removal plan: risks, what is

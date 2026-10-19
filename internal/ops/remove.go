@@ -87,6 +87,9 @@ func (p RemovePlan) Refused(force bool) bool {
 type RisksError struct {
 	Plan  RemovePlan
 	Force bool
+	// Offline is the option of the refused removal, repeated in the
+	// command of the hint (see Error).
+	Offline bool
 }
 
 func (e *RisksError) Error() string {
@@ -115,10 +118,30 @@ func (e *RisksError) Error() string {
 	}
 	if hard {
 		sb.WriteString("\nsome problems cannot be overridden with --force; fix them first")
+		var problems []string
+		for _, it := range e.Plan.Items {
+			problems = append(problems, it.Problem)
+		}
+		if !e.Offline && hasFetchProblem(problems...) {
+			sb.WriteString("\nto check local data only, run: " + e.command("--offline"))
+		}
 	} else {
-		sb.WriteString("\npass --force to remove anyway (the data listed above will be lost)")
+		sb.WriteString("\nto remove anyway (the data listed above will be lost), run: " + e.command("--force"))
 	}
 	return sb.String()
+}
+
+// command returns the command line of the refused removal with flag (see
+// CommandLine).
+func (e *RisksError) command(flag string) string {
+	args := []string{"remove"}
+	if flag == "--force" || e.Force {
+		args = append(args, "--force")
+	}
+	if flag == "--offline" || e.Offline {
+		args = append(args, "--offline")
+	}
+	return CommandLine(append(args, "--", e.Plan.Repo)...)
 }
 
 // Remove deletes the repository name from the bundle: its linked worktrees
@@ -239,7 +262,7 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 		if err := nameUnpushedBranches(ctx, &plan, published); err != nil {
 			return "", err
 		}
-		return "", &RisksError{Plan: plan, Force: opts.Force}
+		return "", &RisksError{Plan: plan, Force: opts.Force, Offline: opts.Offline}
 	}
 	if opts.Confirm == nil || !opts.Confirm(plan) {
 		return "", fmt.Errorf("%w: %s", ErrNotConfirmed, name)
@@ -534,11 +557,10 @@ func nameUnpushedBranches(ctx context.Context, plan *RemovePlan, published []str
 // to do, instead of git's long stderr.
 func fetchProblem(err error) string {
 	if lock, ok := gitx.StaleLockPath(err); ok {
-		return "fetch failed, the remote state is unknown: stale lock file " + lock +
-			" (if no other git process is running in this repository, delete it and retry), or pass --offline to check local data only"
+		return fetchFailed + ": stale lock file " + lock +
+			" (if no other git process is running in this repository, delete it and retry)"
 	}
-	return "fetch failed, the remote state is unknown: " + err.Error() +
-		"; retry when the remote is reachable, or pass --offline to check local data only"
+	return fetchFailed + ": " + err.Error() + "; retry when the remote is reachable"
 }
 
 // goneRemoteProblem is the refusal reason when the fetch shows that origin

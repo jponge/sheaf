@@ -294,6 +294,8 @@ func TestAddOrg(t *testing.T) {
 	}
 	if _, err := f.add(t, AddRequest{Org: "org", Repos: []string{"old"}}); err == nil {
 		t.Fatal("adding an archived repo by name without IncludeArchived succeeded")
+	} else if want := "; to add it, run: sheaf add --org org --include-archived --repo old"; !strings.HasSuffix(err.Error(), want) {
+		t.Fatalf("archived: err = %v, want it to end with %q", err, want)
 	}
 	s, err = f.add(t, AddRequest{Org: "org", All: true, IncludeArchived: true})
 	if err != nil || statuses(s)["old"] != StatusDone {

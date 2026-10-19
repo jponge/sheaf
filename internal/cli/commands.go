@@ -321,7 +321,14 @@ func newRemoveCmd(d Deps) *cobra.Command {
 			}
 			msg, err := ops.Remove(c.Context(), w, name, ops.RemoveOptions{Force: force, Offline: offline, Confirm: confirm, WorkingDir: wd, Interactive: d.singleRepoInteractiveGit(c)}, emit)
 			if errors.Is(err, ops.ErrNotConfirmed) {
-				return fmt.Errorf("removing %s needs confirmation: pass --yes (sheaf never prompts in CLI mode)", name)
+				args := []string{"remove"}
+				if force {
+					args = append(args, "--force")
+				}
+				if offline {
+					args = append(args, "--offline")
+				}
+				return fmt.Errorf("removing %s needs confirmation (sheaf never prompts in CLI mode); run: %s", name, ops.CommandLine(append(args, "--yes", "--", name)...))
 			}
 			if err != nil {
 				return err

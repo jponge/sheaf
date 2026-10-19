@@ -203,7 +203,7 @@ func TestAddUnreachableForkFailsCleanly(t *testing.T) {
 	if err != nil || s.Count(StatusFailed) != 1 {
 		t.Fatalf("%+v, %v", s, err)
 	}
-	if !strings.Contains(s.Results[0].Err.Error(), "--no-fork") {
+	if !strings.HasSuffix(s.Results[0].Err.Error(), "; to clone up/x without your fork, run: sheaf add --no-fork -- up/x") {
 		t.Fatalf("error should hint at --no-fork: %v", s.Results[0].Err)
 	}
 	if exists(filepath.Join(f.w.Root, "x")) || len(f.onDisk(t).Repositories) != 0 {

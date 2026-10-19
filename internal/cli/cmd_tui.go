@@ -298,7 +298,7 @@ func tuiPrune(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.PruneOptions,
 	}
 	out := d.leveled(c, c.OutOrStdout())
 	defer flush(out)
-	printPrune(out, plan, results, false)
+	printPrune(out, plan, results, false, "")
 	return pruneErr(s.ctx, plan, results)
 }
 
