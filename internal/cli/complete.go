@@ -74,6 +74,7 @@ func installCompletionsReport(root *cobra.Command, d Deps) []string {
 		return nil
 	}))
 	argsOf([]string{"remove"}, k.positional(k.repoOnly))
+	argsOf([]string{"browse"}, k.positional(k.repoOnly))
 	argsOf([]string{"worktree", "list"}, k.positional(k.repoOnly))
 	argsOf([]string{"worktree", "add"}, k.positional(func(c *cobra.Command, args []string) []string {
 		if c.Flags().Changed("tag") { // the only positional argument is the repository

@@ -36,12 +36,16 @@ type Fake struct {
 	// context after recording the call and before returning (outside the
 	// Fake's lock), e.g. to hold concurrent calls or cancel the context.
 	DefaultRepoHook func(ctx context.Context)
+	// BrowseErr, when set, is returned by Browse (the call is recorded
+	// anyway).
+	BrowseErr error
 
 	mu        sync.Mutex
 	forks     []hosting.Fork
 	forkCalls int
 
 	defaultCalls []DefaultRepoCall
+	browseCalls  []BrowseCall
 
 	owners map[string][]hosting.Repo
 	prs    map[string]hosting.PR
@@ -219,4 +223,31 @@ func (f *Fake) SetDefaultRepo(ctx context.Context, dir, owner, name string) erro
 		hook(ctx)
 	}
 	return err
+}
+
+// BrowseCall is a Browse call recorded by the Fake: "owner/name" as passed
+// and the page.
+type BrowseCall struct {
+	Slug string
+	Page hosting.Page
+}
+
+// BrowseCalls returns the valid Browse calls so far, in call order (failed
+// ones included).
+func (f *Fake) BrowseCalls() []BrowseCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]BrowseCall(nil), f.browseCalls...)
+}
+
+// Browse validates its input like the gh adapter, records the call and
+// returns BrowseErr; nothing is opened. It is safe for concurrent use.
+func (f *Fake) Browse(_ context.Context, owner, name string, page hosting.Page) error {
+	if err := hosting.ValidatePage(owner, name, page); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.browseCalls = append(f.browseCalls, BrowseCall{Slug: owner + "/" + name, Page: page})
+	return f.BrowseErr
 }

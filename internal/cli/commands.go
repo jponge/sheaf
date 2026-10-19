@@ -13,8 +13,8 @@ import (
 
 // Commands with menus, confirmations or long-running work run their TUI
 // variant (cmd_tui.go) when Deps.tuiMode says so; the others are always
-// plain: status, path, wt list/add/pr, version, completion, shell-init,
-// doctor, run (which streams the commands' output), create.
+// plain: status, path, wt list/add/pr, browse, version, completion,
+// shell-init, doctor, run (which streams the commands' output), create.
 
 func addBundleCommands(root *cobra.Command, d Deps) {
 	root.AddCommand(newCreateCmd(d), newInitCmd(d), newAddCmd(d), newAdoptCmd(d), newRemoveCmd(d))
@@ -23,6 +23,7 @@ func addBundleCommands(root *cobra.Command, d Deps) {
 	addSyncCommands(root, d)
 	addShellCommands(root)
 	addMaintenanceCommands(root, d)
+	addBrowseCommands(root, d)
 }
 
 // absFrom resolves p against the injectable working directory.

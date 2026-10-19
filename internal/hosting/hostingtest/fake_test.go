@@ -211,3 +211,24 @@ func TestFakeSetDefaultRepoRecordsCalls(t *testing.T) {
 		t.Fatalf("calls = %+v\nwant    %+v", got, want)
 	}
 }
+
+func TestFakeBrowseRecordsCalls(t *testing.T) {
+	t.Parallel()
+	f := NewFake()
+	ctx := context.Background()
+	if err := f.Browse(ctx, "o", "x", hosting.Page{PR: 3}); err != nil {
+		t.Fatal(err)
+	}
+	boom := errors.New("boom")
+	f.BrowseErr = boom
+	if err := f.Browse(ctx, "o", "y", hosting.Page{Branch: "feat"}); !errors.Is(err, boom) {
+		t.Fatalf("err = %v", err)
+	}
+	if err := f.Browse(ctx, "o", "z", hosting.Page{Branch: "-x"}); !errors.Is(err, hosting.ErrInvalidInput) {
+		t.Fatalf("invalid branch: err = %v", err)
+	}
+	want := []BrowseCall{{Slug: "o/x", Page: hosting.Page{PR: 3}}, {Slug: "o/y", Page: hosting.Page{Branch: "feat"}}}
+	if got := f.BrowseCalls(); !slices.Equal(got, want) {
+		t.Fatalf("calls = %+v\nwant    %+v", got, want)
+	}
+}

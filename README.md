@@ -265,6 +265,7 @@ lines that still do not fit are cut at the right.
 | f | fetch the repositories of the selected rows (or the current row) |
 | w | add a worktree to the current row's repository: a prompt asks for a branch (an existing local or remote one, else a new branch from the default branch, as `wt add`), tab switches to a tag |
 | # | check out a pull request of the current row's repository (GitHub only): a prompt asks for its number (`#123` also accepted), then `wt pr` runs |
+| b | open the current row on GitHub, as `sheaf browse` run in its directory (its pull request, else the repository's home page); the outcome is the overview's message (`browse: opened o/r`, `browse failed: ...`), without a report view |
 | r | remove the selected worktrees (or the current one); not the primary |
 | p, d, s | `prune`, `doctor`, `sync` on the whole bundle |
 | q, esc | quit with status 0 (esc first clears an applied filter) |
@@ -276,7 +277,8 @@ on a clear screen. Actions run with the TUI of the corresponding command
 What the action prints (the report of `doctor`, summaries, notes, warnings,
 errors) appears there as it runs, as for the command alone, and stays there
 as a log you see after quitting or after an interruption. It is then shown
-again in a report view on the alternate screen, titled
+again (except for `b`, whose outcome fits in the overview's message) in a
+report view on the alternate screen, titled
 `sheaf <action>: <bundle>`, whether the action succeeded, failed or changed
 nothing: up/down (k/j), pgup/pgdown and home/end scroll it, any other key
 returns to the overview, ctrl+c exits with 130. An action cancelled in its
@@ -462,6 +464,19 @@ repository's primary checkout, or a worktree (also by tag). Inside a
 checkout, one argument names a worktree of that repository if there is one,
 else a repository; `--repo`, `--dir`, `--branch` disambiguate.
 
+**`sheaf browse [<repo>]`**: open a page of a GitHub repository in the web
+browser with gh (installed and logged in): without argument, the repository
+of the checkout containing the working directory, else the named repository
+(its primary checkout). For a clone of your fork the page is on the
+repository (`upstream`), `--fork` opens your fork (`origin`). In a worktree
+of a pull request from a fork checked out by `wt pr` (branch `pr/<number>`,
+tracking `refs/pull/<number>/head`), the pull request opens, else the
+repository's home page; a pull request checked out from a branch of the
+repository is an ordinary branch and opens the home page. `--branch` opens
+the tree of the checkout's branch (named as locally). gh runs `gh repo view
+<slug> --web`, `gh pr view <number> --repo <slug> --web` or `gh browse
+--repo <slug> --branch <branch>`. Repositories of other hosts are refused.
+
 ### Maintenance
 
 **`sheaf prune`**: fetch (unless `--offline`), then find the linked worktrees
@@ -603,7 +618,8 @@ every TUI choice has a flag equivalent, progress goes to standard error,
 results to standard output. Commands with TUI variants: bare `sheaf`,
 `init`, `add`, `adopt`, `remove`, `fetch`, `update`, `wt rm`, `prune`,
 `sync`. The others have no TUI (`status`, `path`, `wt list`, `wt add`,
-`wt pr`, `run`, `doctor`, `create`, `version`, `completion`, `shell-init`);
+`wt pr`, `browse`, `run`, `doctor`, `create`, `version`, `completion`,
+`shell-init`);
 `status` and `doctor` still colour their output outside plain mode (see
 below).
 

@@ -53,7 +53,8 @@ func installHome(root *cobra.Command, d Deps) {
 // progress view) runs inline on the normal screen, where what the action
 // prints (summaries, notes, errors) also goes as it runs, so that it stays
 // there as a log (also on an interruption). That output is also captured
-// and, unless the action was cancelled without printing anything, shown in
+// and, unless the action was cancelled without printing anything or is
+// browse (whose outcome is the overview's message), shown in
 // a scrollable report view on the alternate screen until a key is pressed
 // (keys typed ahead are ignored, see tui.Report); the overview then comes
 // back. Enter on a checkout ends sheaf: the path of the checkout is
@@ -150,11 +151,13 @@ func (h *home) loop() error {
 		if err := h.s.ctx.Err(); err != nil {
 			return err // interrupted during the action: exit 130
 		}
-		if h.ran || h.output.Len() > 0 {
+		if (h.ran || h.output.Len() > 0) && name != "browse" {
 			// What the action printed, in a view until a key is pressed
 			// (ctrl+c interrupts, as in the action's dialogs; input
 			// ending returns to the overview); none after an action
-			// cancelled before printing anything.
+			// cancelled before printing anything, nor after browse,
+			// whose outcome (the page opened, or the error) fits in the
+			// message.
 			report := homeReport(name, h.root, h.output.String(), h.message)
 			if _, err := h.s.runModel(report); err != nil {
 				return err
@@ -345,12 +348,24 @@ func (h *home) actions() []tui.OverviewAction {
 		}
 		return ""
 	}
+	// browse resolves the repository from the checkout's directory (see
+	// act), which must be in its repository directory.
+	browsable := func(targets []string) string {
+		if why := onGitHub(targets); why != "" {
+			return why
+		}
+		if c := h.rows[targets[0]].checkout; c.Outside {
+			return "the worktree " + c.Path + " is outside its repository directory: use `sheaf browse " + c.Repo + "`"
+		}
+		return ""
+	}
 	return []tui.OverviewAction{
 		{Key: "enter", Name: "cd", Help: "cd", Scope: tui.ScopeCurrent, Check: noProblem},
 		{Key: "u", Name: "update", Help: "update", Scope: tui.ScopeRows, Check: noProblem},
 		{Key: "f", Name: "fetch", Help: "fetch", Scope: tui.ScopeRows},
 		{Key: "w", Name: "add", Help: "add worktree", Scope: tui.ScopeCurrent},
 		{Key: "#", Name: "pr", Help: "check out PR", Scope: tui.ScopeCurrent, Check: onGitHub},
+		{Key: "b", Name: "browse", Help: "browse", Scope: tui.ScopeCurrent, Check: browsable},
 		{Key: "r", Name: "remove", Help: "remove worktree", Scope: tui.ScopeRows, Check: removable},
 		{Key: "p", Name: "prune", Help: "prune", Scope: tui.ScopeNone},
 		{Key: "d", Name: "doctor", Help: "doctor", Scope: tui.ScopeNone},
@@ -410,6 +425,9 @@ func (h *home) act(name string, targets []string) string {
 		return h.add(repos[0])
 	case "pr":
 		return h.pr(repos[0])
+	case "browse":
+		// As browse run in the checkout's directory.
+		return h.outcome(name, []error{h.commandIn(h.rows[targets[0]].checkout.Path, "browse")})
 	case "remove":
 		var errs []error
 		for _, k := range targets {
@@ -470,15 +488,23 @@ func (h *home) pr(repo string) string {
 }
 
 // command runs `sheaf <args>` (global options of this run, the bundle of
-// the home screen) as a command line would, in this process and with its
+// the home screen) as a command line would (see commandIn).
+func (h *home) command(args ...string) error { return h.commandIn("", args...) }
+
+// commandIn runs `sheaf <args>` (global options of this run, the bundle of
+// the home screen) as a command line would, with dir as its working
+// directory when not empty, in this process and with its
 // context, so that interruptions are handled as usual. Its TUI renders on
 // the terminal; what it prints (standard output and error) goes to the
 // terminal as it runs, as for the command alone (so that it stays there,
 // e.g. after an interruption), and to h.output, for the report view. A
 // command whose user chose nothing (see Deps.cancelled) returns
 // errCancelled.
-func (h *home) command(args ...string) error {
+func (h *home) commandIn(dir string, args ...string) error {
 	d := h.d
+	if dir != "" {
+		d.Getwd = func() (string, error) { return dir, nil }
+	}
 	d.ctl = h.s.ctl // the home screen's controller, with its context
 	d.term = h.s.out
 	d.unchanged = func(note string) { h.unchanged = note }

@@ -407,3 +407,31 @@ func (g *GH) SetDefaultRepo(ctx context.Context, dir, owner, name string) error 
 	_, err := g.runIn(ctx, dir, "repo", "set-default", owner+"/"+name)
 	return err
 }
+
+// Browse runs `gh repo view <owner>/<name> --web` for the home page, `gh pr
+// view <n> --repo <owner>/<name> --web` for pull request n and `gh browse
+// --repo <owner>/<name> --branch <branch>` for the tree of a branch; gh
+// starts the browser. Owner, name and branch are validated first (see
+// ValidatePage).
+//
+// Read in gh's sources (pkg/cmd/repo/view/view.go, pkg/cmd/browse/browse.go,
+// v2.46.0 and v2.102.0): `repo view --web` queries the repository first
+// (an unknown one fails) and opens https://<host>/<owner>/<name>; with
+// --branch it would escape '/' in the branch as %2F (url.QueryEscape),
+// while `browse --branch` keeps it (tree/<branch>), hence browse for
+// branches.
+func (g *GH) Browse(ctx context.Context, owner, name string, page Page) error {
+	if err := ValidatePage(owner, name, page); err != nil {
+		return err
+	}
+	slug := owner + "/" + name
+	args := []string{"repo", "view", slug, "--web"}
+	switch {
+	case page.PR > 0:
+		args = []string{"pr", "view", strconv.Itoa(page.PR), "--repo", slug, "--web"}
+	case page.Branch != "":
+		args = []string{"browse", "--repo", slug, "--branch", page.Branch}
+	}
+	_, err := g.run(ctx, args...)
+	return err
+}

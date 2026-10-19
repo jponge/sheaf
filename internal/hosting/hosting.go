@@ -121,4 +121,32 @@ type Hosting interface {
 	// repository `gh pr list` uses there. It changes local configuration
 	// only (the checkout's), nothing on the service.
 	SetDefaultRepo(ctx context.Context, dir, owner, name string) error
+	// Browse opens page of owner/name in the web browser, through the
+	// service's CLI.
+	Browse(ctx context.Context, owner, name string, page Page) error
+}
+
+// Page is a web page of a repository (see Hosting.Browse): pull request PR
+// when it is positive, else the tree of Branch when it is not empty, else
+// the home page of the repository.
+type Page struct {
+	PR     int
+	Branch string
+}
+
+// ValidatePage validates owner and name like ValidateRepo, then page: a
+// pull request number that is not negative, and a branch that does not
+// begin with '-' (it would be read as an option) and has no whitespace or
+// control characters.
+func ValidatePage(owner, name string, page Page) error {
+	if err := ValidateRepo(owner, name); err != nil {
+		return err
+	}
+	if page.PR < 0 {
+		return fmt.Errorf("%w: pull request number %d must not be negative", ErrInvalidInput, page.PR)
+	}
+	if strings.HasPrefix(page.Branch, "-") || strings.ContainsFunc(page.Branch, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+		return fmt.Errorf("%w: branch %q", ErrInvalidInput, page.Branch)
+	}
+	return nil
 }
