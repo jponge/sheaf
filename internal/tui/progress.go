@@ -107,7 +107,8 @@ type progressRow struct {
 // running, then a final marker (✓ done, - skipped or cancelled, ✗ failed,
 // ! interrupted) and a short message. The header shows the counts and the
 // elapsed time, then, once the rows are planned (PlannedMsg), a progress
-// bar.
+// bar, and a "ctrl+c cancel" hint (see WithInterrupt): other keys (e.g. q
+// and esc) do nothing, questions aside.
 //
 // ctrl+c does not quit: each press runs the interrupt function given to
 // WithInterrupt in a command (outside the event loop), and the view tells
@@ -453,15 +454,20 @@ func (m Progress) ratio() (float64, bool) {
 
 // headerLine returns the header followed, while running with planned rows,
 // by a progress bar of the ratio, in the room left on the line (at most
-// barMax columns); the bar is dropped when less than barMin are left. It
+// barMax columns), then by the cancel hint (see cancelHint); the bar is
+// dropped when less than barMin are left. It
 // is a gradient with 256 colors or more, else solid (full blocks). When
 // the header itself is wider than the terminal, there is no bar, and its
-// aside counts are dropped, then its other counts: the title and the
-// elapsed time stay (the title is cut last, see truncate).
+// hint is dropped, then its aside counts, then its other counts: the title
+// and the elapsed time stay (the title is cut last, see truncate).
 func (m Progress) headerLine() string {
 	h := m.header(true, true)
-	if m.width > 0 && lipgloss.Width(h) > m.width {
-		// The bar went first.
+	hint := m.cancelHint()
+	if m.width > 0 && lipgloss.Width(h+hint) > m.width {
+		// The bar went first, then the hint.
+		if lipgloss.Width(h) <= m.width {
+			return h
+		}
 		if h = m.header(false, true); lipgloss.Width(h) > m.width {
 			h = m.header(false, false)
 		}
@@ -469,16 +475,27 @@ func (m Progress) headerLine() string {
 	}
 	r, ok := m.ratio()
 	if !ok || m.finished {
-		return h
+		return h + hint
 	}
 	w := barMax
 	if m.width > 0 {
-		w = min(w, m.width-lipgloss.Width(h)-2)
+		w = min(w, m.width-lipgloss.Width(h+hint)-2)
 	}
 	if w < barMin {
-		return h
+		return h + hint
 	}
-	return h + "  " + m.bar(w, r)
+	return h + "  " + m.bar(w, r) + hint
+}
+
+// cancelHint returns the faint "ctrl+c cancel" ending the header while the
+// work runs and ctrl+c cancels it (an interrupt function, see
+// WithInterrupt, and no interruption yet: the interruption note then
+// tells what ctrl+c does), preceded by its separator; "" otherwise.
+func (m Progress) cancelHint() string {
+	if m.interrupt == nil || m.interrupts > 0 || m.finished {
+		return ""
+	}
+	return "  " + m.styles.Status.Render("ctrl+c cancel")
 }
 
 // Colors of the progress bar of the header: those of bubbles' progress bar

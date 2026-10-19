@@ -478,6 +478,74 @@ func TestProgressHeaderDropOrder(t *testing.T) {
 	}
 }
 
+// With an interrupt function (WithInterrupt), the running header ends with
+// a faint "ctrl+c cancel" (B52 D3: q and esc do nothing in a progress
+// view), after the bar. On a narrow terminal it is dropped right after the
+// bar, before the counts (see TestProgressHeaderDropOrder). It is not shown
+// without an interrupt function, once interrupted (the interruption note
+// tells what ctrl+c does then) nor in the final view.
+func TestProgressHeaderCancelHint(t *testing.T) {
+	t.Parallel()
+	const hint = "  ctrl+c cancel"
+	full := "Updating · fetch 1/1 · 1 running, 1 done, 1 skipped, 1 failed · 0s"
+	noAside := "Updating · 1 running, 1 done, 1 skipped, 1 failed · 0s"
+	short := "Updating · 0s"
+	build := func(width int, interrupt bool, msgs ...tea.Msg) tea.Model {
+		p, _ := newTestProgress("Updating")
+		p = p.WithAside("fetch")
+		if interrupt {
+			p = p.WithInterrupt(func() {})
+		}
+		m, _ := feed(p, append([]tea.Msg{AsidePlannedMsg{Units: 1}, PlannedMsg{Units: 4},
+			RowUpdate{Key: "a", Label: "alpha", State: RowRunning},
+			RowUpdate{Key: "b", Label: "beta", State: RowDone},
+			RowUpdate{Key: "c", Label: "gamma", State: RowSkipped},
+			RowUpdate{Key: "d", Label: "delta", State: RowFailed},
+			RowUpdate{Key: "e", Label: "e (fetch)", State: RowDone, Aside: true},
+			tea.WindowSizeMsg{Width: width, Height: 20}}, msgs...)...)
+		return m
+	}
+	header := func(m tea.Model) string { return strings.Split(view(m), "\n")[0] }
+	wide := build(lipgloss.Width(full)+2+barMax+len(hint), true)
+	if h := header(wide); !strings.HasPrefix(h, full+"  ") || !strings.HasSuffix(h, " 75%"+hint) || lipgloss.Width(barCells.FindString(h))+len("  75%") != barMax {
+		t.Errorf("header %q, want the status, a full bar, then the hint", h)
+	}
+	if raw := strings.Split(wide.View().Content, "\n")[0]; !strings.HasSuffix(raw, DefaultStyles().Status.Render(strings.TrimSpace(hint))) {
+		t.Errorf("hint not faint: %q", raw)
+	}
+	for _, c := range []struct {
+		width int
+		want  string // "" for a bar followed by the hint
+	}{
+		{lipgloss.Width(full) + 2 + barMin + len(hint), ""},
+		{lipgloss.Width(full) + 2 + barMin - 1 + len(hint), full + hint},
+		{lipgloss.Width(full) + len(hint), full + hint},
+		{lipgloss.Width(full) + len(hint) - 1, full},
+		{lipgloss.Width(full) - 1, noAside},
+		{lipgloss.Width(noAside) - 1, short},
+	} {
+		h := header(build(c.width, true))
+		if c.want == "" {
+			if !strings.HasPrefix(h, full+"  ") || !strings.HasSuffix(h, " 75%"+hint) {
+				t.Errorf("width %d: header %q, want a bar then the hint", c.width, h)
+			}
+			continue
+		}
+		if h != c.want {
+			t.Errorf("width %d: header %q, want %q", c.width, h, c.want)
+		}
+	}
+	for name, m := range map[string]tea.Model{
+		"no interrupt function": build(200, false),
+		"interrupted":           build(200, true, InterruptedMsg{Count: 1}),
+		"finished":              build(200, true, FinishMsg{}),
+	} {
+		if v := view(m); strings.Contains(v, "ctrl+c cancel") {
+			t.Errorf("%s: the hint is shown:\n%s", name, v)
+		}
+	}
+}
+
 // The bar is a gradient only with 256 colors or more; with fewer colors (and
 // under NO_COLOR, which limits the profile to ASCII) it is solid, of full
 // blocks.
