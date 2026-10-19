@@ -565,8 +565,10 @@ func TestProgressFinishAfterInterruption(t *testing.T) {
 
 // With WithAside, the header counts the aside rows apart, as "<phase>
 // <finished>/<total>" before the counts of the other rows (B52 B1): the
-// fetch of update or prune is not hidden behind "0 running". Without aside
-// rows, or without a name for them, the header is unchanged.
+// fetch of update or prune is not hidden behind "0 running". The total is
+// the planned one (AsidePlannedMsg), rows not created yet included; without
+// it, only the finished rows are counted ("<phase> <finished> done").
+// Without aside rows, or without a name for them, the header is unchanged.
 func TestProgressHeaderCountsAsideRows(t *testing.T) {
 	t.Parallel()
 	p, _ := newTestProgress("Updating")
@@ -578,8 +580,16 @@ func TestProgressHeaderCountsAsideRows(t *testing.T) {
 		RowUpdate{Key: "d/main", Label: "d/main", State: RowRunning},
 	}
 	m, _ := feed(p.WithAside("fetch"), rows...)
-	if h := strings.Split(view(m), "\n")[0]; !strings.HasPrefix(h, "Updating · fetch 2/4 · 1 running, 0 done, 0 skipped, 0 failed · ") {
+	if h := strings.Split(view(m), "\n")[0]; !strings.HasPrefix(h, "Updating · fetch 2 done · 1 running, 0 done, 0 skipped, 0 failed · ") {
 		t.Errorf("header = %q, want the aside rows counted apart", h)
+	}
+	m, _ = feed(p.WithAside("fetch"), append([]tea.Msg{AsidePlannedMsg{Units: 4}, AsidePlannedMsg{Units: 3}}, rows...)...)
+	if h := strings.Split(view(m), "\n")[0]; !strings.HasPrefix(h, "Updating · fetch 2/7 · 1 running, 0 done, 0 skipped, 0 failed · ") {
+		t.Errorf("header with 7 planned = %q, want the planned total", h)
+	}
+	m, _ = feed(p.WithAside("fetch"), AsidePlannedMsg{Units: 3})
+	if h := strings.Split(view(m), "\n")[0]; !strings.HasPrefix(h, "Updating · fetch 0/3 · 0 running, ") {
+		t.Errorf("header with 3 planned, none started = %q", h)
 	}
 	m, _ = feed(p, rows...)
 	if h := strings.Split(view(m), "\n")[0]; !strings.HasPrefix(h, "Updating · 1 running, 0 done, 0 skipped, 0 failed · ") {

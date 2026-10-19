@@ -73,6 +73,11 @@ type AskMsg struct {
 // planned ones. Until the first one, the total is unknown.
 type PlannedMsg struct{ Units int }
 
+// AsidePlannedMsg announces Units more aside rows to a Progress (see
+// ops.AsidePlanner): the header counts the finished ones over them (see
+// WithAside).
+type AsidePlannedMsg struct{ Units int }
+
 // barMin and barMax bound the width of the progress bar of the header,
 // percentage included.
 const barMin, barMax = 12, 30
@@ -115,7 +120,8 @@ type Progress struct {
 
 	planned int // rows announced by PlannedMsg; 0: unknown
 
-	asideName string // see WithAside
+	asideName    string // see WithAside
+	asidePlanned int    // aside rows announced by AsidePlannedMsg
 
 	now          func() time.Time
 	start, ended time.Time
@@ -171,9 +177,10 @@ func (m Progress) WithTerminalProgress() Progress {
 }
 
 // WithAside returns a copy of m whose header counts the aside rows apart,
-// as name (their phase) followed by the finished ones over all of them,
-// before the counts of the other rows: "fetch 2/5". The progress bars
-// still count the other rows only (see PlannedMsg).
+// as name (their phase) followed by the finished ones over the planned ones
+// (AsidePlannedMsg), before the counts of the other rows: "fetch 2/5";
+// "fetch 2 done" when none were planned. The progress bars still count the
+// other rows only (see PlannedMsg).
 func (m Progress) WithAside(name string) Progress {
 	m.asideName = name
 	return m
@@ -228,6 +235,8 @@ func (m Progress) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.profile = msg.Profile
 	case PlannedMsg:
 		m.planned += msg.Units
+	case AsidePlannedMsg:
+		m.asidePlanned += msg.Units
 	case InterruptedMsg:
 		m.interrupts = max(m.interrupts, msg.Count)
 	case spinner.TickMsg:
@@ -385,7 +394,7 @@ func (m Progress) header() string {
 
 // asideCounts returns the aside rows counted apart in the header, followed
 // by its separator: "fetch 2/5 · " (see WithAside); "" without a name for
-// them or without such rows.
+// them or without such rows, planned or not.
 func (m Progress) asideCounts() string {
 	finished, all := 0, 0
 	for _, r := range m.rows {
@@ -396,10 +405,13 @@ func (m Progress) asideCounts() string {
 			}
 		}
 	}
-	if m.asideName == "" || all == 0 {
+	switch {
+	case m.asideName == "" || all == 0 && m.asidePlanned <= 0:
 		return ""
+	case m.asidePlanned <= 0:
+		return fmt.Sprintf("%s %d done · ", sanitize(m.asideName), finished)
 	}
-	return fmt.Sprintf("%s %d/%d · ", sanitize(m.asideName), finished, all)
+	return fmt.Sprintf("%s %d/%d · ", sanitize(m.asideName), finished, max(all, m.asidePlanned))
 }
 
 // ratio returns the finished rows (aside rows excluded) over the planned

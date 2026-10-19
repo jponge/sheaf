@@ -126,10 +126,31 @@ func PlanPrune(ctx context.Context, w *Workspace, opts PruneOptions, rep Reporte
 		probs    []Problem
 		distrust forkDistrust
 	}
+	// The primaries are checked first: the repositories with a problem are
+	// not fetched, and the others' fetches are announced (see AsidePlanner).
+	type primaryCheck struct {
+		primary, common string
+		prob            *Problem
+	}
+	checks := make([]primaryCheck, len(repos))
+	forEach(opts.Jobs, len(repos), func(i int) {
+		c := &checks[i]
+		c.primary, c.common, c.prob = checkPrimary(ctx, w.Root, repos[i])
+	})
+	if !opts.Offline {
+		fetches := 0
+		for _, c := range checks {
+			if c.prob == nil {
+				fetches++
+			}
+		}
+		planAside(rep, fetches)
+	}
 	plans := make([]repoPlan, len(repos))
 	forEach(opts.Jobs, len(repos), func(i int) {
 		p := &plans[i]
-		p.cands, p.skips, p.probs, p.distrust = planPruneRepo(ctx, w.Root, repos[i], opts, report)
+		c := checks[i]
+		p.cands, p.skips, p.probs, p.distrust = planPruneRepo(ctx, w.Root, repos[i], c.primary, c.common, c.prob, opts, report)
 	})
 	out := PrunePlan{fetched: map[string]bool{}, distrust: map[string]forkDistrust{}}
 	for i, p := range plans {
@@ -146,9 +167,10 @@ func PlanPrune(ctx context.Context, w *Workspace, opts PruneOptions, rep Reporte
 	return out, nil
 }
 
-func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts PruneOptions, report func(Event)) ([]PruneCandidate, []PruneSkip, []Problem, forkDistrust) {
+// planPruneRepo plans the prune of r, whose primary checkout was checked
+// (see checkPrimary).
+func planPruneRepo(ctx context.Context, root string, r bundle.Repository, primary, common string, prob *Problem, opts PruneOptions, report func(Event)) ([]PruneCandidate, []PruneSkip, []Problem, forkDistrust) {
 	var distrust forkDistrust
-	primary, common, prob := checkPrimary(ctx, root, r)
 	if prob != nil {
 		return nil, nil, []Problem{*prob}, distrust
 	}

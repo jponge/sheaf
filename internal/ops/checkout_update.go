@@ -116,9 +116,11 @@ func (f *inflight) onCancel() {
 // a PhaseWaitFastForward event is reported for each. Closing opts.Force
 // kills those merges.
 //
-// Events: fetch start/done/failed per repository, and one KindDone,
-// KindSkipped or KindFailed PhaseUpdate event per checkout (Worktree set to
-// its directory name), announced to a Planner first. The error is only set
+// Events: fetch start/done/failed per repository (failed "not started"
+// without start when cancelled before), announced to an AsidePlanner
+// first, and one KindDone, KindSkipped or KindFailed PhaseUpdate event per
+// checkout (Worktree set to its directory name), announced to a Planner
+// first. The error is only set
 // for an invalid filter.
 func Update(ctx context.Context, w *Workspace, opts UpdateOptions, rep Reporter) (UpdateReport, error) {
 	ctx = withCommandCache(ctx)
@@ -131,6 +133,7 @@ func Update(ctx context.Context, w *Workspace, opts UpdateOptions, rep Reporter)
 		units += len(s.checkouts)
 	}
 	plan(rep, units)
+	planAside(rep, len(sets))
 	report := serialize(rep)
 	fl := &inflight{running: map[Checkout]bool{}, report: report}
 	stop := context.AfterFunc(ctx, fl.onCancel)
@@ -190,6 +193,8 @@ func updateRepo(ctx context.Context, s *repoCheckouts, opts UpdateOptions, repor
 		return true
 	}
 	if err := ctx.Err(); err != nil {
+		// The fetch announced to an AsidePlanner ends too.
+		report(Event{Repo: s.name, Phase: PhaseFetch, Kind: KindFailed, Message: "not started", Err: err})
 		for _, c := range s.checkouts {
 			if !pinned(c) {
 				emit(notStarted(c, err))

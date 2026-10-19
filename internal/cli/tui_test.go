@@ -281,6 +281,30 @@ func TestTUIProgressPlansRows(t *testing.T) {
 	}
 }
 
+// The reporter of a progress view is an ops.AsidePlanner: the header counts
+// the aside rows over the planned ones, those not started yet included (B52
+// U2 review: "fetch 0/1" while 4 fetches were pending at -j 1).
+func TestTUIProgressPlansAsideRows(t *testing.T) {
+	t.Parallel()
+	var out syncBuffer
+	s := &tuiSession{ctx: context.Background(), ctl: newInterruptCtl(), out: &out, errw: io.Discard}
+	planned := false
+	s.progress("Updating", progressOpts{Aside: ops.PhaseFetch}, func(_ context.Context, rep ops.Reporter, _ askFunc) {
+		p, ok := rep.(ops.AsidePlanner)
+		if planned = ok; !ok {
+			return
+		}
+		p.PlanAside(4)
+		rep.Report(ops.Event{Repo: "alpha", Phase: ops.PhaseFetch, Kind: ops.KindStart})
+		waitScreen(t, &out, "Updating · fetch 0/4 · ")()
+		rep.Report(ops.Event{Repo: "alpha", Phase: ops.PhaseFetch, Kind: ops.KindDone})
+		waitScreen(t, &out, "Updating · fetch 1/4 · ")()
+	})
+	if !planned {
+		t.Error("the reporter is not an ops.AsidePlanner")
+	}
+}
+
 // A progress view on an output that is not a terminal (a TUI forced on)
 // never drives the terminal's progress indicator (OSC 9;4).
 func TestTUIProgressOnNonTerminalLeavesTerminalProgressAlone(t *testing.T) {

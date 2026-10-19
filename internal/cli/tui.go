@@ -364,7 +364,7 @@ func (s *tuiSession) progress(title string, o progressOpts, work func(ctx contex
 						u.Key, u.Label = o.Single, o.Single
 					}
 					p.Send(u)
-				case tui.AskMsg, tui.TitleMsg, tui.PlannedMsg:
+				case tui.AskMsg, tui.TitleMsg, tui.PlannedMsg, tui.AsidePlannedMsg:
 					p.Send(v)
 				}
 			}
@@ -401,7 +401,7 @@ func (s *tuiSession) progress(title string, o progressOpts, work func(ctx contex
 }
 
 // queueReporter is the reporter of progress: events and announced units of
-// work (tui.PlannedMsg) go to q; with single, the units are ignored (the
+// work (tui.PlannedMsg, tui.AsidePlannedMsg) go to q; with single, the units are ignored (the
 // one row is all the work).
 type queueReporter struct {
 	q      *msgQueue
@@ -415,6 +415,9 @@ func (r queueReporter) Plan(units int) {
 		r.q.push(tui.PlannedMsg{Units: units})
 	}
 }
+
+// PlanAside announces the aside rows (see ops.AsidePlanner).
+func (r queueReporter) PlanAside(units int) { r.q.push(tui.AsidePlannedMsg{Units: units}) }
 
 // msgQueue is an unbounded FIFO between the goroutines of progress.
 type msgQueue struct {

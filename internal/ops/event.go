@@ -80,6 +80,22 @@ func plan(rep Reporter, units int) {
 	}
 }
 
+// AsidePlanner is implemented by Reporters that want to know how much
+// preliminary work is coming, counted apart from the units of Planner: the
+// fetches (PhaseFetch, one start and one final event each) preceding the
+// fast-forwards of Update and the plan of PlanPrune. PlanAside announces
+// units more of them before the first one starts; it is called as Plan is.
+type AsidePlanner interface {
+	PlanAside(units int)
+}
+
+// planAside announces units of aside work to rep if it is an AsidePlanner.
+func planAside(rep Reporter, units int) {
+	if p, ok := rep.(AsidePlanner); ok {
+		p.PlanAside(units)
+	}
+}
+
 // ReporterFunc adapts a function to Reporter.
 type ReporterFunc func(Event)
 
