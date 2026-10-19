@@ -409,12 +409,12 @@ type WorktreeAddResult struct {
 
 // noFetchCommand returns the command line of wt add for branch of repo
 // with opts and --no-fetch (see CommandLine).
-func noFetchCommand(repo, branch string, opts WorktreeAddOptions) string {
+func noFetchCommand(ctx context.Context, repo, branch string, opts WorktreeAddOptions) string {
 	args := []string{"wt", "add", "--no-fetch"}
 	if opts.Base != "" {
 		args = append(args, "--base", opts.Base)
 	}
-	return CommandLine(append(args, "--", repo, branch)...)
+	return CommandLine(ctx, append(args, "--", repo, branch)...)
 }
 
 // AddWorktree creates a worktree for branch at
@@ -477,7 +477,7 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 			if ctx.Err() != nil {
 				return WorktreeAddResult{}, ctx.Err()
 			}
-			return WorktreeAddResult{}, fmt.Errorf("fetching %s failed: %w\nto create the worktree from the local state of the repository, run: %s", r.Name, err, noFetchCommand(r.Name, branch, opts))
+			return WorktreeAddResult{}, fmt.Errorf("fetching %s failed: %w\nto create the worktree from the local state of the repository, run: %s", r.Name, err, noFetchCommand(ctx, r.Name, branch, opts))
 		}
 		// A new branch would be created: fetch origin's tags too (safely, see
 		// gitx.FetchTagsFrom), so that checkNotOnlyATag also sees tags that git's
@@ -491,7 +491,7 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 				if ctx.Err() != nil {
 					return WorktreeAddResult{}, ctx.Err()
 				}
-				return WorktreeAddResult{}, fmt.Errorf("fetching the tags of %s failed: %w\nto create the worktree from the local state of the repository, run: %s", r.Name, err, noFetchCommand(r.Name, branch, opts))
+				return WorktreeAddResult{}, fmt.Errorf("fetching the tags of %s failed: %w\nto create the worktree from the local state of the repository, run: %s", r.Name, err, noFetchCommand(ctx, r.Name, branch, opts))
 			}
 		}
 	}
@@ -790,6 +790,7 @@ type WorktreeRefusedError struct {
 	// DeleteBranch and Offline are the other options of the refused
 	// removal, repeated in the command of the hint (see Error).
 	DeleteBranch, Offline bool
+	bundle                string // of hints (see WithHintBundle)
 }
 
 func (e *WorktreeRefusedError) Error() string {
@@ -815,8 +816,9 @@ func (e *WorktreeRefusedError) Error() string {
 		}
 	}
 	// No command for a worktree outside the repository directory: --dir
-	// could select another worktree of the same directory name.
-	if (blocking || unmerged) && !e.Plan.Worktree.Outside {
+	// could select another worktree of the same directory name; nor with
+	// hard problems, which --force does not override.
+	if (blocking || unmerged) && !e.Plan.Worktree.Outside && len(e.Plan.Hard) == 0 {
 		sb.WriteString("\nto remove anyway (what is listed above will be lost), run: " + e.command(blocking, unmerged, false))
 	}
 	return sb.String()
@@ -839,7 +841,7 @@ func (e *WorktreeRefusedError) command(force, forceDelete, offline bool) string 
 	if offline || e.Offline {
 		args = append(args, "--offline")
 	}
-	return CommandLine(append(args, "--dir", e.Plan.Worktree.Dir, "--", e.Plan.Repo)...)
+	return commandLineIn(e.bundle, append(args, "--dir", e.Plan.Worktree.Dir, "--", e.Plan.Repo)...)
 }
 
 // RemoveWorktree removes the linked worktree of repo named by target (its
@@ -886,7 +888,7 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 		return "", err
 	}
 	if wt.Primary {
-		return "", fmt.Errorf("%s (%s) is the primary checkout of %s and cannot be removed as a worktree; to remove the repository, run: %s", describe(wt), wt.Path, r.Name, CommandLine("remove", "--", r.Name))
+		return "", fmt.Errorf("%s (%s) is the primary checkout of %s and cannot be removed as a worktree; to remove the repository, run: %s", describe(wt), wt.Path, r.Name, CommandLine(ctx, "remove", "--", r.Name))
 	}
 	deleteBr := opts.DeleteBranch || opts.ForceDeleteBranch
 	if deleteBr && wt.Tag != "" {
@@ -955,7 +957,7 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 	}
 	if plan.Refused(opts) {
 		return "", &WorktreeRefusedError{Plan: plan, Force: opts.Force, ForceDeleteBranch: opts.ForceDeleteBranch,
-			DeleteBranch: opts.DeleteBranch, Offline: opts.Offline}
+			DeleteBranch: opts.DeleteBranch, Offline: opts.Offline, bundle: hintBundle(ctx)}
 	}
 	if opts.Confirm == nil || !opts.Confirm(plan) {
 		return "", fmt.Errorf("%w: worktree %s", ErrNotConfirmed, wt.Path)

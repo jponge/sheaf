@@ -328,7 +328,7 @@ func newRemoveCmd(d Deps) *cobra.Command {
 				if offline {
 					args = append(args, "--offline")
 				}
-				return fmt.Errorf("removing %s needs confirmation (sheaf never prompts in CLI mode); run: %s", name, ops.CommandLine(append(args, "--yes", "--", name)...))
+				return fmt.Errorf("removing %s needs confirmation (sheaf never prompts in CLI mode); run: %s", name, ops.CommandLine(c.Context(), append(args, "--yes", "--", name)...))
 			}
 			if err != nil {
 				return err

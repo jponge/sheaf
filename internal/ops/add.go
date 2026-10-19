@@ -222,14 +222,14 @@ func selectFromOrg(ctx context.Context, h hosting.Hosting, req AddRequest) ([]ho
 					return nil, "", err
 				}
 				if got.Archived && !req.IncludeArchived {
-					return nil, "", fmt.Errorf("repository %s is archived; to add it, run: %s", got.Slug(), includeArchivedCommand(req, name))
+					return nil, "", fmt.Errorf("repository %s is archived; to add it, run: %s", got.Slug(), includeArchivedCommand(ctx, req, name))
 				}
 				r, ok = got, true
 			}
 		}
 		if !ok {
 			if a, ok := findRepo(listed, name); ok && a.Archived {
-				return nil, "", fmt.Errorf("repository %s is archived; to add it, run: %s", a.Slug(), includeArchivedCommand(req, name))
+				return nil, "", fmt.Errorf("repository %s is archived; to add it, run: %s", a.Slug(), includeArchivedCommand(ctx, req, name))
 			}
 			return nil, "", fmt.Errorf("%s has no repository %q: %w", org, name, hosting.ErrNotFound)
 		}
@@ -306,7 +306,7 @@ func planClones(w *Workspace, net gitx.Net, specs []lookup, as, origin, source s
 			entry.Fork = bundle.Fork{Slug: fk.Slug(), URL: fk.CloneURL}
 		}
 		tasks = append(tasks, Task{Repo: name, Phase: PhaseClone, Run: func(ctx context.Context, emit func(Event)) (string, error) {
-			return cloneRepo(ctx, w, net, entry, branchDir, source, gd, emit)
+			return cloneRepo(ctx, w, net, entry, branchDir, source, r.Archived, gd, emit)
 		}})
 	}
 	return tasks
@@ -360,7 +360,7 @@ func looksLikeGitHubAlias(host string) bool {
 
 // includeArchivedCommand returns the command line adding the archived
 // repository name of req's organization (see CommandLine).
-func includeArchivedCommand(req AddRequest, name string) string {
+func includeArchivedCommand(ctx context.Context, req AddRequest, name string) string {
 	args := []string{"add", "--org", req.Org, "--include-archived"}
 	if req.NoFork {
 		args = append(args, "--no-fork")
@@ -368,31 +368,35 @@ func includeArchivedCommand(req AddRequest, name string) string {
 	if req.As != "" {
 		args = append(args, "--as", req.As)
 	}
-	return CommandLine(append(args, "--repo", name)...)
+	return CommandLine(ctx, append(args, "--repo", name)...)
 }
 
 // noForkCommand returns the command line adding entry without its fork,
-// from the organization source if not empty (see CommandLine).
-func noForkCommand(entry bundle.Repository, source string) string {
+// from the organization source if not empty, archived or not (see
+// CommandLine).
+func noForkCommand(ctx context.Context, entry bundle.Repository, source string, archived bool) string {
 	name := entry.Slug[strings.LastIndex(entry.Slug, "/")+1:]
 	args := []string{"add"}
 	if source != "" {
 		args = append(args, "--org", source)
+		if archived {
+			args = append(args, "--include-archived")
+		}
 	}
 	args = append(args, "--no-fork")
 	if entry.Name != name {
 		args = append(args, "--as", entry.Name)
 	}
 	if source != "" {
-		return CommandLine(append(args, "--repo", name)...)
+		return CommandLine(ctx, append(args, "--repo", name)...)
 	}
-	return CommandLine(append(args, "--", entry.Slug)...)
+	return CommandLine(ctx, append(args, "--", entry.Slug)...)
 }
 
 // cloneRepo creates <root>/<name> (which must not exist), clones into it and
 // records the entry, then sets the gh default repository through gd. On any
 // failure of the clone or the record the repository directory is removed.
-func cloneRepo(ctx context.Context, w *Workspace, net gitx.Net, entry bundle.Repository, branchDir, source string, gd *ghDefaults, emit func(Event)) (string, error) {
+func cloneRepo(ctx context.Context, w *Workspace, net gitx.Net, entry bundle.Repository, branchDir, source string, archived bool, gd *ghDefaults, emit func(Event)) (string, error) {
 	repoDir := bundle.RepoDir(w.Root, entry.Name)
 	if err := os.Mkdir(repoDir, 0o755); err != nil {
 		if errors.Is(err, fs.ErrExist) {
@@ -406,7 +410,7 @@ func cloneRepo(ctx context.Context, w *Workspace, net gitx.Net, entry bundle.Rep
 		emit(Event{Message: fmt.Sprintf("using your fork %s as origin and %s as upstream", entry.Fork.Slug, entry.Slug)})
 		emit(Event{Message: "cloning " + entry.URL + " (upstream) and " + entry.Fork.URL + " (origin) into " + dest})
 		if err = net.CloneFork(ctx, entry.URL, entry.Fork.URL, dest, entry.DefaultBranch); err != nil && ctx.Err() == nil {
-			err = fmt.Errorf("%w; to clone %s without your fork, run: %s", err, entry.Slug, noForkCommand(entry, source))
+			err = fmt.Errorf("%w; to clone %s without your fork, run: %s", err, entry.Slug, noForkCommand(ctx, entry, source, archived))
 		}
 	} else {
 		emit(Event{Message: "cloning " + entry.URL + " into " + dest})

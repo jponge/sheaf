@@ -332,7 +332,7 @@ func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noF
 	out := d.leveled(c, c.OutOrStdout())
 	defer flush(out)
 	if len(rep.Proposals) == 0 {
-		syWriteProposals(out, rep, false)
+		syWriteProposals(c.Context(), out, rep, nil, false)
 		d.reportUnchanged("nothing to sync")
 		return rep.Err()
 	}

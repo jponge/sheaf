@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"runtime/debug"
 
 	"github.com/spf13/cobra"
+
+	"github.com/jponge/sheaf/internal/ops"
 )
 
 // Version is the sheaf version; override with
@@ -52,6 +55,7 @@ prune, doctor, sync). Without a terminal or with --no-tui, it prints this help.`
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(c *cobra.Command, _ []string) error {
+			c.SetContext(hintContext(c, d))
 			if !c.HasParent() {
 				return nil // bare sheaf: runHome checks --jobs only when it opens the home screen
 			}
@@ -104,6 +108,29 @@ func newVersionCmd() *cobra.Command {
 			fmt.Fprintln(c.OutOrStdout(), versionString(Version, bi))
 		},
 	}
+}
+
+// hintContext returns the context of c with the bundle that hints name
+// (see ops.WithHintBundle): the bundle given with --bundle (d.hintBundle
+// when set), resolved like the commands do; none without --bundle.
+func hintContext(c *cobra.Command, d Deps) context.Context {
+	ctx := c.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	b := OptionsFrom(c).Bundle
+	if d.hintBundle != nil {
+		b = *d.hintBundle
+	}
+	if b == "" {
+		return ctx
+	}
+	if wd, err := d.getwd(); err == nil {
+		if root, err := ops.FindBundle(b, wd); err == nil {
+			b = root
+		}
+	}
+	return ops.WithHintBundle(ctx, b)
 }
 
 // OptionsFrom reads the global options from a command's flags.

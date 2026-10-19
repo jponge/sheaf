@@ -19,7 +19,7 @@ type Item struct {
 	Key      string   // returned by SelectedKeys; should be unique
 	Label    string   // main text, matched by the filter
 	Detail   string   // secondary text, matched by the filter
-	Tags     []string // short markers shown before the label, e.g. "new", "fork"; the first one in a column
+	Tags     []string // short markers, e.g. "new", "fork": the first one in a column before the label, the others after it
 	Selected bool     // initial selection state
 	Disabled bool     // cannot be toggled; its Selected state is kept as given
 	Level    Level    // its tags and label are rendered in the style of this level (e.g. LevelWarn)
@@ -611,9 +611,10 @@ func (m MultiSelect) renderRow(row int) string {
 	default:
 		box = st.Unchecked.Render("[ ]")
 	}
-	// The tags go first, the first one padded to the column of the first
-	// tags, so that they stay visible when the row is cut; the tags and the
-	// label are in the style of the item's level, if any.
+	// The first tag goes first, padded to the column of the first tags,
+	// and the other tags after the label, so that the kind of the item and
+	// its label stay visible when the row is cut; the tags and the label
+	// are in the style of the item's level, if any.
 	tagStyle, labelStyle := st.Tag, lipgloss.NewStyle()
 	if it.Level != LevelNone {
 		tagStyle, labelStyle = st.Level(it.Level), st.Level(it.Level)
@@ -630,9 +631,6 @@ func (m MultiSelect) renderRow(row int) string {
 		}
 		parts = append(parts, first+pad)
 	}
-	for _, t := range it.Tags[min(1, len(it.Tags)):] {
-		parts = append(parts, style(tagStyle, "["+sanitize(t)+"]"))
-	}
 	label := sanitize(it.Label)
 	switch {
 	case current:
@@ -641,6 +639,9 @@ func (m MultiSelect) renderRow(row int) string {
 		label = style(labelStyle, label)
 	}
 	parts = append(parts, label)
+	for _, t := range it.Tags[min(1, len(it.Tags)):] {
+		parts = append(parts, style(tagStyle, "["+sanitize(t)+"]"))
+	}
 	if it.Detail != "" {
 		parts = append(parts, style(st.Detail, sanitize(it.Detail)))
 	}

@@ -729,6 +729,20 @@ func TestHomeRemoveWorktreeConfirmsAndRefusesPrimary(t *testing.T) {
 	}
 }
 
+// The hints of the actions do not name the bundle that the home screen
+// passes to them with --bundle (B52 U1 review): here r on feat, refused
+// for its untracked file.
+func TestHomeActionHintsDoNotNameThePassedBundle(t *testing.T) {
+	t.Parallel()
+	e, _, _, _, _ := homeBundle(t)
+	var out syncBuffer
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", "r"), keys(), reportKey(t, &out, "wt rm", "x"), ovKeys(t, &out, "wt rm failed", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 || !strings.Contains(out.String(), "run: sheaf wt rm --force --dir feat -- alpha") || strings.Contains(out.String(), "--bundle") {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+}
+
 func TestHomeRemoveDeclinedKeepsWorktree(t *testing.T) {
 	e, _, feat, _, _ := homeBundle(t)
 	if err := os.Remove(filepath.Join(feat, "new.txt")); err != nil {
@@ -798,7 +812,29 @@ func TestHomeRefusesEnterAndUpdateOnProblemRows(t *testing.T) {
 
 // problemRefusal is the refusal of an action on the problem row of
 // homeBundle's feat worktree once deleted.
-const problemRefusal = "alpha/feat: problem row, see `sheaf doctor`"
+const problemRefusal = "problem row, see `sheaf doctor`: alpha/feat"
+
+// u on a selection of problem rows only is refused with the reason first,
+// then the names of the rows (so that a cut message keeps the reason).
+func TestHomeRefusesSelectionOfProblemRowsReasonFirst(t *testing.T) {
+	t.Parallel()
+	e, alpha, feat, _, _ := homeBundle(t)
+	other := filepath.Join(filepath.Dir(alpha), "other")
+	testutil.Git(t, alpha, "worktree", "add", "-q", "-b", "other", other)
+	for _, p := range []string{feat, other} {
+		if err := os.RemoveAll(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out syncBuffer
+	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "j", " ", "j", " ", "u"),
+		key{keys: "q", wait: waitOutput(t, &out, "problem rows, see `sheaf doctor`: alpha/")}))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	o := out.String()
+	if code != 0 || strings.Contains(o, "Updating") || !strings.Contains(o, "alpha/feat") || !strings.Contains(o, "alpha/other") {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, o, errs)
+	}
+}
 
 // u on a selection with a problem row (here every row, selected with a)
 // updates the other rows and says the problem row was skipped, naming it

@@ -90,6 +90,7 @@ type RisksError struct {
 	// Offline is the option of the refused removal, repeated in the
 	// command of the hint (see Error).
 	Offline bool
+	bundle  string // of hints (see WithHintBundle)
 }
 
 func (e *RisksError) Error() string {
@@ -141,7 +142,7 @@ func (e *RisksError) command(flag string) string {
 	if flag == "--offline" || e.Offline {
 		args = append(args, "--offline")
 	}
-	return CommandLine(append(args, "--", e.Plan.Repo)...)
+	return commandLineIn(e.bundle, append(args, "--", e.Plan.Repo)...)
 }
 
 // Remove deletes the repository name from the bundle: its linked worktrees
@@ -262,7 +263,7 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 		if err := nameUnpushedBranches(ctx, &plan, published); err != nil {
 			return "", err
 		}
-		return "", &RisksError{Plan: plan, Force: opts.Force, Offline: opts.Offline}
+		return "", &RisksError{Plan: plan, Force: opts.Force, Offline: opts.Offline, bundle: hintBundle(ctx)}
 	}
 	if opts.Confirm == nil || !opts.Confirm(plan) {
 		return "", fmt.Errorf("%w: %s", ErrNotConfirmed, name)

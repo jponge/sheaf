@@ -219,7 +219,7 @@ func TestHomeBrowse(t *testing.T) {
 	testutil.Git(t, filepath.Join(root, "a", "main"), "worktree", "add", "-q", "-b", "elsewhere", outside)
 	from := len(e.fake.BrowseCalls())
 	for _, c := range []struct{ filter, refusal string }{
-		{"pr-7", "a/pr-7: problem row, see `sheaf doctor`"},
+		{"pr-7", "problem row, see `sheaf doctor`: a/pr-7"},
 		{"elsewhere", "worktree outside its repository directory; run: sheaf browse -- a"},
 	} {
 		out = syncBuffer{}

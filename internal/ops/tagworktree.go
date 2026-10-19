@@ -68,7 +68,7 @@ func AddTagWorktree(ctx context.Context, w *Workspace, repo, tag string, opts Wo
 				return WorktreeAddResult{}, ctx.Err()
 			}
 			return WorktreeAddResult{}, fmt.Errorf("fetching %s failed: %w\nto create the worktree from the local tags of the repository, run: %s", r.Name, err,
-				CommandLine("wt", "add", "--no-fetch", "--tag", tag, "--", r.Name))
+				CommandLine(ctx, "wt", "add", "--no-fetch", "--tag", tag, "--", r.Name))
 		}
 		warnings = keptTagWarnings(kept, tag, ref)
 	}

@@ -246,7 +246,7 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 		if n, ok := b.PullRequest(); ok {
 			why := fmt.Sprintf("it is the branch of pull request #%d (never pruned)", n)
 			if in, ok := checkedOut[b.Name]; ok && !in.Primary && !in.Outside {
-				why += "; to remove its worktree, run: " + CommandLine("wt", "rm", "--dir", in.Dir, "--", r.Name)
+				why += "; to remove its worktree, run: " + CommandLine(ctx, "wt", "rm", "--dir", in.Dir, "--", r.Name)
 			}
 			skip("", why)
 			continue
@@ -282,20 +282,27 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, opts P
 		case opts.IncludeBranches:
 			cands = append(cands, c)
 		default:
-			args := []string{"prune", "--include-branches"}
+			args := []string{"prune"}
+			if opts.DeleteBranches {
+				args = append(args, "--delete-branches")
+			}
+			args = append(args, "--include-branches")
 			if opts.Offline {
 				args = append(args, "--offline")
 			}
 			for _, name := range opts.Repos {
 				args = append(args, "--repo", name)
 			}
-			skip("", "it has no worktree; to delete such branches, run: "+CommandLine(args...))
+			skip("", "it has no worktree; to delete such branches, run: "+CommandLine(ctx, args...))
 		}
 	}
 	for _, in := range infos {
 		if in.Tag != "" {
-			skips = append(skips, PruneSkip{Repo: r.Name, Tag: in.Tag, Path: in.Path,
-				Reason: "pinned at tag " + in.Tag + " (tag worktrees are never pruned); to remove it, run: " + CommandLine("wt", "rm", "--dir", in.Dir, "--", r.Name)})
+			why := "pinned at tag " + in.Tag + " (tag worktrees are never pruned)"
+			if !in.Outside {
+				why += "; to remove it, run: " + CommandLine(ctx, "wt", "rm", "--dir", in.Dir, "--", r.Name)
+			}
+			skips = append(skips, PruneSkip{Repo: r.Name, Tag: in.Tag, Path: in.Path, Reason: why})
 		}
 	}
 	return cands, skips, probs, distrust
@@ -456,7 +463,7 @@ func pruneWorktree(ctx context.Context, w *Workspace, c PruneCandidate, opts Pru
 		}
 		res.Notes = riskNotes(refused.Plan.Risks)
 		res.Outcome = PruneKept
-		res.Message = "kept worktree " + describe(refused.Plan.Worktree) + ": " + strings.Join(why, "; ") + "; review it, then run: " + CommandLine("wt", "rm", "--dir", c.Dir, "--", c.Repo)
+		res.Message = "kept worktree " + describe(refused.Plan.Worktree) + ": " + strings.Join(why, "; ") + "; review it, then run: " + CommandLine(ctx, wtRm(opts.DeleteBranches, c.Dir, c.Repo)...)
 	case errors.Is(err, ErrNotConfirmed):
 		res.Outcome, res.Message = PruneKept, "kept: "+changed+"; run prune again"
 	case errors.Is(err, errNoWorktree):
@@ -465,6 +472,16 @@ func pruneWorktree(ctx context.Context, w *Workspace, c PruneCandidate, opts Pru
 		res.Outcome, res.Message, res.Err = PruneFailed, err.Error(), err
 	}
 	return res
+}
+
+// wtRm returns the arguments of wt rm for the worktree dir of repo, with
+// -d when deleteBranch.
+func wtRm(deleteBranch bool, dir, repo string) []string {
+	args := []string{"wt", "rm"}
+	if deleteBranch {
+		args = append(args, "-d")
+	}
+	return append(args, "--dir", dir, "--", repo)
 }
 
 func pruneBranch(ctx context.Context, w *Workspace, c PruneCandidate, distrust forkDistrust) PruneResult {

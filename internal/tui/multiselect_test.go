@@ -269,7 +269,7 @@ func TestMultiSelectViewRendersRows(t *testing.T) {
 	items[0].Tags = []string{"fork", "archived"}
 	items[1].Selected = true
 	v := view(NewMultiSelect("Pick repositories", items))
-	for _, s := range []string{"Pick repositories", "> [ ] [fork] [archived] alpha first letter", "[x]        bravo", "1/3 selected", "space", "toggle", "enter", "more"} {
+	for _, s := range []string{"Pick repositories", "> [ ] [fork] alpha [archived] first letter", "[x]        bravo", "1/3 selected", "space", "toggle", "enter", "more"} {
 		if !strings.Contains(v, s) {
 			t.Fatalf("view lacks %q:\n%s", s, v)
 		}
@@ -866,9 +866,10 @@ func TestMultiSelectStatusPartsAreShownWholeOrNotAtAll(t *testing.T) {
 	}
 }
 
-// The tags of a row come first, in a column as wide as the widest first
-// tag, so that the kind of an item (e.g. "gone", "new") stays visible on a
-// narrow window; a row wider than the window ends with "…" (B52 A1).
+// The first tag of a row comes first, in a column as wide as the widest
+// first tag, so that the kind of an item (e.g. "gone", "new") stays
+// visible on a narrow window; the other tags follow the label, which
+// stays visible too; a row wider than the window ends with "…" (B52 A1).
 func TestMultiSelectTagsFirstAndEllipsis(t *testing.T) {
 	items := []Item{
 		{Key: "gone:acme/old", Label: "old", Detail: "acme/old: no longer listed in acme: deleted, transferred or renamed (archived repositories are listed)", Tags: []string{"gone"}},
@@ -877,7 +878,7 @@ func TestMultiSelectTagsFirstAndEllipsis(t *testing.T) {
 	}
 	m, _ := NewMultiSelect("Choose", items).Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	v := view(m)
-	for _, want := range []string{"> [ ] [gone] old acme/old: no longer listed", "  [ ] [new]  [fork] newsvc acme/newsvc", "  [ ]        plain no tag"} {
+	for _, want := range []string{"> [ ] [gone] old acme/old: no longer listed", "  [ ] [new]  newsvc [fork] acme/newsvc", "  [ ]        plain no tag"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view lacks %q:\n%s", want, v)
 		}

@@ -35,6 +35,11 @@ func TestWorktreeRefusedErrorRunHints(t *testing.T) {
 			"\nto remove anyway (what is listed above will be lost), run: sheaf wt rm --force -D --offline --dir 'my dir' -- api"},
 		{"fetch failed", WorktreeRefusedError{Plan: plan("abc", nil, "", fetchProblem(errorString("boom")))},
 			"\nto check local data only, run: sheaf wt rm --offline --dir abc -- api"},
+		// A command with --force would be refused for the hard problem.
+		{"fetch failed and dirty", WorktreeRefusedError{Plan: plan("abc", dirty, "branch abc is not merged", fetchProblem(errorString("boom"))), DeleteBranch: true},
+			"\nto check local data only, run: sheaf wt rm -d --offline --dir abc -- api"},
+		{"bundle", WorktreeRefusedError{Plan: plan("abc", dirty, ""), bundle: "/b x"},
+			"\nto remove anyway (what is listed above will be lost), run: sheaf --bundle '/b x' wt rm --force --dir abc -- api"},
 	} {
 		got := tc.err.Error()
 		if !strings.HasSuffix(got, tc.want) {
@@ -72,6 +77,8 @@ func TestRisksErrorRunHints(t *testing.T) {
 			"\nto remove anyway (the data listed above will be lost), run: sheaf remove --force --offline -- old"},
 		{"fetch failed", RisksError{Plan: RemovePlan{Repo: "old", Items: []RemoveItem{fetch}}},
 			"\nto check local data only, run: sheaf remove --offline -- old"},
+		{"bundle", RisksError{Plan: RemovePlan{Repo: "old", Items: []RemoveItem{dirty}}, bundle: "/b"},
+			"\nto remove anyway (the data listed above will be lost), run: sheaf --bundle /b remove --force -- old"},
 	} {
 		got := tc.err.Error()
 		if !strings.HasSuffix(got, tc.want) {
@@ -165,13 +172,70 @@ func TestSyncMassRemovalRunHint(t *testing.T) {
 func TestAddRunHintCommands(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ got, want string }{
-		{noForkCommand(bundle.Repository{Name: "x", Slug: "up/x"}, ""), "sheaf add --no-fork -- up/x"},
-		{noForkCommand(bundle.Repository{Name: "y", Slug: "up/x"}, ""), "sheaf add --no-fork --as y -- up/x"},
-		{noForkCommand(bundle.Repository{Name: "x", Slug: "up/x"}, "up"), "sheaf add --org up --no-fork --repo x"},
-		{includeArchivedCommand(AddRequest{Org: "o", NoFork: true, As: "z"}, "old"), "sheaf add --org o --include-archived --no-fork --as z --repo old"},
+		{noForkCommand(context.Background(), bundle.Repository{Name: "x", Slug: "up/x"}, "", false), "sheaf add --no-fork -- up/x"},
+		{noForkCommand(context.Background(), bundle.Repository{Name: "y", Slug: "up/x"}, "", false), "sheaf add --no-fork --as y -- up/x"},
+		{noForkCommand(context.Background(), bundle.Repository{Name: "x", Slug: "up/x"}, "up", false), "sheaf add --org up --no-fork --repo x"},
+		{noForkCommand(context.Background(), bundle.Repository{Name: "x", Slug: "up/x"}, "up", true), "sheaf add --org up --include-archived --no-fork --repo x"},
+		{noForkCommand(WithHintBundle(context.Background(), "/b"), bundle.Repository{Name: "x", Slug: "up/x"}, "", false), "sheaf --bundle /b add --no-fork -- up/x"},
+		{includeArchivedCommand(context.Background(), AddRequest{Org: "o", NoFork: true, As: "z"}, "old"), "sheaf add --org o --include-archived --no-fork --as z --repo old"},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("command = %q, want %q", tc.got, tc.want)
 		}
+	}
+}
+
+// A tag worktree outside its repository directory gets no command: it has
+// no directory name there that --dir could select (B52 U1 review).
+func TestPruneTagSkipOutsideHasNoCommand(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	primary, _ := f.clonedRepo(t, "a")
+	testutil.Git(t, primary, "tag", "v1", "origin/main")
+	tw := f.mustAddTag(t, "a", "v1")
+	outside := filepath.Join(t.TempDir(), "v1out")
+	testutil.Git(t, primary, "worktree", "move", tw.Path, outside)
+	plan := f.prunePlan(t, PruneOptions{Offline: true})
+	var reason string
+	for _, s := range plan.Skipped {
+		if s.Tag == "v1" {
+			reason = s.Reason
+		}
+	}
+	if reason == "" || strings.Contains(reason, "run:") || strings.Contains(reason, "--dir") {
+		t.Errorf("tag skip reason = %q, want one without a command (skipped %+v)", reason, plan.Skipped)
+	}
+}
+
+// The hints of prune keep its options: --delete-branches in the "no
+// worktree" hint, -d in the hint of a kept worktree (B52 U1 review).
+func TestPruneRunHintsKeepDeleteBranches(t *testing.T) {
+	t.Parallel()
+	f, _, _ := pruneScenario(t)
+	plan := f.prunePlan(t, PruneOptions{DeleteBranches: true})
+	if s, ok := skipFor(plan, "old"); !ok || !strings.HasSuffix(s.Reason, "run: sheaf prune --delete-branches --include-branches") {
+		t.Errorf("skip old = %+v, %v", s, ok)
+	}
+	opts := PruneOptions{DeleteBranches: true, WorkingDir: f.w.Root}
+	plan = f.prunePlan(t, opts)
+	writeFile(t, filepath.Join(f.w.Root, "a", "feat", "file-1.txt"), "changed\n")
+	rs := ApplyPrune(context.Background(), f.w, plan, opts, Discard)
+	if r, _ := resultFor(rs, "feat"); r.Outcome != PruneKept || !strings.HasSuffix(r.Message, "; review it, then run: sheaf wt rm -d --dir feat -- a") {
+		t.Errorf("dirty feat: %+v", r)
+	}
+}
+
+// The hints of a command name the bundle of hints of its context (see
+// WithHintBundle).
+func TestCommandLineNamesTheBundle(t *testing.T) {
+	t.Parallel()
+	ctx := WithHintBundle(context.Background(), "/my bundle")
+	if got, want := CommandLine(ctx, "prune", "--yes"), "sheaf --bundle '/my bundle' prune --yes"; got != want {
+		t.Errorf("CommandLine = %q, want %q", got, want)
+	}
+	p := Proposal{Key: "gone:o/a", Kind: ProposalGone, Org: "o", Name: "a", Slug: "o/a", MassRemoval: true}
+	s := SyncRemoveGone(ctx, nil, []Proposal{p}, SyncRemoveOptions{Remove: RemoveOptions{WorkingDir: t.TempDir()}}, 1, Discard)
+	if want := "run: sheaf --bundle '/my bundle' sync --org o --remove-gone --yes --allow-mass-removal"; len(s.Results) != 1 || !strings.HasSuffix(s.Results[0].Err.Error(), want) {
+		t.Errorf("summary %+v, want an error ending with %q", s, want)
 	}
 }

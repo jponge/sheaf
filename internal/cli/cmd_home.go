@@ -89,7 +89,7 @@ func runHome(c *cobra.Command, d Deps) error {
 		return fmt.Errorf("invalid --jobs %d: must be at least 1", o.Jobs)
 	}
 	d.windowTitle = homeTitle("", root)
-	h := &home{c: c, d: d, s: newTUISession(c, d), root: root, jobs: o.Jobs}
+	h := &home{c: c, d: d, s: newTUISession(c, d), root: root, jobs: o.Jobs, hintBundle: o.Bundle}
 	if h.s.title != "" {
 		// The window title of the terminal is saved and restored around
 		// the programs, which set it and clear it when they end; also on
@@ -144,6 +144,9 @@ type home struct {
 	s    *tuiSession
 	root string
 	jobs int
+	// hintBundle is the --bundle of bare sheaf, that the hints of the
+	// actions name (see Deps.hintBundle).
+	hintBundle string
 
 	cursor, filter, message string
 	fullHelp                bool               // the last overview showed the full key help
@@ -396,8 +399,8 @@ func skipsProblems(name string) bool { return name == "update" || name == "remov
 // actions are the actions of the overview.
 func (h *home) actions() []tui.OverviewAction {
 	// noProblem refuses targets that are all problem rows, naming them
-	// (the actions on a selection skip the problem rows among others, see
-	// act).
+	// after the reason, which a cut message keeps (the actions on a
+	// selection skip the problem rows among others, see act).
 	noProblem := func(targets []string) string {
 		checkouts, problems := h.splitProblems(targets)
 		if len(checkouts) == 0 && len(problems) > 0 {
@@ -405,7 +408,7 @@ func (h *home) actions() []tui.OverviewAction {
 			if len(problems) > 1 {
 				rows += "s"
 			}
-			return strings.Join(problems, ", ") + ": " + rows + ", see `sheaf doctor`"
+			return rows + ", see `sheaf doctor`: " + strings.Join(problems, ", ")
 		}
 		return ""
 	}
@@ -417,7 +420,7 @@ func (h *home) actions() []tui.OverviewAction {
 		for _, k := range checkouts {
 			switch c := h.rows[k].checkout; {
 			case c.Primary:
-				return "primary checkout, not a worktree; run: " + ops.CommandLine("remove", "--", c.Repo)
+				return "primary checkout, not a worktree; run: " + ops.CommandLine(h.s.ctx, "remove", "--", c.Repo)
 			case c.Outside:
 				return "the worktree " + c.Path + " is outside its repository directory: remove it with git"
 			}
@@ -442,7 +445,7 @@ func (h *home) actions() []tui.OverviewAction {
 			return why
 		}
 		if c := h.rows[targets[0]].checkout; c.Outside {
-			return "worktree outside its repository directory; run: " + ops.CommandLine("browse", "--", c.Repo)
+			return "worktree outside its repository directory; run: " + ops.CommandLine(h.s.ctx, "browse", "--", c.Repo)
 		}
 		return ""
 	}
@@ -636,6 +639,7 @@ func (h *home) commandIn(dir string, args ...string) error {
 		d.Getwd = func() (string, error) { return dir, nil }
 	}
 	d.ctl = h.s.ctl // the home screen's controller, with its context
+	d.hintBundle = &h.hintBundle
 	d.term = h.s.out
 	d.windowTitle = homeTitle(h.action, h.root)
 	d.unchanged = func(note string) { h.unchanged = note }

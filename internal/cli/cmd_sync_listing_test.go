@@ -83,7 +83,7 @@ func TestSyncEmptyListingNeedsAllowMassRemoval(t *testing.T) {
 	e.fake = hostingtest.NewFake()
 	e.fake.AddOwner("o")
 	out, errs, code := e.run(t, "sync")
-	if code != 0 || !strings.Contains(out, "--allow-mass-removal") {
+	if code != 0 || !strings.Contains(out, "then run: sheaf sync --org o --remove-gone --yes --allow-mass-removal\n") {
 		t.Fatalf("dry run: exit %d\nstdout:\n%s\nstderr:\n%s", code, out, errs)
 	}
 	out, errs, code = e.run(t, "sync", "--remove-gone", "--yes")

@@ -61,6 +61,10 @@ type Deps struct {
 	// of the commands (see tuiSession): the home screen names itself and
 	// its actions.
 	windowTitle string
+	// hintBundle, if set, replaces --bundle as the bundle that the hints
+	// name (see hintContext): the home screen passes --bundle to its
+	// actions, whose hints name the bundle only when the user gave it.
+	hintBundle *string
 	// stdinTTY replaces isTerminal for standard input (interactive git
 	// mode); tests only.
 	stdinTTY func(io.Reader) bool

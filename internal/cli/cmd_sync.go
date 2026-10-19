@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -162,7 +163,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 	if err != nil {
 		return err
 	}
-	syWriteProposals(out, rep, !(fl.addNew || fl.removeGone || len(fl.exclude) > 0))
+	syWriteProposals(c.Context(), out, rep, fl.orgs, !(fl.addNew || fl.removeGone || len(fl.exclude) > 0))
 
 	errs := []error{rep.Err()}
 	if len(excluded) > 0 {
@@ -276,7 +277,7 @@ func syResolveExcludes(rep ops.SyncReport, args []string, includeArchived bool) 
 
 // syWriteProposals prints one line per proposal and, when hints is set,
 // how to act on them.
-func syWriteProposals(w io.Writer, rep ops.SyncReport, hints bool) {
+func syWriteProposals(ctx context.Context, w io.Writer, rep ops.SyncReport, orgs []string, hints bool) {
 	if len(rep.Proposals) == 0 {
 		var orgs []string
 		for _, o := range rep.Orgs {
@@ -317,13 +318,28 @@ func syWriteProposals(w io.Writer, rep ops.SyncReport, hints bool) {
 	if !hints {
 		return
 	}
+	// The commands of the hints keep the organizations of this run.
+	syncCmd := func(orgs []string, flags ...string) string {
+		args := []string{"sync"}
+		for _, o := range orgs {
+			args = append(args, "--org", o)
+		}
+		return ops.CommandLine(ctx, append(args, flags...)...)
+	}
 	if len(syOfKind(rep.Proposals, ops.ProposalNew)) > 0 {
-		fmt.Fprintln(w, "add the new ones with: sheaf sync --add-new (decline some for good with --exclude <repo>)")
+		fmt.Fprintln(w, "add the new ones with: "+syncCmd(orgs, "--add-new")+" (decline some for good with --exclude <repo>)")
 	}
 	if len(syOfKind(rep.Proposals, ops.ProposalGone)) > 0 {
-		hint := "remove the gone ones with: sheaf sync --remove-gone --yes (refused when data would be lost)"
-		if slices.ContainsFunc(rep.Proposals, func(p ops.Proposal) bool { return p.MassRemoval }) {
-			hint += "; most repositories of an organization look gone: check its listing (gh authentication scope), then add --allow-mass-removal"
+		hint := "remove the gone ones with: " + syncCmd(orgs, "--remove-gone", "--yes") + " (refused when data would be lost)"
+		var mass []string
+		for _, p := range rep.Proposals {
+			if p.MassRemoval && !slices.Contains(mass, p.Org) {
+				mass = append(mass, p.Org)
+			}
+		}
+		if len(mass) > 0 {
+			hint += "; most repositories of an organization look gone: check its listing (gh authentication scope), then run: " +
+				syncCmd(mass, "--remove-gone", "--yes", "--allow-mass-removal")
 		}
 		fmt.Fprintln(w, hint)
 	}

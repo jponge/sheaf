@@ -153,7 +153,7 @@ func newPruneCmd(d Deps) *cobra.Command {
 			if asJSON {
 				err = printPruneJSON(out, plan, results, !yes)
 			} else {
-				printPrune(out, plan, results, !yes, pruneCommand(opts))
+				printPrune(out, plan, results, !yes, pruneCommand(ctx, opts))
 			}
 			if err != nil {
 				return err
@@ -195,7 +195,7 @@ func pruneErr(ctx context.Context, plan ops.PrunePlan, results []ops.PruneResult
 
 // pruneCommand returns the command line of prune with opts, confirmed
 // with --yes (see ops.CommandLine).
-func pruneCommand(opts ops.PruneOptions) string {
+func pruneCommand(ctx context.Context, opts ops.PruneOptions) string {
 	args := []string{"prune"}
 	if opts.DeleteBranches {
 		args = append(args, "--delete-branches")
@@ -209,7 +209,7 @@ func pruneCommand(opts ops.PruneOptions) string {
 	for _, r := range opts.Repos {
 		args = append(args, "--repo", r)
 	}
-	return ops.CommandLine(append(args, "--yes")...)
+	return ops.CommandLine(ctx, append(args, "--yes")...)
 }
 
 // printPrune prints the plan and results of prune; a dry run ends with
