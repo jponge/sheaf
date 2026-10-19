@@ -87,8 +87,15 @@ type PlannedMsg struct{ Units int }
 type AsidePlannedMsg struct{ Units int }
 
 // barMin and barMax bound the width of the progress bar of the header,
-// percentage included.
-const barMin, barMax = 12, 30
+// percentage included: at barMin, 4 cells and " 100%", so that the bar and
+// the cancel hint fit beside a fetch of a few repositories in 80 columns.
+const barMin, barMax = 9, 30
+
+// elapsedReserve is the width the elapsed time of the header counts
+// for when deciding what fits (see headerLine), that of the longest under
+// an hour ("59m59s"): what the header shows does not change when the
+// elapsed time gains a digit.
+const elapsedReserve = 6
 
 // InterruptedMsg tells a Progress that the command was interrupted Count
 // times in all (signals included); the view shows the corresponding note.
@@ -107,7 +114,7 @@ type progressRow struct {
 // running, then a final marker (✓ done, - skipped or cancelled, ✗ failed,
 // ! interrupted) and a short message. The header shows the counts and the
 // elapsed time, then, once the rows are planned (PlannedMsg), a progress
-// bar, and a "ctrl+c cancel" hint (see WithInterrupt): other keys (e.g. q
+// bar, and a "^C cancel" hint (see WithInterrupt): other keys (e.g. q
 // and esc) do nothing, questions aside.
 //
 // ctrl+c does not quit: each press runs the interrupt function given to
@@ -459,16 +466,19 @@ func (m Progress) ratio() (float64, bool) {
 // is a gradient with 256 colors or more, else solid (full blocks). When
 // the header itself is wider than the terminal, there is no bar, and its
 // hint is dropped, then its aside counts, then its other counts: the title
-// and the elapsed time stay (the title is cut last, see truncate).
+// and the elapsed time stay (the title is cut last, see truncate). The
+// elapsed time counts as elapsedReserve columns in these decisions.
 func (m Progress) headerLine() string {
+	pad := max(0, elapsedReserve-lipgloss.Width(fmt.Sprint(m.elapsed())))
+	width := func(s string) int { return lipgloss.Width(s) + pad }
 	h := m.header(true, true)
 	hint := m.cancelHint()
-	if m.width > 0 && lipgloss.Width(h+hint) > m.width {
+	if m.width > 0 && width(h+hint) > m.width {
 		// The bar went first, then the hint.
-		if lipgloss.Width(h) <= m.width {
+		if width(h) <= m.width {
 			return h
 		}
-		if h = m.header(false, true); lipgloss.Width(h) > m.width {
+		if h = m.header(false, true); width(h) > m.width {
 			h = m.header(false, false)
 		}
 		return h
@@ -479,7 +489,7 @@ func (m Progress) headerLine() string {
 	}
 	w := barMax
 	if m.width > 0 {
-		w = min(w, m.width-lipgloss.Width(h+hint)-2)
+		w = min(w, m.width-width(h+hint)-2)
 	}
 	if w < barMin {
 		return h + hint
@@ -487,7 +497,7 @@ func (m Progress) headerLine() string {
 	return h + "  " + m.bar(w, r) + hint
 }
 
-// cancelHint returns the faint "ctrl+c cancel" ending the header while the
+// cancelHint returns the faint "^C cancel" ending the header while the
 // work runs and ctrl+c cancels it (an interrupt function, see
 // WithInterrupt, and no interruption yet: the interruption note then
 // tells what ctrl+c does), preceded by its separator; "" otherwise.
@@ -495,7 +505,7 @@ func (m Progress) cancelHint() string {
 	if m.interrupt == nil || m.interrupts > 0 || m.finished {
 		return ""
 	}
-	return "  " + m.styles.Status.Render("ctrl+c cancel")
+	return "  " + m.styles.Status.Render("^C cancel")
 }
 
 // Colors of the progress bar of the header: those of bubbles' progress bar

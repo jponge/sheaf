@@ -703,7 +703,7 @@ the other commands with `-j 1`. In TUI mode git never gets the terminal.
 - The first Ctrl-C (or SIGINT, SIGTERM, SIGHUP) cancels the command: git
   processes are stopped, sheaf prints `interrupted` and exits with 130.
   Ctrl-C in a TUI menu or dialog also exits with 130. A progress view
-  reminds it in its header (`ctrl+c cancel`); q and esc do nothing there.
+  reminds it in its header (`^C cancel`); q and esc do nothing there.
 - `update` lets a running fast-forward merge finish after the first Ctrl-C
   (interrupting it would leave a half-updated work tree) and starts no new
   one.

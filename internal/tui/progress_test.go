@@ -420,13 +420,15 @@ func TestProgressHeaderBar(t *testing.T) {
 
 // The bar narrows to the room left on the header line, and is dropped
 // first, before the status line is cut, when less than barMin columns are
-// left.
+// left. The elapsed time "0s" counts as elapsedReserve columns (see
+// TestProgressHeaderStableWhileElapsedGrows).
 func TestProgressHeaderBarFitsWidth(t *testing.T) {
 	t.Parallel()
 	status := "Updating · 1 running, 1 done, 1 skipped, 1 failed · 0s"
-	w := lipgloss.Width(status)
+	pad := elapsedReserve - len("0s")
+	w := lipgloss.Width(status) + pad
 	h := strings.Split(view(plannedProgress(t, tea.WindowSizeMsg{Width: w + 2 + 20, Height: 20})), "\n")[0]
-	if !strings.HasPrefix(h, status+"  ") || lipgloss.Width(h) != w+2+20 || !strings.HasSuffix(h, " 75%") {
+	if !strings.HasPrefix(h, status+"  ") || lipgloss.Width(h) != w-pad+2+20 || !strings.HasSuffix(h, " 75%") {
 		t.Errorf("header %q, want a 20-column bar", h)
 	}
 	for _, width := range []int{w + 2 + barMin - 1, w} {
@@ -447,20 +449,22 @@ func TestProgressHeaderBarFitsWidth(t *testing.T) {
 // On a narrow terminal the parts of the header are dropped in this order,
 // so that the title and the elapsed time stay (B52 U2 review): the bar
 // (see TestProgressHeaderBarFitsWidth), the aside counts, then the other
-// counts; the title is cut last.
+// counts; the title is cut last. The elapsed time "0s" counts as
+// elapsedReserve columns (pad more) in these decisions.
 func TestProgressHeaderDropOrder(t *testing.T) {
 	t.Parallel()
 	full := "Updating · fetch 1/1 · 1 running, 1 done, 1 skipped, 1 failed · 0s"
 	noAside := "Updating · 1 running, 1 done, 1 skipped, 1 failed · 0s"
 	short := "Updating · 0s"
+	pad := elapsedReserve - len("0s")
 	for _, c := range []struct {
 		width int
 		want  string
 	}{
-		{lipgloss.Width(full), full},
-		{lipgloss.Width(full) - 1, noAside},
-		{lipgloss.Width(noAside), noAside},
-		{lipgloss.Width(noAside) - 1, short},
+		{lipgloss.Width(full) + pad, full},
+		{lipgloss.Width(full) + pad - 1, noAside},
+		{lipgloss.Width(noAside) + pad, noAside},
+		{lipgloss.Width(noAside) + pad - 1, short},
 		{lipgloss.Width(short), short},
 		{5, "Upda…"},
 	} {
@@ -479,14 +483,17 @@ func TestProgressHeaderDropOrder(t *testing.T) {
 }
 
 // With an interrupt function (WithInterrupt), the running header ends with
-// a faint "ctrl+c cancel" (B52 D3: q and esc do nothing in a progress
-// view), after the bar. On a narrow terminal it is dropped right after the
+// a faint "^C cancel" (B52 D3: q and esc do nothing in a progress view),
+// after the bar. The decisions count the elapsed time as elapsedReserve
+// columns (see TestProgressHeaderStableWhileElapsedGrows): "0s" is padded
+// by pad. On a narrow terminal it is dropped right after the
 // bar, before the counts (see TestProgressHeaderDropOrder). It is not shown
 // without an interrupt function, once interrupted (the interruption note
 // tells what ctrl+c does then) nor in the final view.
 func TestProgressHeaderCancelHint(t *testing.T) {
 	t.Parallel()
-	const hint = "  ctrl+c cancel"
+	const hint = "  ^C cancel"
+	pad := elapsedReserve - len("0s")
 	full := "Updating · fetch 1/1 · 1 running, 1 done, 1 skipped, 1 failed · 0s"
 	noAside := "Updating · 1 running, 1 done, 1 skipped, 1 failed · 0s"
 	short := "Updating · 0s"
@@ -506,7 +513,7 @@ func TestProgressHeaderCancelHint(t *testing.T) {
 		return m
 	}
 	header := func(m tea.Model) string { return strings.Split(view(m), "\n")[0] }
-	wide := build(lipgloss.Width(full)+2+barMax+len(hint), true)
+	wide := build(lipgloss.Width(full)+pad+2+barMax+len(hint), true)
 	if h := header(wide); !strings.HasPrefix(h, full+"  ") || !strings.HasSuffix(h, " 75%"+hint) || lipgloss.Width(barCells.FindString(h))+len("  75%") != barMax {
 		t.Errorf("header %q, want the status, a full bar, then the hint", h)
 	}
@@ -517,12 +524,12 @@ func TestProgressHeaderCancelHint(t *testing.T) {
 		width int
 		want  string // "" for a bar followed by the hint
 	}{
-		{lipgloss.Width(full) + 2 + barMin + len(hint), ""},
-		{lipgloss.Width(full) + 2 + barMin - 1 + len(hint), full + hint},
-		{lipgloss.Width(full) + len(hint), full + hint},
-		{lipgloss.Width(full) + len(hint) - 1, full},
-		{lipgloss.Width(full) - 1, noAside},
-		{lipgloss.Width(noAside) - 1, short},
+		{lipgloss.Width(full) + pad + 2 + barMin + len(hint), ""},
+		{lipgloss.Width(full) + pad + 2 + barMin - 1 + len(hint), full + hint},
+		{lipgloss.Width(full) + pad + len(hint), full + hint},
+		{lipgloss.Width(full) + pad + len(hint) - 1, full},
+		{lipgloss.Width(full) + pad - 1, noAside},
+		{lipgloss.Width(noAside) + pad - 1, short},
 	} {
 		h := header(build(c.width, true))
 		if c.want == "" {
@@ -540,8 +547,57 @@ func TestProgressHeaderCancelHint(t *testing.T) {
 		"interrupted":           build(200, true, InterruptedMsg{Count: 1}),
 		"finished":              build(200, true, FinishMsg{}),
 	} {
-		if v := view(m); strings.Contains(v, "ctrl+c cancel") {
+		if v := view(m); strings.Contains(v, "^C cancel") {
 			t.Errorf("%s: the hint is shown:\n%s", name, v)
+		}
+	}
+}
+
+// At 80 columns, the header of a fetch of a few repositories has room for
+// both the bar and the cancel hint (B52 D3 review).
+func TestProgressHeaderBarAndHintFitIn80Columns(t *testing.T) {
+	t.Parallel()
+	p, c := newTestProgress("Fetching")
+	msgs := []tea.Msg{PlannedMsg{Units: 5}, tea.WindowSizeMsg{Width: 80, Height: 20}}
+	for _, k := range []string{"api", "web", "lib", "old", "tool"} {
+		msgs = append(msgs, RowUpdate{Key: k, Label: k, State: RowRunning})
+	}
+	m, _ := feed(p.WithInterrupt(func() {}), msgs...)
+	c.t = c.t.Add(1200 * time.Millisecond)
+	if h := strings.Split(view(m), "\n")[0]; !strings.HasPrefix(h, "Fetching · 5 running, 0 done, 0 skipped, 0 failed · 1.2s  ") || !barCells.MatchString(h) || !strings.HasSuffix(h, "  0%  ^C cancel") {
+		t.Errorf("header %q, want the bar and the hint", h)
+	}
+}
+
+// While the elapsed time grows (up to elapsedReserve columns, i.e. under an
+// hour), what the header shows does not change at any width: the bar, the
+// hint and the counts are kept or dropped as if the elapsed time took
+// elapsedReserve columns, so that they do not flicker when it gains a
+// digit.
+func TestProgressHeaderStableWhileElapsedGrows(t *testing.T) {
+	t.Parallel()
+	shape := regexp.MustCompile(`[0-9.]+(ms|s|m[0-9]+s)`)
+	for w := 20; w <= 130; w++ {
+		p, c := newTestProgress("Updating")
+		m, _ := feed(p.WithAside("fetch").WithInterrupt(func() {}), AsidePlannedMsg{Units: 1}, PlannedMsg{Units: 4},
+			RowUpdate{Key: "a", Label: "alpha", State: RowRunning},
+			RowUpdate{Key: "b", Label: "beta", State: RowDone},
+			RowUpdate{Key: "e", Label: "e (fetch)", State: RowDone, Aside: true},
+			tea.WindowSizeMsg{Width: w, Height: 20})
+		first := ""
+		for _, d := range []time.Duration{400 * time.Millisecond, 1200 * time.Millisecond, 12300 * time.Millisecond, time.Minute, 119 * time.Second, 10 * time.Minute, time.Hour - time.Second} {
+			c.t = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC).Add(d)
+			h := strings.Split(view(m), "\n")[0]
+			if lipgloss.Width(h) > w {
+				t.Fatalf("width %d, elapsed %v: header %q too wide", w, d, h)
+			}
+			// What is shown, the elapsed time and the bar's cells aside.
+			got := barCells.ReplaceAllString(shape.ReplaceAllString(h, "T"), "B")
+			if first == "" {
+				first = got
+			} else if got != first {
+				t.Fatalf("width %d, elapsed %v: header %q, was %q", w, d, got, first)
+			}
 		}
 	}
 }
