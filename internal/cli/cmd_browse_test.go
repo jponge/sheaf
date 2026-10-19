@@ -50,7 +50,7 @@ func TestBrowse(t *testing.T) {
 		{"main", []string{"--branch"}, hostingtest.BrowseCall{Slug: "o/a", Page: hosting.Page{Branch: "main"}}},
 		{"pr-7", nil, hostingtest.BrowseCall{Slug: "o/a", Page: hosting.Page{PR: 7}}},
 		{filepath.Join("pr-7", "sub"), nil, hostingtest.BrowseCall{Slug: "o/a", Page: hosting.Page{PR: 7}}},
-		{"feat", nil, home},
+		{"feat", nil, hostingtest.BrowseCall{Slug: "o/a", Page: hosting.Page{Head: "feat"}}},
 		{"feat", []string{"--branch"}, hostingtest.BrowseCall{Slug: "o/a", Page: hosting.Page{Branch: "feat"}}},
 		// A repository argument names its primary checkout.
 		{"pr-7", []string{"a"}, home},
@@ -93,11 +93,15 @@ func TestBrowseFork(t *testing.T) {
 	e.addRepo(t, "plain")
 	e.mustRun(t, "browse", "x")
 	e.mustRun(t, "browse", "--fork", "x")
-	e.mustRun(t, "browse", "--fork", "--branch", "x")
+	e.mustRun(t, "browse", "--branch", "x") // main tracks upstream/main
 	wantBrowse(t, e, 0, hostingtest.BrowseCall{Slug: "up/x"}, hostingtest.BrowseCall{Slug: "me/x"},
-		hostingtest.BrowseCall{Slug: "me/x", Page: hosting.Page{Branch: "main"}})
+		hostingtest.BrowseCall{Slug: "up/x", Page: hosting.Page{Branch: "main"}})
 	if _, errs, code := e.run(t, "browse", "--fork", "plain"); code != 1 || !strings.Contains(errs, "plain has no fork") {
 		t.Fatalf("--fork without a fork: exit %d, %s", code, errs)
+	}
+	// --branch opens the branch where it is pushed: --fork has no meaning.
+	if _, errs, code := e.run(t, "browse", "--fork", "--branch", "x"); code != 1 || !strings.Contains(errs, "--fork and --branch cannot be combined") {
+		t.Fatalf("--fork --branch: exit %d, %s", code, errs)
 	}
 	wantBrowse(t, e, 3)
 	// A pull request (on the repository) is not a page of the fork.
@@ -109,6 +113,79 @@ func TestBrowseFork(t *testing.T) {
 	e.mustRun(t, "browse")
 	e.mustRun(t, "browse", "--fork")
 	wantBrowse(t, e, 3, hostingtest.BrowseCall{Slug: "up/x", Page: hosting.Page{PR: 5}}, hostingtest.BrowseCall{Slug: "me/x"})
+	// A pull request ref tracked from the fork is not one wt pr sets up:
+	// no pull request, and no head to look up.
+	testutil.Git(t, primary, "config", "branch.pr/5.remote", "origin")
+	e.mustRun(t, "browse")
+	wantBrowse(t, e, 5, hostingtest.BrowseCall{Slug: "up/x"})
+	// A branch pushed to the fork: its pull request on the repository is
+	// looked up as <fork owner>:<branch>; --branch opens it on the fork,
+	// under its upstream name.
+	testutil.Git(t, primary, "update-ref", "refs/remotes/origin/topic", "HEAD")
+	testutil.Git(t, primary, "worktree", "add", "-q", "--track", "-b", "local-topic", filepath.Join(filepath.Dir(primary), "topic"), "origin/topic")
+	e.fake.AddPR("up", "x", hosting.PR{Number: 9, HeadBranch: "topic", HeadOwner: "me", HeadRepo: "x", IsCrossRepository: true})
+	e.cwd = filepath.Join(filepath.Dir(primary), "topic")
+	e.mustRun(t, "browse")
+	e.mustRun(t, "browse", "--branch")
+	wantBrowse(t, e, 6, hostingtest.BrowseCall{Slug: "up/x", Page: hosting.Page{Head: "me:topic"}},
+		hostingtest.BrowseCall{Slug: "me/x", Page: hosting.Page{Branch: "topic"}})
+}
+
+// Without a recorded pull request, gh is asked for the pull request of the
+// branch's upstream, and the repository opens when there is none; --branch
+// opens the upstream branch and needs one.
+func TestBrowseBranchUpstreams(t *testing.T) {
+	t.Parallel()
+	e, root := prBundle(t)
+	e.mustRun(t, "wt", "pr", "a", "7")
+	repo := filepath.Join(root, "a")
+	primary := filepath.Join(repo, "main")
+	git := func(args ...string) { t.Helper(); testutil.Git(t, primary, args...) }
+	git("update-ref", "refs/remotes/origin/lonely", "HEAD")
+	git("worktree", "add", "-q", "--track", "-b", "lonely", filepath.Join(repo, "lonely"), "origin/lonely")
+	git("worktree", "add", "-q", "--track", "-b", "mine", filepath.Join(repo, "mine"), "origin/lonely")
+	git("worktree", "add", "-q", "-b", "local", filepath.Join(repo, "local"))
+	git("update-ref", "refs/remotes/origin/123", "HEAD")
+	git("worktree", "add", "-q", "--track", "-b", "123", filepath.Join(repo, "123"), "origin/123")
+	git("worktree", "add", "-q", "-b", "merge-ref", filepath.Join(repo, "merge-ref"))
+	git("config", "branch.merge-ref.remote", "origin")
+	git("config", "branch.merge-ref.merge", "refs/pull/7/merge")
+	git("remote", "add", "other", "https://github.com/someone/a.git")
+	git("worktree", "add", "-q", "-b", "elsewhere", filepath.Join(repo, "elsewhere"))
+	git("config", "branch.elsewhere.remote", "other")
+	git("config", "branch.elsewhere.merge", "refs/heads/elsewhere")
+	if err := os.Mkdir(filepath.Join(repo, "notes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	home := hostingtest.BrowseCall{Slug: "o/a"}
+	for _, c := range []struct {
+		dir     string
+		args    []string
+		want    []hostingtest.BrowseCall
+		message string // in stderr: what was opened, or the error (exit 1)
+	}{
+		{"lonely", nil, []hostingtest.BrowseCall{{Slug: "o/a", Page: hosting.Page{Head: "lonely"}}, home}, "opened o/a (no pull request for branch lonely)"},
+		{"lonely", []string{"--branch"}, []hostingtest.BrowseCall{{Slug: "o/a", Page: hosting.Page{Branch: "lonely"}}}, "opened branch lonely of o/a"},
+		{"mine", []string{"--branch"}, []hostingtest.BrowseCall{{Slug: "o/a", Page: hosting.Page{Branch: "lonely"}}}, "opened branch lonely of o/a"},
+		{"local", nil, []hostingtest.BrowseCall{home}, "opened o/a"},
+		{"local", []string{"--branch"}, nil, "local has no upstream branch: push it first (git push -u origin local)"},
+		{"pr-7", []string{"--branch"}, nil, "pr/7 tracks pull request #7, not a branch: run sheaf browse without --branch to open it"},
+		{"123", nil, []hostingtest.BrowseCall{home}, "opened o/a"}, // gh would read 123 as a pull request number
+		{"merge-ref", nil, []hostingtest.BrowseCall{home}, "opened o/a"},
+		{"elsewhere", nil, []hostingtest.BrowseCall{home}, "opened o/a"},
+		{"elsewhere", []string{"--branch"}, nil, "elsewhere tracks other/elsewhere: other is not a remote of a known to sheaf (origin)"},
+		{"notes", nil, nil, "is not inside a checkout of a"},
+	} {
+		e.cwd = filepath.Join(repo, c.dir)
+		from := len(e.fake.BrowseCalls())
+		_, errs, code := e.run(t, append([]string{"browse"}, c.args...)...)
+		if wantCode := map[bool]int{true: 0, false: 1}[strings.HasPrefix(c.message, "opened")]; code != wantCode || !strings.Contains(errs, c.message) {
+			t.Errorf("%s %q: exit %d, stderr %q; want exit %d and %q", c.dir, c.args, code, errs, wantCode, c.message)
+		}
+		if got := e.fake.BrowseCalls()[from:]; !slices.Equal(got, c.want) {
+			t.Errorf("%s %q: browse calls = %+v, want %+v", c.dir, c.args, got, c.want)
+		}
+	}
 }
 
 // b on the home screen opens the current row like browse in its directory;

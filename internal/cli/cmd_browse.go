@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -23,10 +22,14 @@ func newBrowseCmd(d Deps) *cobra.Command {
 			"containing the working directory; with one, that repository of the bundle (its\n" +
 			"primary checkout).\n\n" +
 			"For a clone of your fork, the page is on the repository (upstream); --fork opens\n" +
-			"your fork (origin). In a worktree of a pull request from a fork checked out by\n" +
-			"`sheaf wt pr` (branch pr/<number>), the pull request opens; otherwise the home\n" +
-			"page of the repository. --branch opens the tree of the checkout's branch (as named\n" +
-			"locally) instead. Repositories of other hosts are refused.",
+			"the home page of your fork (origin). In a worktree of a pull request from a fork\n" +
+			"checked out by `sheaf wt pr` (branch pr/<number>), the pull request opens. For a\n" +
+			"branch tracking another branch of the repository or of your fork (except the\n" +
+			"default branch), gh looks for the pull request of that branch, and the home page\n" +
+			"of the repository opens when there is none; otherwise the home page opens.\n\n" +
+			"--branch opens the tree of the branch the checkout's branch tracks, on the\n" +
+			"repository it is pushed to (the repository or your fork); it is refused for a\n" +
+			"branch without upstream and with --fork. Repositories of other hosts are refused.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			w, err := openWorkspace(c, d)
@@ -41,12 +44,8 @@ func newBrowseCmd(d Deps) *cobra.Command {
 			if len(args) == 1 {
 				arg = args[0]
 			}
-			t, err := ops.ResolveBrowse(c.Context(), w, arg, wd, opts)
+			t, err := ops.Browse(c.Context(), w, d.hosting(), arg, wd, opts)
 			if err != nil {
-				return err
-			}
-			owner, name, _ := strings.Cut(t.Slug, "/")
-			if err := d.hosting().Browse(c.Context(), owner, name, t.Page); err != nil {
 				return err
 			}
 			fmt.Fprintln(c.ErrOrStderr(), "opened "+t.String())
@@ -55,7 +54,7 @@ func newBrowseCmd(d Deps) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&opts.Fork, "fork", false, "open your fork (origin) rather than the repository (upstream)")
-	cmd.Flags().BoolVar(&opts.Branch, "branch", false, "open the tree of the checkout's branch")
+	cmd.Flags().BoolVar(&opts.Fork, "fork", false, "open the home page of your fork (origin) rather than the repository (upstream)")
+	cmd.Flags().BoolVar(&opts.Branch, "branch", false, "open the tree of the upstream branch of the checkout's branch")
 	return cmd
 }

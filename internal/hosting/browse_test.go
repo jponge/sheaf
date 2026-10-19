@@ -23,6 +23,8 @@ func TestGHBrowseCommands(t *testing.T) {
 		{Page{Branch: "feat/x"}, "browse --repo o/r --branch feat/x"},
 		{Page{PR: 12, Branch: "feat/x"}, "pr view 12 --repo o/r --web"},
 		{Page{Branch: "a b"}, "browse --repo o/r --branch a b"}, // git allows a no-break space
+		{Page{Head: "feat"}, "pr view feat --repo o/r --web"},
+		{Page{Head: "me:feat", Branch: "feat"}, "pr view me:feat --repo o/r --web"},
 	} {
 		path, calls := stubGH(t, map[string]resp{"repo view": {}, "pr view": {}, "browse --repo": {}})
 		if err := NewGH(GHOptions{Path: path}).Browse(context.Background(), "o", "r", c.page); err != nil {
@@ -53,6 +55,8 @@ func TestGHBrowseErrors(t *testing.T) {
 		{"o", "r", Page{PR: -1}},
 		{"o", "r", Page{Branch: "-x"}},
 		{"o", "r", Page{Branch: "a\x1bb"}},
+		{"o", "r", Page{Head: "-x"}},
+		{"o", "r", Page{Head: "me:a\nb"}},
 	} {
 		if err := gh.Browse(context.Background(), c.owner, c.name, c.page); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("Browse(%q, %q, %+v) = %v, want ErrInvalidInput", c.owner, c.name, c.page, err)
@@ -76,6 +80,23 @@ func TestGHBrowseIgnoresLingeringChildren(t *testing.T) {
 	err := NewGH(GHOptions{Path: path}).Browse(context.Background(), "o", "r", Page{})
 	if elapsed := time.Since(start); err != nil || elapsed > time.Second {
 		t.Fatalf("Browse = %v after %v, want success well under the 2 s WaitDelay", err, elapsed)
+	}
+}
+
+// noPRForBranchStderr is what gh prints, with exit code 1, for `gh pr view
+// <branch> --web` when no pull request has that head: the error of
+// findForRefs (findForBranch before) in pkg/cmd/pr/shared/finder.go,
+// printed by printError in internal/ghcmd/cmd.go (gh v2.102.0 and v2.46.0
+// sources; not recorded from a real gh).
+const noPRForBranchStderr = `no pull requests found for branch "feat"`
+
+// No pull request for a head is ErrNotFound (the caller then opens the
+// repository).
+func TestGHBrowseNoPullRequestForHead(t *testing.T) {
+	path, _ := stubGH(t, map[string]resp{"pr view": {stderr: noPRForBranchStderr, code: 1}})
+	err := NewGH(GHOptions{Path: path}).Browse(context.Background(), "o", "r", Page{Head: "feat"})
+	if !errors.Is(err, ErrNotFound) || errors.Is(err, ErrGHNotAuthenticated) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 

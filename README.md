@@ -265,7 +265,7 @@ lines that still do not fit are cut at the right.
 | f | fetch the repositories of the selected rows (or the current row) |
 | w | add a worktree to the current row's repository: a prompt asks for a branch (an existing local or remote one, else a new branch from the default branch, as `wt add`), tab switches to a tag |
 | # | check out a pull request of the current row's repository (GitHub only): a prompt asks for its number (`#123` also accepted), then `wt pr` runs |
-| b | open the current row on GitHub, as `sheaf browse` run in its directory (its pull request, else the repository's home page); the outcome is the overview's message (`browse: opened o/r`, `browse failed: ...`), without a report view |
+| b | open the current row on GitHub, as `sheaf browse` run in its directory (the pull request of its branch, else the repository's home page); the outcome is the overview's message (`browse: opened o/r`, `browse failed: ...`), without a report view |
 | r | remove the selected worktrees (or the current one); not the primary |
 | p, d, s | `prune`, `doctor`, `sync` on the whole bundle |
 | q, esc | quit with status 0 (esc first clears an applied filter) |
@@ -468,14 +468,26 @@ else a repository; `--repo`, `--dir`, `--branch` disambiguate.
 browser with gh (installed and logged in): without argument, the repository
 of the checkout containing the working directory, else the named repository
 (its primary checkout). For a clone of your fork the page is on the
-repository (`upstream`), `--fork` opens your fork (`origin`). In a worktree
-of a pull request from a fork checked out by `wt pr` (branch `pr/<number>`,
-tracking `refs/pull/<number>/head`), the pull request opens, else the
-repository's home page; a pull request checked out from a branch of the
-repository is an ordinary branch and opens the home page. `--branch` opens
-the tree of the checkout's branch (named as locally). gh runs `gh repo view
-<slug> --web`, `gh pr view <number> --repo <slug> --web` or `gh browse
---repo <slug> --branch <branch>`. Repositories of other hosts are refused.
+repository (`upstream`); `--fork` opens the home page of your fork
+(`origin`). The page is:
+
+- in a worktree of a pull request from a fork checked out by `wt pr`
+  (branch `pr/<number>`, tracking `refs/pull/<number>/head` of the
+  repository): the pull request (`gh pr view <number> --repo <slug> --web`);
+- for a branch tracking another branch of the repository or of your fork,
+  except the default branch: the pull request of that branch, which gh looks
+  up (`gh pr view <branch> --repo <slug> --web`, `<fork owner>:<branch>` for
+  a branch of your fork); when there is none, the home page (the message
+  says `(no pull request for branch ...)`);
+- otherwise (default branch, no upstream, detached, tag): the home page
+  (`gh repo view <slug> --web`).
+
+`--branch` opens the tree of the branch the checkout's branch tracks, under
+its remote name, on the repository it is pushed to (the repository or your
+fork): `gh browse --repo <slug> --branch <branch>`. It is refused for a
+branch without upstream (push it first), one tracking a pull request, one
+tracking a remote sheaf does not know, and with `--fork`. Repositories of
+other hosts are refused.
 
 ### Maintenance
 

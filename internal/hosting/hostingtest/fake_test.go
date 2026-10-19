@@ -232,3 +232,19 @@ func TestFakeBrowseRecordsCalls(t *testing.T) {
 		t.Fatalf("calls = %+v\nwant    %+v", got, want)
 	}
 }
+
+// A head is looked up among the pull requests: "<branch>" for a branch of
+// the repository, "<owner>:<branch>" for a fork's, as gh matches them.
+func TestFakeBrowseHead(t *testing.T) {
+	t.Parallel()
+	f := NewFake()
+	f.AddPR("o", "x", hosting.PR{Number: 1, HeadBranch: "feat", HeadOwner: "o", HeadRepo: "x"})
+	f.AddPR("o", "x", hosting.PR{Number: 2, HeadBranch: "fix", HeadOwner: "me", HeadRepo: "x", IsCrossRepository: true})
+	ctx := context.Background()
+	for head, found := range map[string]bool{"feat": true, "me:fix": true, "fix": false, "o:feat": false, "other": false} {
+		err := f.Browse(ctx, "O", "X", hosting.Page{Head: head})
+		if found && err != nil || !found && !errors.Is(err, hosting.ErrNotFound) {
+			t.Errorf("head %s: err = %v, found %v", head, err, found)
+		}
+	}
+}

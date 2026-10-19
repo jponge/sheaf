@@ -96,9 +96,15 @@ func childEnv() []string {
 //	repo view: GraphQL: Could not resolve to a Repository with the name 'o/n'. (repository)
 //	pr view:   GraphQL: Could not resolve to a PullRequest with the number of 999999. (repository.pullRequest)
 //	repo list: the owner handle "x" was not recognized as either a GitHub user or an organization
+//
+// and, from gh's sources (pkg/cmd/pr/shared/finder.go, v2.46.0 and
+// v2.102.0), for `gh pr view <branch>` without a pull request of that head:
+//
+//	no pull requests found for branch "feat"
 var notFoundMarkers = []string{
 	"Could not resolve to a",
 	"was not recognized as either a GitHub user or an organization",
+	"no pull requests found for branch ",
 }
 
 func isNotFound(stderr string) bool {
@@ -459,7 +465,11 @@ func (g *GH) SetDefaultRepo(ctx context.Context, dir, owner, name string) error 
 }
 
 // Browse runs `gh repo view <owner>/<name> --web` for the home page, `gh pr
-// view <n> --repo <owner>/<name> --web` for pull request n and `gh browse
+// view <n> --repo <owner>/<name> --web` for pull request n, `gh pr view
+// <head> --repo <owner>/<name> --web` for the pull request of a head (gh
+// matches "<branch>" with the head of a pull request from a branch of the
+// repository and "<owner>:<branch>" with one from a fork: HeadLabel in
+// api/queries_pr.go) and `gh browse
 // --repo <owner>/<name> --branch <branch>` for the tree of a branch; gh
 // starts the browser. Owner, name and branch are validated first (see
 // ValidatePage).
@@ -479,6 +489,8 @@ func (g *GH) Browse(ctx context.Context, owner, name string, page Page) error {
 	switch {
 	case page.PR > 0:
 		args = []string{"pr", "view", strconv.Itoa(page.PR), "--repo", slug, "--web"}
+	case page.Head != "":
+		args = []string{"pr", "view", page.Head, "--repo", slug, "--web"}
 	case page.Branch != "":
 		args = []string{"browse", "--repo", slug, "--branch", page.Branch}
 	}

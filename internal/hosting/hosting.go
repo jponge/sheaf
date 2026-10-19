@@ -127,16 +127,19 @@ type Hosting interface {
 }
 
 // Page is a web page of a repository (see Hosting.Browse): pull request PR
-// when it is positive, else the tree of Branch when it is not empty, else
-// the home page of the repository.
+// when it is positive; else, when Head is not empty, the pull request whose
+// head is Head (a branch of the repository, or "<owner>:<branch>" for a
+// branch of a fork; ErrNotFound when there is none); else the tree of
+// Branch when it is not empty; else the home page of the repository.
 type Page struct {
 	PR     int
+	Head   string
 	Branch string
 }
 
 // ValidatePage validates owner and name like ValidateRepo, then page: a
-// pull request number that is not negative, and a branch that does not
-// begin with '-' (it would be read as an option) and has no control
+// pull request number that is not negative, and a head and a branch that
+// do not begin with '-' (they would be read as options) and has no control
 // characters (git refuses ASCII spaces in branch names, not every Unicode
 // space).
 func ValidatePage(owner, name string, page Page) error {
@@ -146,8 +149,10 @@ func ValidatePage(owner, name string, page Page) error {
 	if page.PR < 0 {
 		return fmt.Errorf("%w: pull request number %d must not be negative", ErrInvalidInput, page.PR)
 	}
-	if strings.HasPrefix(page.Branch, "-") || strings.ContainsFunc(page.Branch, unicode.IsControl) {
-		return fmt.Errorf("%w: branch %q", ErrInvalidInput, page.Branch)
+	for _, ref := range []string{page.Head, page.Branch} {
+		if strings.HasPrefix(ref, "-") || strings.ContainsFunc(ref, unicode.IsControl) {
+			return fmt.Errorf("%w: branch %q", ErrInvalidInput, ref)
+		}
 	}
 	return nil
 }

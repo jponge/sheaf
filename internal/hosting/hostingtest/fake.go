@@ -243,7 +243,8 @@ func (f *Fake) BrowseCalls() []BrowseCall {
 }
 
 // Browse validates its input like the gh adapter, records the call, runs
-// BrowseHook and returns BrowseErr; nothing is opened. It is safe for concurrent use.
+// BrowseHook and returns BrowseErr, or ErrNotFound for a Head without a
+// pull request (see AddPR); nothing is opened. It is safe for concurrent use.
 func (f *Fake) Browse(ctx context.Context, owner, name string, page hosting.Page) error {
 	if err := hosting.ValidatePage(owner, name, page); err != nil {
 		return err
@@ -255,5 +256,24 @@ func (f *Fake) Browse(ctx context.Context, owner, name string, page hosting.Page
 	if hook != nil {
 		hook(ctx)
 	}
+	if err == nil && page.PR <= 0 && page.Head != "" && !f.hasHead(owner, name, page.Head) {
+		err = fmt.Errorf("no pull requests found for branch %q: %w", page.Head, hosting.ErrNotFound)
+	}
 	return err
+}
+
+// hasHead reports whether owner/name has a pull request whose head is head
+// ("<branch>" of the repository, "<owner>:<branch>" of a fork).
+func (f *Fake) hasHead(owner, name, head string) bool {
+	prefix := strings.ToLower(owner + "/" + name + "#")
+	for k, p := range f.prs {
+		label := p.HeadBranch
+		if p.IsCrossRepository {
+			label = p.HeadOwner + ":" + p.HeadBranch
+		}
+		if strings.HasPrefix(k, prefix) && label == head {
+			return true
+		}
+	}
+	return false
 }
