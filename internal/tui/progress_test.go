@@ -324,7 +324,7 @@ func TestProgressCancelledRowAndTitleChange(t *testing.T) {
 	}
 	m, _ = feed(m, RowUpdate{Key: "a", State: RowCancelled})
 	v := view(m)
-	if l := strings.Split(v, "\n")[1]; !strings.HasPrefix(l, "- alpha") || !strings.Contains(l, "cancelled") || strings.Contains(l, "skipped") {
+	if l := strings.Split(v, "\n")[2]; !strings.HasPrefix(l, "- alpha") || !strings.Contains(l, "cancelled") || strings.Contains(l, "skipped") {
 		t.Errorf("alpha row = %q, want a cancelled row", l)
 	}
 	if !strings.Contains(v, "0 running, 0 done, 0 skipped, 0 failed, 1 cancelled ·") {
@@ -333,5 +333,65 @@ func TestProgressCancelledRowAndTitleChange(t *testing.T) {
 	m, _ = feed(m, FinishMsg{})
 	if v := view(m); !strings.HasPrefix(v, "Removing alpha: 0 done, 0 skipped, 0 failed, 1 cancelled in ") {
 		t.Errorf("final view:\n%s", v)
+	}
+}
+
+// progressShape classifies the lines of a progress view titled "t": H
+// header, R row, N hidden-rows note, I interruption note, ? other.
+func progressShape(m tea.Model) string {
+	return shape(view(m), func(l string) string {
+		switch {
+		case strings.HasPrefix(l, "t ·"), strings.HasPrefix(l, "t:"):
+			return "H"
+		case strings.Contains(l, "repo"):
+			return "R"
+		case strings.HasPrefix(l, "… "):
+			return "N"
+		case strings.HasPrefix(l, "Interrupted"):
+			return "I"
+		}
+		return "?"
+	})
+}
+
+// A blank line separates the header from the rows (B41), with the rule of
+// the other views: kept unless dropping it lets every row fit, and dropped
+// when no row would fit with it (the hidden-rows note then follows the
+// header). No blank line without rows, nor in the final view.
+func TestProgressSpacesTheHeader(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		rows, height int
+		interrupted  bool
+		want         string
+	}{
+		{0, 0, false, "H"},
+		{3, 0, false, "H _ R R R"},
+		{3, 5, false, "H _ R R R"},
+		{3, 4, false, "H R R R"},
+		{5, 4, false, "H _ R N"},
+		{5, 3, false, "H R N"},
+		{2, 5, true, "H _ R R I"},
+		{2, 4, true, "H R R I"},
+	} {
+		p, _ := newTestProgress("t")
+		var msgs []tea.Msg
+		for i := range c.rows {
+			msgs = append(msgs, RowUpdate{Key: fmt.Sprint(i), Label: fmt.Sprintf("repo%d", i), State: RowRunning})
+		}
+		if c.height > 0 {
+			msgs = append(msgs, tea.WindowSizeMsg{Width: 80, Height: c.height})
+		}
+		if c.interrupted {
+			msgs = append(msgs, InterruptedMsg{Count: 1})
+		}
+		m, _ := feed(p, msgs...)
+		if got := progressShape(m); got != c.want {
+			t.Errorf("%d rows, height %d: shape %q, want %q:\n%s", c.rows, c.height, got, c.want, view(m))
+		}
+		m, _ = m.Update(FinishMsg{})
+		if got := progressShape(m); got != "H _" {
+			t.Errorf("%d rows, height %d: final shape %q, want %q", c.rows, c.height, got, "H _")
+		}
 	}
 }

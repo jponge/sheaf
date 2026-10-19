@@ -345,7 +345,10 @@ func (m Progress) render() string {
 		footer = append(footer, strings.Split(ask.View().Content, "\n")...)
 	}
 
-	visible := m.visibleRows(len(footer))
+	visible, gap := m.visibleRows(len(footer))
+	if gap {
+		lines = append(lines, "")
+	}
 	width := 0
 	for _, i := range visible {
 		width = max(width, lipgloss.Width(sanitize(m.rows[i].label)))
@@ -374,19 +377,30 @@ func (m Progress) render() string {
 	return m.truncate(lines)
 }
 
-// visibleRows returns the indices of the rows to render, in order. When the
+// visibleRows returns the indices of the rows to render, in order, and
+// whether a blank line separates them from the header (B41). When the
 // height is known and too small, running rows are kept first, then the most
 // recently added finished ones, leaving a line for the hidden-rows note.
-func (m Progress) visibleRows(footer int) []int {
+// The blank line is kept unless dropping it lets every row fit, and dropped
+// when no row would fit with it, like the gaps of the other views (see
+// fitGaps); there is none without rows.
+func (m Progress) visibleRows(footer int) ([]int, bool) {
 	all := make([]int, len(m.rows))
 	for i := range all {
 		all[i] = i
 	}
+	gap := len(m.rows) > 0
 	room := m.height - 1 - footer // header and footer
-	if m.height <= 0 || len(m.rows) <= room {
-		return all
+	switch {
+	case m.height <= 0 || len(m.rows) <= room-1:
+		return all, gap
+	case len(m.rows) <= room:
+		return all, false
 	}
 	room-- // the "… N more" line
+	if gap = room > 1; gap {
+		room--
+	}
 	keep := map[int]bool{}
 	for i, r := range m.rows {
 		if len(keep) < room && r.state == RowRunning {
@@ -402,7 +416,7 @@ func (m Progress) visibleRows(footer int) []int {
 			out = append(out, i)
 		}
 	}
-	return out
+	return out, gap
 }
 
 func (m Progress) renderRow(r progressRow, width int) string {
