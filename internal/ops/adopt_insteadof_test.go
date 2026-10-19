@@ -130,3 +130,35 @@ func TestAdoptRecheckRecordsConfiguredForkURLDespiteInsteadOf(t *testing.T) {
 	}
 	noRemoteURLWarning(t, f, "newcli")
 }
+
+// With several URLs (`git remote set-url --add`, mirrors), git fetches from
+// the first one: adopt records it, and doctor compares the first one.
+func TestAdoptRecordsFirstOfSeveralURLs(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	o := testutil.NewOrigin(t, testutil.OriginOpts{})
+	dir := filepath.Join(f.w.Root, "proj")
+	plainClone(t, o, dir)
+	testutil.Git(t, dir, "remote", "set-url", "--add", "origin", "https://gitlab.com/mirror/proj.git")
+	if _, err := adopt(t, f, dir, AdoptOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if r, ok := f.onDisk(t).Repository("proj"); !ok || r.URL != o.URL || r.Slug != originSlug(t, o) || r.Host != bundle.HostLocal {
+		t.Fatalf("entry = %+v, %v; want URL %s", r, ok, o.URL)
+	}
+	noRemoteURLWarning(t, f, "proj")
+}
+
+func TestDoctorComparesFirstOfSeveralURLs(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	primary, o := f.clonedRepo(t, "a")
+	// A mirror added after the recorded URL is not a mismatch.
+	testutil.Git(t, primary, "remote", "set-url", "--add", "origin", "https://gitlab.com/mirror/a.git")
+	noRemoteURLWarning(t, f, "a")
+	// The recorded URL only as a mirror is one: git fetches from the first.
+	testutil.Git(t, primary, "config", "--unset-all", "remote.origin.url")
+	testutil.Git(t, primary, "config", "--add", "remote.origin.url", "file:///elsewhere/a.git")
+	testutil.Git(t, primary, "config", "--add", "remote.origin.url", o.URL)
+	wantCheck(t, f.doctor(t, DoctorOptions{}), CheckWarn, "origin-url", "a", "file:///elsewhere/a.git")
+}

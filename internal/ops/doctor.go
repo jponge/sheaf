@@ -203,7 +203,7 @@ func doctorRepo(ctx context.Context, root string, r bundle.Repository, now time.
 	// gh default repository check.
 	cfg, cfgErr := remoteConfig(ctx, primary)
 	checkRemote := func(remote, want, what, field string) {
-		u := lastValue(cfg, "remote."+remote+".url")
+		u := firstValue(cfg, "remote."+remote+".url")
 		switch {
 		case cfgErr != nil:
 			add(CheckWarn, remote+"-url", "cannot read the "+remote+" remote"+what+": "+firstLineOf(cfgErr.Error()), "")

@@ -175,6 +175,15 @@ func remoteConfig(ctx context.Context, dir string) (map[string][]string, error) 
 	return cfg, nil
 }
 
+// firstValue returns the first value of a multi-valued variable, or "" when
+// unset: for remote.<name>.url, the URL git fetches from.
+func firstValue(cfg map[string][]string, key string) string {
+	if vs := cfg[key]; len(vs) > 0 {
+		return vs[0]
+	}
+	return ""
+}
+
 // lastValue returns the value git uses for a single-valued variable (the
 // last one), or "" when unset.
 func lastValue(cfg map[string][]string, key string) string {

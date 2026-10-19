@@ -106,12 +106,13 @@ func CurrentBranch(ctx context.Context, dir string) (string, error) {
 }
 
 // RemoteURL returns the (fetch) URL configured for remote in dir as written
-// (remote.<remote>.url, the last value when there are several), not the URL
-// `git remote get-url` returns after url.<base>.insteadOf rewriting: sheaf
-// records and compares configured URLs, while git operations (clone, fetch,
-// ls-remote) keep applying the rewrites.
+// (remote.<remote>.url; the first value when there are several, the one git
+// fetches from), not the URL `git remote get-url` returns after
+// url.<base>.insteadOf rewriting: sheaf records and compares configured
+// URLs, while git operations (clone, fetch, ls-remote) keep applying the
+// rewrites.
 func RemoteURL(ctx context.Context, dir, remote string) (string, error) {
-	out, err := Run(ctx, dir, "config", "--get", "remote."+remote+".url")
+	out, err := Run(ctx, dir, "config", "--get-all", "remote."+remote+".url")
 	if err != nil {
 		var ge *GitError
 		if errors.As(err, &ge) && ge.ExitCode == 1 && ctx.Err() == nil {
@@ -119,7 +120,8 @@ func RemoteURL(ctx context.Context, dir, remote string) (string, error) {
 		}
 		return "", err
 	}
-	return strings.TrimSpace(out), nil
+	first, _, _ := strings.Cut(out, "\n")
+	return strings.TrimSpace(first), nil
 }
 
 // TopLevel returns the absolute top-level directory of the work tree

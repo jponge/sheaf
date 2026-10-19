@@ -156,6 +156,32 @@ func TestRemoteURLIgnoresInsteadOf(t *testing.T) {
 	}
 }
 
+// With several URLs, RemoteURL returns the first one, the one git fetches
+// from and `git remote get-url` lists, also when per-worktree configuration
+// (extensions.worktreeConfig, read after the repository's) adds one.
+func TestRemoteURLFirstOfSeveral(t *testing.T) {
+	t.Parallel()
+	o, dir := cloneOrigin(t, testutil.OriginOpts{})
+	testutil.Git(t, dir, "remote", "set-url", "--add", "origin", "https://gitlab.com/mirror/proj.git")
+	testutil.Git(t, dir, "config", "extensions.worktreeConfig", "true")
+	testutil.Git(t, dir, "config", "--worktree", "remote.origin.url", "https://example.org/wt/proj.git")
+	if got := testutil.Git(t, dir, "remote", "get-url", "origin"); got != o.URL {
+		t.Fatalf("setup: git remote get-url = %q, want %q", got, o.URL)
+	}
+	got, err := RemoteURL(context.Background(), dir, "origin")
+	if err != nil || got != o.URL {
+		t.Fatalf("RemoteURL = %q, %v; want %q", got, err, o.URL)
+	}
+	// Set only for this worktree, the URL is the worktree's.
+	testutil.Git(t, dir, "config", "--unset-all", "remote.origin.url")
+	if got, err := RemoteURL(context.Background(), dir, "origin"); err != nil || got != "https://example.org/wt/proj.git" {
+		t.Fatalf("worktree-only: RemoteURL = %q, %v", got, err)
+	}
+	if got := testutil.Git(t, dir, "remote", "get-url", "origin"); got != "https://example.org/wt/proj.git" {
+		t.Fatalf("worktree-only: git remote get-url = %q", got)
+	}
+}
+
 func TestTopLevelAndIsRepo(t *testing.T) {
 	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})
