@@ -302,6 +302,25 @@ func tuiPrune(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.PruneOptions,
 	return pruneErr(s.ctx, plan, results)
 }
 
+// syncApply adds the new repositories add and removes the gone ones (see
+// tuiSync), reporting to r, and returns their summaries. A planning r is
+// told the units of both batches (one per proposal) up front rather than
+// batch by batch, so that the progress ratio never goes backwards.
+func syncApply(ctx context.Context, d Deps, w *ops.Workspace, add, gone []ops.Proposal, noFork bool, wd string, jobs int, r ops.Reporter) (addSum, rmSum ops.Summary) {
+	if p, ok := r.(ops.Planner); ok {
+		p.Plan(len(add) + len(gone))
+		r = ops.ReporterFunc(r.Report) // not a Planner: the batches plan again
+	}
+	if len(add) > 0 {
+		addSum = ops.SyncAddNewWithOptions(ctx, w, add, ops.CloneOptions{Hosting: d.hosting(), NoFork: noFork}, jobs, r)
+	}
+	if len(gone) > 0 {
+		opts := ops.SyncRemoveOptions{Remove: ops.RemoveOptions{WorkingDir: wd, Confirm: func(ops.RemovePlan) bool { return true }}}
+		rmSum = ops.SyncRemoveGone(ctx, w, gone, opts, jobs, r)
+	}
+	return addSum, rmSum
+}
+
 // tuiSync offers the proposals of sync in a menu (new and gone ones
 // selectable, nothing preselected), confirms removals, and applies the
 // choices like --add-new and --remove-gone --yes (never --force nor
@@ -361,13 +380,7 @@ func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noF
 		defer s.ctl.during(noteClone)()
 	}
 	s.progress("Syncing", progressOpts{}, func(ctx context.Context, r ops.Reporter, _ askFunc) {
-		if len(add) > 0 {
-			addSum = ops.SyncAddNewWithOptions(ctx, w, add, ops.CloneOptions{Hosting: d.hosting(), NoFork: noFork}, jobs, r)
-		}
-		if len(gone) > 0 {
-			opts := ops.SyncRemoveOptions{Remove: ops.RemoveOptions{WorkingDir: wd, Confirm: func(ops.RemovePlan) bool { return true }}}
-			rmSum = ops.SyncRemoveGone(ctx, w, gone, opts, jobs, r)
-		}
+		addSum, rmSum = syncApply(ctx, d, w, add, gone, noFork, wd, jobs, r)
 	})
 	if len(add) > 0 {
 		printFailureDetails(c.ErrOrStderr(), addSum)

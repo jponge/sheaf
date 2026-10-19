@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
@@ -88,8 +89,28 @@ func runHome(c *cobra.Command, d Deps) error {
 	}
 	d.windowTitle = homeTitle("", root)
 	h := &home{c: c, d: d, s: newTUISession(c, d), root: root, jobs: o.Jobs}
+	if h.s.title != "" {
+		// The window title of the terminal is saved and restored around
+		// the programs, which set it and clear it when they end; also on
+		// the emergency stop, which exits at once.
+		fmt.Fprint(h.s.out, saveWindowTitle)
+		var once sync.Once
+		restore := func() { once.Do(func() { fmt.Fprint(h.s.out, restoreWindowTitle) }) }
+		h.s.ctl.setRestore(restore)
+		defer func() {
+			h.s.ctl.setRestore(nil)
+			restore()
+		}()
+	}
 	return h.loop()
 }
+
+// saveWindowTitle and restoreWindowTitle push the icon and window titles of
+// the terminal on its stack and pop them (XTWINOPS 22 and 23, mode 0).
+const (
+	saveWindowTitle    = "\x1b[22;0t"
+	restoreWindowTitle = "\x1b[23;0t"
+)
 
 // homeTitle returns the window title of the home screen on the bundle
 // root, "sheaf: <name of root>", or that of its action name, "sheaf

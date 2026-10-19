@@ -151,14 +151,17 @@ func (d Deps) termOf(c *cobra.Command) io.Writer {
 // render inline (no alternate screen; the overview of the home screen is
 // the exception), so their last frame stays in the terminal; bubbletea's
 // own signal handler is disabled: signals go through
-// execute's interruptCtl, like ctrl+c in a progress view. With a title
-// (Deps.windowTitle, on a terminal only), the programs set the window title.
+// execute's interruptCtl, like ctrl+c in a progress view. With controls
+// (see terminalControls), progress views drive the terminal's progress
+// indicator, and the programs set the window title if there is one
+// (Deps.windowTitle).
 type tuiSession struct {
 	ctx       context.Context
 	ctl       *interruptCtl
 	in        io.Reader
 	out, errw io.Writer
 	spin      *spinner // held while a program runs
+	controls  bool
 	title     string
 }
 
@@ -177,10 +180,17 @@ func newTUISession(c *cobra.Command, d Deps) *tuiSession {
 		out = p.w
 	}
 	s := &tuiSession{ctx: ctx, ctl: ctl, in: c.InOrStdin(), out: out, errw: d.leveled(c, c.ErrOrStderr()), spin: d.spin}
-	if isTerminal(out) {
+	if s.controls = d.terminalControls(out); s.controls {
 		s.title = d.windowTitle
 	}
 	return s
+}
+
+// terminalControls tells whether the TUI programs rendering on out may send
+// it the controls of the terminal window (title, progress indicator): when
+// it is a terminal, other than TERM=dumb.
+func (d Deps) terminalControls(out io.Writer) bool {
+	return isTerminal(out) && d.getenv("TERM") != "dumb"
 }
 
 // titled returns m wrapped to set the window title of s, if any.
@@ -280,7 +290,7 @@ type progressOpts struct {
 func (s *tuiSession) progress(title string, o progressOpts, work func(ctx context.Context, rep ops.Reporter, ask askFunc)) {
 	plain := checkoutRenderer{plainRenderer{s.errw}}
 	model := tui.NewProgress(title).WithInterrupt(s.ctl.interrupt)
-	if isTerminal(s.out) {
+	if s.controls {
 		model = model.WithTerminalProgress()
 	}
 	p, err := tui.NewProgram(s.titled(model), s.in, s.out, tea.WithoutSignalHandler())

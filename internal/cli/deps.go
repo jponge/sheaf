@@ -148,6 +148,7 @@ type interruptCtl struct {
 
 	mu      sync.Mutex
 	release func() // restores the terminal of the running TUI program, if any
+	restore func() // restores what was set outside programs (see setRestore)
 	notify  func(int)
 	notes   []string // see during
 	// registered, if set, is called with each note registered by during
@@ -193,6 +194,15 @@ func (d Deps) force() <-chan struct{} {
 func (c *interruptCtl) setRelease(f func()) {
 	c.mu.Lock()
 	c.release = f
+	c.mu.Unlock()
+}
+
+// setRestore registers f, which restores terminal state set outside the
+// TUI programs (the window title saved by the home screen), to be called by
+// the emergency stop after release; nil unregisters it.
+func (c *interruptCtl) setRestore(f func()) {
+	c.mu.Lock()
+	c.restore = f
 	c.mu.Unlock()
 }
 
@@ -260,10 +270,13 @@ func (d Deps) emergencyNote(note string) (done func()) {
 func (c *interruptCtl) emergencyStop() {
 	close(c.force)
 	c.mu.Lock()
-	release := c.release
+	release, restore := c.release, c.restore
 	c.mu.Unlock()
 	if release != nil {
 		release()
+	}
+	if restore != nil {
+		restore()
 	}
 	c.mu.Lock()
 	var notes []string

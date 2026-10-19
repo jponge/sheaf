@@ -623,6 +623,87 @@ func TestHomeOnPTYSetsWindowTitle(t *testing.T) {
 	}
 }
 
+// titleControls matches the sequences about the window title: setting it
+// (OSC 0, 2), saving and restoring it (XTWINOPS 22, 23).
+var titleControls = regexp.MustCompile(`\x1b\][02];[^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[2[23];\d*t`)
+
+// wantWindowTitleRestored checks that out saves the window title before
+// setting it the first time, and restores it last.
+func wantWindowTitleRestored(t *testing.T, out string) {
+	t.Helper()
+	all := titleControls.FindAllString(out, -1)
+	if len(all) < 3 || all[0] != "\x1b[22;0t" || all[len(all)-1] != "\x1b[23;0t" || !strings.HasPrefix(all[1], "\x1b]2;sheaf") {
+		t.Errorf("title sequences %q: want the save first, then titles, the restore last", all)
+	}
+	if strings.Count(out, "\x1b[22;0t") != 1 || strings.Count(out, "\x1b[23;0t") != 1 {
+		t.Errorf("title sequences %q: want one save and one restore", all)
+	}
+}
+
+// The home screen saves the window title of the terminal before its
+// programs set theirs, and restores it once the last one has ended (D2),
+// on every way out: quit, enter (cd), ctrl+c (130), an error, the
+// emergency stop.
+func TestHomeOnPTYRestoresWindowTitle(t *testing.T) {
+	for _, c := range []struct {
+		name, exit string
+		path       string // shell code of a git wrapper (see fakeFetchGit), if any
+		drive      func(t *testing.T, s *ptyShell, root string)
+	}{
+		{"quit", "0", "", func(t *testing.T, s *ptyShell, _ string) { s.write("q") }},
+		{"cd", "0", "", func(t *testing.T, s *ptyShell, _ string) { s.write("\r") }},
+		{"ctrl+c", "130", "", func(t *testing.T, s *ptyShell, _ string) { s.write("\x03") }},
+		{"error", "1", "", func(t *testing.T, s *ptyShell, root string) {
+			// The next overview cannot read the bundle.
+			if err := os.Rename(filepath.Join(root, "sheaf.yaml"), filepath.Join(root, "moved.yaml")); err != nil {
+				t.Fatal(err)
+			}
+			s.write("f")
+			dismissReport(t, s, "fetch", 1)
+		}},
+		{"emergency stop", "130", `trap '' TERM INT HUP; while :; do sleep 1; done`, func(t *testing.T, s *ptyShell, _ string) {
+			s.write("f")
+			s.waitFor(`Fetching`)
+			s.write("\x03")
+			s.waitFor(`Interrupted: no new work`)
+			s.write("\x03")
+			s.waitFor(`interrupted again`)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e, _, _, _, _ := homeBundle(t)
+			path := ""
+			if c.path != "" {
+				path = `PATH='` + fakeFetchGit(t, c.path) + `':$PATH; export PATH; `
+			}
+			s := startPTYShell(t, e.cwd, path+`B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+			s.waitFor(`STATE`)
+			c.drive(t, s, e.cwd)
+			wantTerminalRestored(t, s, c.exit)
+			wantWindowTitleRestored(t, s.output())
+		})
+	}
+}
+
+// With TERM=dumb, nothing touches the window title nor the progress
+// indicator (F2).
+func TestHomeOnPTYDumbTerminalSendsNoWindowControls(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	bin := fakeFetchGit(t, `sleep 30`)
+	s := startPTYShell(t, e.cwd, `PATH='`+bin+`':$PATH; export PATH; B=$(stty -g); TERM=dumb "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	s.write("f")
+	s.waitFor(`Fetching · 1 running`)
+	s.write("\x03")
+	wantTerminalRestored(t, s, "130")
+	if all := titleControls.FindAllString(s.output(), -1); len(all) > 0 {
+		t.Errorf("title sequences %q with TERM=dumb", all)
+	}
+	if all := terminalProgress.FindAllString(s.output(), -1); len(all) > 0 {
+		t.Errorf("terminal progress sequences %q with TERM=dumb", all)
+	}
+}
+
 // On a terminal, the STATE column of the overview and the level words of
 // doctor's report are colored; with NO_COLOR, nothing is (B32, B33).
 func TestHomeOnPTYColorsStatesAndLevels(t *testing.T) {

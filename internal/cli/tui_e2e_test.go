@@ -2,8 +2,10 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/jponge/sheaf/internal/hosting"
 	"github.com/jponge/sheaf/internal/hosting/hostingtest"
+	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
@@ -372,6 +375,69 @@ func goneB(t *testing.T) (*env, string) {
 	e.fake.AddRepo(hosting.Repo{Owner: "o", Name: "a", CloneURL: a.URL, DefaultBranch: "main"})
 	e.origin(t, "o", "c", false)
 	return e, root
+}
+
+// ratioRecorder is a planning reporter that records the ratio of final
+// events over planned units after each call, as the progress bars show it.
+type ratioRecorder struct {
+	plans    []int
+	planned  int
+	finished int
+	ratios   []float64
+}
+
+func (r *ratioRecorder) Plan(units int) {
+	r.plans = append(r.plans, units)
+	r.planned += units
+	r.record()
+}
+
+func (r *ratioRecorder) Report(e ops.Event) {
+	if e.Kind == ops.KindDone || e.Kind == ops.KindSkipped || e.Kind == ops.KindFailed {
+		r.finished++
+	}
+	r.record()
+}
+
+func (r *ratioRecorder) record() {
+	if r.planned > 0 {
+		r.ratios = append(r.ratios, float64(r.finished)/float64(r.planned))
+	}
+}
+
+// A TUI sync adding new repositories and removing gone ones announces all
+// of its work up front: its progress ratio never goes backwards.
+func TestTUISyncPlansAllItsWorkUpFront(t *testing.T) {
+	e, root := goneB(t)
+	w, err := ops.OpenWorkspace(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := e.deps()
+	rep, err := ops.Sync(context.Background(), w, d.hosting(), ops.SyncOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var add, gone []ops.Proposal
+	for _, p := range rep.Proposals {
+		switch p.Kind {
+		case ops.ProposalNew:
+			add = append(add, p)
+		case ops.ProposalGone:
+			gone = append(gone, p)
+		}
+	}
+	if len(add) != 1 || len(gone) != 1 {
+		t.Fatalf("proposals %+v, want new c and gone b", rep.Proposals)
+	}
+	r := &ratioRecorder{}
+	syncApply(context.Background(), d, w, add, gone, false, root, 1, r)
+	if !slices.Equal(r.plans, []int{2}) {
+		t.Errorf("plans %v, want [2]", r.plans)
+	}
+	if !slices.IsSorted(r.ratios) || r.finished != 2 {
+		t.Errorf("ratios %v (%d finished), want them non-decreasing up to 2 finished", r.ratios, r.finished)
+	}
 }
 
 // The TUI never implies --force: a gone repository whose remote still
