@@ -748,9 +748,10 @@ make demo                                            # writes demo/sheaf.gif
 and `demo/setup.sh` creates a throwaway bundle in `DEMO_DIR` (default
 `/tmp/sheaf-demo`, removed afterwards): three repositories with local bare
 remotes (`file://` URLs), worktrees, a checkout behind its remote and a
-dirty one. The recording shell gets its own `HOME` and git configuration
-and the `sheaf` shell function; nothing uses the network, gh or your
-configuration. `make demo-check` runs the steps of the tape in plain mode
+dirty one. The setup and the recording shell drop the `GIT_*` and gh
+variables, get their own `HOME`, git and gh configuration, and a `gh` stub
+that fails first on `PATH`; the shell also gets the `sheaf` shell function.
+Nothing uses the network, GitHub or your configuration. `make demo-check` runs the steps of the tape in plain mode
 against such a bundle (`demo/check.sh`) and checks the tape with vhs's
 parser, without ttyd or ffmpeg.
 

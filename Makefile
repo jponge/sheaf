@@ -66,15 +66,22 @@ vet-windows:
 
 # Records demo/sheaf.gif with vhs (needs vhs, ttyd and ffmpeg on PATH; see
 # the README). demo/setup.sh creates the demo bundle in DEMO_DIR (replaced if
-# an earlier run left it; another existing directory is refused and kept),
-# with sheaf built into a temporary directory first on PATH; both are
-# removed afterwards. Nothing uses the network or the user's configuration.
+# an earlier run left it; a symbolic link or another existing directory is
+# refused and kept), with sheaf built into a temporary directory first on
+# PATH; both are removed afterwards, also on interruption (the bundle is
+# kept when setup.sh fails). Nothing uses the network, gh or the user's
+# configuration. The INT and TERM traps exit so that the EXIT trap runs:
+# dash does not run it on a signal.
 DEMO_DIR ?= /tmp/sheaf-demo
 demo:
-	@set -e; bin=$$(mktemp -d) && \
-	trap 'rm -rf "$$bin"; if [ -e "$(DEMO_DIR)/.sheaf-demo" ]; then rm -rf "$(DEMO_DIR)"; fi' EXIT; \
+	@for t in vhs ttyd ffmpeg; do \
+	  command -v $$t >/dev/null || { echo "make demo: $$t not found on PATH (see Regenerating the demo in README.md)" >&2; exit 1; }; \
+	done
+	@set -e; bin=$$(mktemp -d); made=; \
+	trap 'rm -rf "$$bin"; if [ -n "$$made" ]; then rm -rf "$(DEMO_DIR)"; fi' EXIT; \
+	trap 'exit 130' INT; trap 'exit 143' TERM; \
 	go build -ldflags "$(LDFLAGS)" -o "$$bin/sheaf" ./cmd/sheaf; \
-	PATH="$$bin:$$PATH" demo/setup.sh "$(DEMO_DIR)"; \
+	PATH="$$bin:$$PATH" demo/setup.sh "$(DEMO_DIR)"; made=1; \
 	PATH="$$bin:$$PATH" SHEAF_DEMO_DIR="$(DEMO_DIR)" vhs demo/sheaf.tape
 
 # Checks the demo without vhs: demo/check.sh runs the steps of the tape in
@@ -83,7 +90,8 @@ demo:
 # staticcheck; ttyd and ffmpeg are not needed).
 VHS := github.com/charmbracelet/vhs@v0.12.1
 demo-check:
-	@set -e; bin=$$(mktemp -d) && trap 'rm -rf "$$bin"' EXIT; \
-	go build -o "$$bin/sheaf" ./cmd/sheaf; \
+	@set -e; bin=$$(mktemp -d); \
+	trap 'rm -rf "$$bin"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; \
+	go build -ldflags "$(LDFLAGS)" -o "$$bin/sheaf" ./cmd/sheaf; \
 	PATH="$$bin:$$PATH" demo/check.sh; \
 	go run $(VHS) validate demo/sheaf.tape

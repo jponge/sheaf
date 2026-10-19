@@ -3,10 +3,15 @@
 # (see the Makefile); its env.sh isolates the shell from the user's
 # configuration and defines the sheaf shell function.
 #
-# Waits (Wait+Screen on the alternate screen, where no scrollback shifts the
-# lines it reads; Wait on the prompt line) let
-# the work finish whatever the machine; the Sleeps that follow set how long
-# each step stays on screen.
+# Waits let the work finish whatever the machine; the Sleeps that follow set
+# how long each step stays on screen. Wait+Screen reads the lines 0 to Rows-1
+# of the active buffer, scrollback included (vhs v0.12.1, testing.go:70), so
+# it is only used on the alternate screen (overview, report views), which has
+# no scrollback. The prompt of `w` is drawn on the normal screen below what
+# the earlier actions printed, possibly past those lines: it gets a Sleep
+# (nothing runs between `w` and the prompt), and the Wait for the report of
+# `add` that follows fails the recording if the branch was not entered. Wait
+# (current line) is used for the shell prompt.
 
 Output demo/sheaf.gif
 
@@ -80,8 +85,7 @@ Sleep 500ms
 Enter
 Sleep 800ms
 Type "w"
-Wait+Screen /New worktree of api/
-Sleep 800ms
+Sleep 1.2s
 Type@90ms "feat/search"
 Sleep 600ms
 Enter
