@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jponge/sheaf/internal/gitx"
 )
@@ -22,9 +24,10 @@ type WorktreeSuggestions struct {
 // checkout (nothing is fetched), with one git process: the local branches
 // and the branches of the remotes searched for an existing branch
 // (RemotesOf(r).BranchSearch(): origin, or the fork and upstream), without
-// the remote's name (nor the remote's HEAD); the tags. A primary checkout
-// without its .git directory is an error, without running git, which would
-// read an enclosing repository.
+// the remote's name (nor the remote's HEAD); the tags. Names that the
+// prompt would display or accept altered (see typable) are left out. A
+// primary checkout without its .git directory is an error, without running
+// git, which would read an enclosing repository.
 func SuggestWorktree(ctx context.Context, w *Workspace, repo string) (WorktreeSuggestions, error) {
 	r, err := repoNamed(w.Bundle(), repo)
 	if err != nil {
@@ -48,6 +51,9 @@ func SuggestWorktree(ctx context.Context, w *Workspace, repo string) (WorktreeSu
 	}
 	var s WorktreeSuggestions
 	for _, ref := range strings.Split(out, "\n") {
+		if !typable(ref) {
+			continue
+		}
 		if name, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
 			s.Branches = append(s.Branches, name)
 		} else if name, ok := strings.CutPrefix(ref, "refs/tags/"); ok {
@@ -64,4 +70,11 @@ func SuggestWorktree(ctx context.Context, w *Workspace, repo string) (WorktreeSu
 	slices.Sort(s.Tags)
 	s.Branches, s.Tags = slices.Compact(s.Branches), slices.Compact(s.Tags)
 	return s, nil
+}
+
+// typable reports whether s is valid UTF-8 without control characters (C0,
+// DEL, C1), which the prompt would replace or drop: a suggestion accepted
+// altered would name another ref.
+func typable(s string) bool {
+	return utf8.ValidString(s) && strings.IndexFunc(s, unicode.IsControl) < 0
 }

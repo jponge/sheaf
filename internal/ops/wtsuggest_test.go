@@ -50,6 +50,15 @@ func TestWorktreeSuggestions(t *testing.T) {
 			t.Errorf("%s: %d git processes, want 1", tc.repo, n)
 		}
 	}
+	// Names that the prompt would display or accept changed (control
+	// characters, C1 included, or invalid UTF-8), i.e. another ref, are
+	// not suggested.
+	for _, ref := range []string{"refs/heads/caf\u0085e", "refs/heads/bad\xff", "refs/tags/t\u009b1", "refs/remotes/origin/x\u0085y"} {
+		testutil.Git(t, primary, "update-ref", ref, "HEAD")
+	}
+	if got, err := SuggestWorktree(context.Background(), f.w, "plain"); err != nil || !reflect.DeepEqual(got, WorktreeSuggestions{Branches: []string{"feat", "local-only", "main"}, Tags: []string{"v1.0"}}) {
+		t.Errorf("with unsafe names: %+v, %v", got, err)
+	}
 	// An unknown repository, or a primary checkout without its .git
 	// directory (git would read an enclosing repository), give an error,
 	// without running git.
