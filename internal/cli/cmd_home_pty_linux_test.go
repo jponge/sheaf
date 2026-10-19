@@ -828,6 +828,58 @@ func TestHomeOnPTYPromptDoesNotWaitForSuggestions(t *testing.T) {
 	}
 }
 
+// The git process reading the suggestions of the w prompt (B47) is stopped
+// once the prompt is answered, before wt add runs: when wt add checks the
+// branch name, the process (still loading, here) is gone (waited for up
+// to 5 seconds, as stopping it takes a moment).
+func TestHomeOnPTYSuggestionsStoppedBeforeWtAdd(t *testing.T) {
+	e, alpha, _, _, _ := homeBundle(t)
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin, state := t.TempDir(), t.TempDir()
+	pid, seen := filepath.Join(state, "suggest.pid"), filepath.Join(state, "seen")
+	// The suggestions are the only for-each-ref of refs/tags and
+	// refs/remotes/origin; wt add starts with check-ref-format --branch.
+	writeFile(t, filepath.Join(bin, "git"), `#!/bin/sh
+tags=; origin=; check=
+for a in "$@"; do case $a in refs/tags) tags=1;; refs/remotes/origin) origin=1;; --branch) check=1;; esac; done
+if [ "$tags$origin" = 11 ]; then echo $$ > '`+pid+`'; exec sleep 60; fi
+if [ -n "$check" ] && [ -s '`+pid+`' ] && [ ! -e '`+seen+`' ]; then
+	i=0
+	while kill -0 "$(cat '`+pid+`')" 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+	if kill -0 "$(cat '`+pid+`')" 2>/dev/null; then echo running > '`+seen+`'; else echo stopped > '`+seen+`'; fi
+fi
+exec '`+git+`' "$@"
+`)
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := startPTYShell(t, e.cwd, `PATH='`+bin+`':$PATH; export PATH; B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	s.write("w")
+	s.waitFor(`New worktree of alpha`)
+	for deadline := time.Now().Add(30 * time.Second); !exists(pid); { // the suggestions are loading
+		if time.Now().After(deadline) {
+			t.Fatal("the suggestions were never read")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	s.write("xy\r")
+	dismissReport(t, s, "wt add", 1)
+	s.waitFor(`wt add: done`)
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
+	if !exists(filepath.Join(filepath.Dir(alpha), "xy", ".git")) {
+		t.Fatalf("worktree not added:\n%q", s.output())
+	}
+	got, err := os.ReadFile(seen)
+	if err != nil || string(got) != "stopped\n" {
+		t.Errorf("suggestion process when wt add started: %q, %v", got, err)
+	}
+}
+
 // Mouse wheel reports (SGR, as the terminal sends them once asked) move the
 // cursor of the overview by up to 3 rows (B49); mouse reporting is on while
 // the overview is displayed, as cell motion with SGR encoding (DECSET 1002
