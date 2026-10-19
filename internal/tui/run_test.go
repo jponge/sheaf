@@ -151,6 +151,29 @@ func TestRunMultiRuneKeyInListMode(t *testing.T) {
 	assertKeys(t, m, "c")
 }
 
+// Mouse reports that reach a program without mouse mode (e.g. wheel turns
+// in flight when the overview ends and an action's menu or prompt starts,
+// B49) are parsed as mouse events, which these models ignore: none of their
+// bytes is taken as a key. SGR reports (the format bubbletea asks for) and
+// X10 ones (the fallback; "\x1b[Ma*%" is a wheel turn down whose button
+// byte reads "a", select all in a menu) are covered.
+func TestRunIgnoresStrayMouseReports(t *testing.T) {
+	const reports = "\x1b[<65;10;5M\x1b[<64;10;5M\x1b[<0;3;4M\x1b[<0;3;4m\x1b[Ma*%\x1b[M`*%"
+	m, out := runWithTimeout(t, NewMultiSelect("Pick", abc()), &chunkReader{chunks: []string{reports, " ", reports, "/", reports, "b", "\r", reports, " ", "\r"}})
+	if !asMS(t, m).Confirmed() {
+		t.Fatalf("menu not confirmed:\n%s", out)
+	}
+	assertKeys(t, m, "a", "b")
+	p, _ := runWithTimeout(t, newPrompt(), &chunkReader{chunks: []string{reports, "x", reports, "\r"}})
+	if pr := asPrompt(t, p); !pr.Confirmed() || pr.Value() != "x" {
+		t.Fatalf("prompt: confirmed %v, value %q", pr.Confirmed(), pr.Value())
+	}
+	c, _ := runWithTimeout(t, NewConfirm("Remove?", []string{"x"}), &chunkReader{chunks: []string{reports, "y"}})
+	if !asConfirm(t, c).Confirmed() {
+		t.Fatal("confirm: y after mouse reports did not confirm")
+	}
+}
+
 // newPipe returns an os.Pipe whose ends are closed at the end of the test.
 // Closing the write end also releases any goroutine still reading r.
 func newPipe(t *testing.T) (r, w *os.File) {

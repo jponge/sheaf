@@ -473,6 +473,22 @@ func TestHomeOnNonTerminalSetsNoWindowTitle(t *testing.T) {
 	}
 }
 
+// On an output that is not a terminal (a TUI forced on), the overview and
+// the report view never turn mouse reporting on (B49).
+func TestHomeOnNonTerminalEnablesNoMouse(t *testing.T) {
+	t.Parallel()
+	e, _, _, _, _ := homeBundle(t)
+	var out syncBuffer
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "f"), keys(), reportKey(t, &out, "fetch", "x"), ovKeys(t, &out, "fetch: done", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 || !strings.Contains(out.String(), "sheaf fetch: ") {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	if m := regexp.MustCompile(`\x1b\[\?100[0236][hl]`).FindAllString(out.String(), -1); len(m) > 0 {
+		t.Errorf("mouse mode sequences %q", m)
+	}
+}
+
 func TestHomeAddWorktreeForBranchAndTag(t *testing.T) {
 	t.Parallel()
 	e, alpha, _, _, o := homeBundle(t)

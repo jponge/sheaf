@@ -4,12 +4,15 @@ package cli
 
 import (
 	"encoding/base64"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -45,6 +48,11 @@ func wantTerminalRestored(t *testing.T, s *ptyShell, exit string) {
 	}
 	if last("\x1b[?1049h", "\x1b[?1049l") {
 		t.Error("alternate screen left on")
+	}
+	for _, mode := range []string{"1000", "1002", "1003", "1006"} {
+		if last("\x1b[?"+mode+"h", "\x1b[?"+mode+"l") {
+			t.Errorf("mouse mode %s left on", mode)
+		}
 	}
 	if got := s.nextLine(); got != "zzz" {
 		t.Fatalf("the shell read %q after sheaf, want zzz", got)
@@ -729,6 +737,150 @@ func TestHomeOnPTYCopiesPathWithOSC52(t *testing.T) {
 				t.Errorf("OSC 52 sequences %q, want %q sent: %v", got, want, c.sent)
 			}
 		})
+	}
+}
+
+// Mouse wheel reports (SGR, as the terminal sends them once asked) move the
+// cursor of the overview by up to 3 rows (B49); mouse reporting is on while
+// the overview is displayed, as cell motion with SGR encoding (DECSET 1002
+// and 1006, not 1003), and off while an action's prompt is.
+func TestHomeOnPTYWheelMovesTheCursor(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	s := startPTYShell(t, e.cwd, `B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	current := func(repo string) func(vt *vtScreen) bool {
+		return func(vt *vtScreen) bool {
+			return vt.altActive() && slices.ContainsFunc(vt.altLines(), func(l string) bool { return strings.HasPrefix(l, "> [ ] "+repo) })
+		}
+	}
+	waitScreenState(t, s, "the cursor on alpha", current("alpha"))
+	s.write("\x1b[<65;20;6M") // wheel down: 3 rows, the last of the 3 rows
+	waitScreenState(t, s, "the cursor on beta after a wheel turn down", current("beta"))
+	s.write("\x1b[<64;20;6M") // wheel up
+	waitScreenState(t, s, "the cursor on alpha after a wheel turn up", current("alpha"))
+	out := s.output()
+	if !strings.Contains(out, "\x1b[?1002h") || !strings.Contains(out, "\x1b[?1006h") || strings.Contains(out, "\x1b[?1003h") {
+		t.Errorf("want mouse modes 1002 and 1006 on, not 1003:\n%q", out)
+	}
+	s.write("w")
+	s.waitFor(`New worktree of alpha`)
+	out = s.output()
+	if prompt := strings.LastIndex(out, "New worktree of alpha"); strings.LastIndex(out[:prompt], "\x1b[?1002h") > strings.LastIndex(out[:prompt], "\x1b[?1002l") {
+		t.Errorf("mouse reporting on while the prompt is displayed:\n%q", out)
+	}
+	s.write("\x1b")
+	s.waitFor(`add: cancelled`)
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
+}
+
+// Mouse wheel reports scroll the report view by 3 lines (B49).
+func TestHomeOnPTYWheelScrollsTheReport(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	s := doctorReport(t, e)
+	from := func(n string) func(st, _ []string) bool {
+		return func(st, _ []string) bool { return st[1] == n }
+	}
+	doctorView(t, s, e.cwd, "the top of the report", from("1"))
+	s.write("\x1b[<65;20;6M")
+	doctorView(t, s, e.cwd, "lines 4- after a wheel turn down", from("4"))
+	s.write("\x1b[<64;20;6M")
+	doctorView(t, s, e.cwd, "lines 1- after a wheel turn up", from("1"))
+	time.Sleep(tui.ReportGrace)
+	s.write("\x1b[<65;20;6M\x1b[<0;20;6M\x1b[<0;20;6m") // wheel and click: the report stays
+	doctorView(t, s, e.cwd, "lines 4- after the grace period", from("4"))
+	s.write("x")
+	waitScreenStateRows(t, s, 10, "the overview after doctor", func(vt *vtScreen) bool {
+		return vt.altActive() && slices.ContainsFunc(vt.altLines(), func(l string) bool { return overviewMessage(l) == "doctor: done" })
+	})
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
+}
+
+// childPID returns the PID of the only child of process pid.
+func childPID(t *testing.T, pid int) int {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/children", pid, pid))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f := strings.Fields(string(b)); len(f) == 1 {
+			n, err := strconv.Atoi(f[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("children of %d: %q", pid, b)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// Mouse reporting, turned on by the overview and the report view, is off
+// when sheaf ends, on every way out (wantTerminalRestored checks it): quit,
+// enter (cd), ctrl+c in the overview and in the report view (130), an
+// error, SIGTERM (130).
+func TestHomeOnPTYMouseOffOnEveryExit(t *testing.T) {
+	for _, c := range []struct {
+		name, exit string
+		drive      func(t *testing.T, s *ptyShell, root string)
+	}{
+		{"quit", "0", func(t *testing.T, s *ptyShell, _ string) { s.write("q") }},
+		{"cd", "0", func(t *testing.T, s *ptyShell, _ string) { s.write("\r") }},
+		{"ctrl+c", "130", func(t *testing.T, s *ptyShell, _ string) { s.write("\x03") }},
+		{"ctrl+c in the report", "130", func(t *testing.T, s *ptyShell, _ string) {
+			s.write("f")
+			waitScreenState(t, s, "the report view of fetch", func(vt *vtScreen) bool {
+				alt := vt.altLines()
+				return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf fetch: ")
+			})
+			if n := strings.Count(s.output(), "\x1b[?1002h"); n != 2 {
+				t.Errorf("mouse reporting turned on %d times, want 2 (overview, report view)", n)
+			}
+			s.write("\x03")
+		}},
+		{"error", "1", func(t *testing.T, s *ptyShell, root string) {
+			if err := os.Rename(filepath.Join(root, "sheaf.yaml"), filepath.Join(root, "moved.yaml")); err != nil {
+				t.Fatal(err)
+			}
+			s.write("f")
+			dismissReport(t, s, "fetch", 1)
+		}},
+		{"SIGTERM", "130", func(t *testing.T, s *ptyShell, _ string) {
+			if err := syscall.Kill(childPID(t, s.cmd.Process.Pid), syscall.SIGTERM); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e, _, _, _, _ := homeBundle(t)
+			s := startPTYShell(t, e.cwd, `B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+			s.waitFor(`STATE`)
+			if !strings.Contains(s.output(), "\x1b[?1002h") {
+				t.Fatalf("mouse reporting not on in the overview:\n%q", s.output())
+			}
+			c.drive(t, s, e.cwd)
+			wantTerminalRestored(t, s, c.exit)
+		})
+	}
+}
+
+// With TERM=dumb, the home screen never turns mouse reporting on (B49).
+func TestHomeOnPTYDumbTerminalEnablesNoMouse(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	s := startPTYShell(t, e.cwd, `B=$(stty -g); TERM=dumb "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	s.write("f")
+	dismissReport(t, s, "fetch", 1)
+	s.waitFor(`fetch: done`)
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
+	if m := regexp.MustCompile(`\x1b\[\?100[0236][hl]`).FindAllString(s.output(), -1); len(m) > 0 {
+		t.Errorf("mouse mode sequences %q with TERM=dumb", m)
 	}
 }
 

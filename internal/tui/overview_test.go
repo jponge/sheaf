@@ -926,6 +926,61 @@ func TestOverviewCompactHelpLayout(t *testing.T) {
 	}
 }
 
+// WithMouse turns mouse reporting on (cell motion: clicks and wheel, not
+// bare motion) while the overview is displayed, and off in its final view;
+// the wheel moves the cursor by wheelStep rows within bounds, scrolling
+// the rows, in filter mode too; clicks are ignored (B49).
+func TestOverviewMouseWheelMovesTheCursor(t *testing.T) {
+	t.Parallel()
+	if newOv().View().MouseMode != tea.MouseModeNone {
+		t.Error("mouse mode on without WithMouse")
+	}
+	var rows []Row
+	for i := range 30 {
+		rows = append(rows, Row{Key: fmt.Sprint(i), Cells: []string{fmt.Sprintf("r%02d", i), "main"}})
+	}
+	var m tea.Model = NewOverview("t", []string{"REPO", "DIR"}, rows, ovActions()).WithMouse()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	if mode := m.View().MouseMode; mode != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode %v, want cell motion", mode)
+	}
+	down := tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 3, Y: 4}
+	up := tea.MouseWheelMsg{Button: tea.MouseWheelUp, X: 3, Y: 4}
+	for _, step := range []struct {
+		msg  tea.Msg
+		want string
+	}{
+		{down, "3"},
+		{down, "6"},
+		{up, "3"},
+		{up, "0"},
+		{up, "0"},
+		{tea.MouseClickMsg{Button: tea.MouseLeft, X: 3, Y: 6}, "0"},
+		{tea.MouseWheelMsg{Button: tea.MouseWheelRight}, "0"},
+	} {
+		var cmd tea.Cmd
+		m, cmd = m.Update(step.msg)
+		if got := asOv(t, m).CurrentKey(); cmd != nil || got != step.want {
+			t.Fatalf("after %v: current row %q (command %v), want %q", step.msg, got, cmd != nil, step.want)
+		}
+	}
+	for range 12 {
+		m, _ = m.Update(down)
+	}
+	if v := view(m); asOv(t, m).CurrentKey() != "29" || !strings.Contains(v, "> [ ] r29") {
+		t.Fatalf("after wheeling to the end, current row %q:\n%s", asOv(t, m).CurrentKey(), v)
+	}
+	m, _ = press(m, "/", "r", "1")
+	m, _ = m.Update(down)
+	if got := asOv(t, m).CurrentKey(); got != "13" { // r10..r19 shown, from the first
+		t.Fatalf("filter mode: current row %q, want 13", got)
+	}
+	m, _ = press(m, "enter", "q")
+	if v := m.View(); !asOv(t, m).Cancelled() || v.MouseMode != tea.MouseModeNone {
+		t.Errorf("final view: mouse mode %v", v.MouseMode)
+	}
+}
+
 // An action with Do runs in the overview (B44): its message is displayed,
 // its command returned, and the overview stays open, with no action chosen;
 // a refusal of Check comes first, and Do receives the targets of the scope.

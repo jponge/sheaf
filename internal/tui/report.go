@@ -20,12 +20,13 @@ const ReportGrace = 250 * time.Millisecond
 // what a command printed) on the alternate screen until a key other than the
 // scroll keys is pressed: any such key ends it, ctrl+c as an interruption.
 // A report longer than the window scrolls (up/down/k/j, pgup/pgdown,
-// home/end) and a status line tells which lines are shown; lines wider
+// home/end, the mouse wheel: see WithMouse) and a status line tells
+// which lines are shown; lines wider
 // than the window are wrapped. With an unknown size every line is shown.
 // Keys that end the report are ignored during the first ReportGrace
 // (ctrl+c excepted), so that a key typed ahead, e.g. while the work that
 // precedes the report ran, does not end it before it can be read; scroll
-// keys always work. Pastes and other messages are ignored. Update returns
+// keys always work. Pastes, clicks and other messages are ignored. Update returns
 // tea.Quit once the report ends; later messages are ignored and the view
 // is then empty. The title and lines are displayed with tabs expanded to
 // the next multiple of 8 columns and other control characters replaced by
@@ -37,8 +38,9 @@ type Report struct {
 	now   func() time.Time
 	start time.Time
 
-	width, height int // 0 = unknown
-	offset        int // index into wrapped() of the first rendered line
+	width, height int  // 0 = unknown
+	offset        int  // index into wrapped() of the first rendered line
+	mouse         bool // see WithMouse
 
 	done, interrupted bool
 	keys              multiSelectKeys
@@ -105,6 +107,14 @@ func expandTabs(s string) string {
 	return b.String()
 }
 
+// WithMouse returns a copy of m that turns mouse reporting on while it is
+// displayed (see tea.MouseModeCellMotion): the wheel scrolls by wheelStep
+// lines; clicks are ignored, and neither ends the report.
+func (m Report) WithMouse() Report {
+	m.mouse = true
+	return m
+}
+
 // WithClock returns a copy of m using now as its clock; the grace period
 // counts from now().
 func (m Report) WithClock(now func() time.Time) Report {
@@ -134,6 +144,13 @@ func (m Report) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetWidth(msg.Width)
 		m.scroll(0)
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			m.scroll(-wheelStep)
+		case tea.MouseWheelDown:
+			m.scroll(wheelStep)
+		}
 	case tea.KeyPressMsg:
 		page := m.layout().rows
 		switch {
@@ -271,5 +288,8 @@ func (m Report) View() tea.View {
 		}
 	}
 	v.SetContent(strings.Join(lines, "\n"))
+	if m.mouse {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	return v
 }

@@ -258,7 +258,7 @@ lines that still do not fit are cut at the right.
 
 | Key | Action |
 |---|---|
-| up/down, k/j, pgup/pgdown, home/end | move |
+| up/down, k/j, pgup/pgdown, home/end, mouse wheel | move (the wheel by 3 rows) |
 | space | toggle the selection of the current row |
 | a, n | select / deselect every visible row (rows hidden by the filter keep their selection) |
 | / | filter (case-insensitive substring over the cells; enter keeps it, esc clears it) |
@@ -282,6 +282,12 @@ selection menus of the commands (e.g. `sync`, `init`) work the same way:
 their short line lists space, enter, `/`, `? more` and esc/q, and `?` shows
 the others (`a`/`n` to select or deselect every visible item, movement).
 
+To receive the mouse wheel, the overview and the report view turn on the
+terminal's mouse reporting (clicks are ignored), which is off again in the
+other views and once sheaf ends. While it is on, dragging no longer selects
+text: most terminals still select it with a modifier held, usually shift
+(option in iTerm2). Not with `TERM=dumb`.
+
 The overview is drawn on the terminal's alternate screen, so each one starts
 on a clear screen. Actions run with the TUI of the corresponding command
 (progress view, confirmation dialogs, menus, prompt) on the normal screen.
@@ -291,7 +297,7 @@ as a log you see after quitting or after an interruption. It is then shown
 again (except for `b`, whose outcome fits in the overview's message) in a
 report view on the alternate screen, titled
 `sheaf <action>: <bundle>`, whether the action succeeded, failed or changed
-nothing: up/down (k/j), pgup/pgdown and home/end scroll it, any other key
+nothing: up/down (k/j), pgup/pgdown, home/end and the mouse wheel scroll it, any other key
 returns to the overview, ctrl+c exits with 130. An action cancelled in its
 dialog, menu or prompt (enter in the `sync` menu with nothing selected
 counts as cancelled) shows no report view, unless it printed something

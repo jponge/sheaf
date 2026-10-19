@@ -60,7 +60,8 @@ const noRowMessage = "no row to act on"
 // a multi-selection and a filter, and quitting with the action chosen by
 // the user.
 //
-// Keys: up/down/k/j, pgup/pgdown, home/end move; space toggles the
+// Keys: up/down/k/j, pgup/pgdown, home/end (and the mouse wheel, see
+// WithMouse) move; space toggles the
 // selection of the current row; a selects and n deselects every visible
 // row (rows hidden by the filter keep their state, as in MultiSelect);
 // / enters filter mode (case-insensitive substring over the cells; editing
@@ -90,6 +91,7 @@ type Overview struct {
 
 	width, height int // 0 = unknown
 	altScreen     bool
+	mouse         bool  // see WithMouse
 	grouped       bool  // see WithGrouping
 	shrink        []int // see WithShrinkable
 
@@ -143,6 +145,20 @@ func (m Overview) WithAltScreen() Overview {
 	m.altScreen = true
 	return m
 }
+
+// WithMouse returns a copy of m that turns mouse reporting on while it is
+// displayed (see tea.MouseModeCellMotion): the wheel moves the cursor by
+// wheelStep rows; clicks are ignored. Mouse reporting keeps the terminal
+// from selecting text by itself (most terminals still do with a modifier
+// held, usually shift).
+func (m Overview) WithMouse() Overview {
+	m.mouse = true
+	return m
+}
+
+// wheelStep is the number of rows (lines) by which a turn of the mouse
+// wheel moves the cursor of an Overview (scrolls a Report).
+const wheelStep = 3
 
 // WithGrouping returns a copy of m that groups rows by their first cell
 // (e.g. a repository): the first cell of a rendered row is left blank when
@@ -264,6 +280,14 @@ func (m Overview) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.filtering {
 			m.setFilter(m.filter + dropControl(msg.Content))
 		}
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			m.cursor -= wheelStep
+		case tea.MouseWheelDown:
+			m.cursor += wheelStep
+		}
+		m.scrollToCursor()
 	case tea.KeyPressMsg:
 		if key.Matches(msg, m.keys.ForceQuit) {
 			m.cancelled, m.interrupted = true, true
@@ -647,6 +671,9 @@ func (m Overview) View() tea.View {
 	}
 	v := tea.NewView(strings.Join(lines, "\n"))
 	v.AltScreen = m.altScreen
+	if m.mouse {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	return v
 }
 

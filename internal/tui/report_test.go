@@ -303,3 +303,52 @@ func TestReportEmptyHasNoAdjacentBlankLines(t *testing.T) {
 		}
 	}
 }
+
+// WithMouse turns mouse reporting on (cell motion: clicks and wheel, not
+// bare motion) while the report is displayed, and off in its final view;
+// the wheel scrolls by wheelStep lines within bounds, during the grace
+// period too, and neither the wheel nor clicks end the report (B49).
+func TestReportMouseWheelScrolls(t *testing.T) {
+	t.Parallel()
+	if m, _ := newTestReport(30); m.View().MouseMode != tea.MouseModeNone {
+		t.Error("mouse mode on without WithMouse")
+	}
+	m0, c := newTestReport(30)
+	var m tea.Model = m0.WithMouse()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 13}) // 7 report lines
+	if mode := m.View().MouseMode; mode != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode %v, want cell motion", mode)
+	}
+	down := tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 3, Y: 4}
+	up := tea.MouseWheelMsg{Button: tea.MouseWheelUp, X: 3, Y: 4}
+	for _, step := range []struct {
+		msg      tea.Msg
+		from, to int
+	}{
+		{down, 4, 10},
+		{down, 7, 13},
+		{up, 4, 10},
+		{up, 1, 7},
+		{up, 1, 7},
+		{tea.MouseClickMsg{Button: tea.MouseLeft, X: 3, Y: 4}, 1, 7},
+		{tea.MouseWheelMsg{Button: tea.MouseWheelLeft}, 1, 7},
+	} {
+		var cmd tea.Cmd
+		m, cmd = m.Update(step.msg)
+		if got := shownLines(m); cmd != nil || m.(Report).Done() || !slices.Equal(got, span(step.from, step.to)) {
+			t.Fatalf("after %v: lines %v (done %v), want %d-%d\n%s", step.msg, got, m.(Report).Done(), step.from, step.to, view(m))
+		}
+	}
+	c.t = c.t.Add(ReportGrace)
+	for range 10 {
+		m, _ = m.Update(down)
+	}
+	m, _ = m.Update(tea.MouseClickMsg{Button: tea.MouseLeft})
+	if got := shownLines(m); m.(Report).Done() || !slices.Equal(got, span(24, 30)) {
+		t.Fatalf("after the grace period: lines %v, done %v", got, m.(Report).Done())
+	}
+	m, _ = press(m, "x")
+	if v := m.View(); !m.(Report).Done() || v.MouseMode != tea.MouseModeNone {
+		t.Errorf("final view: done %v, mouse mode %v", m.(Report).Done(), v.MouseMode)
+	}
+}

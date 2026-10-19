@@ -197,6 +197,9 @@ func (h *home) loop() error {
 			// whose outcome (the page opened, or the error) fits in the
 			// message.
 			report := homeReport(name, h.root, h.output.String(), h.message)
+			if h.s.controls {
+				report = report.WithMouse()
+			}
 			if _, err := h.s.runModel(report); err != nil {
 				return err
 			}
@@ -241,7 +244,13 @@ func (h *home) overview() (tui.Overview, error) {
 	// repository are contiguous for the grouping.
 	slices.SortStableFunc(rows, func(a, b tui.Row) int { return strings.Compare(a.Cells[0], b.Cells[0]) })
 	ov := tui.NewOverview("sheaf: "+w.Root, []string{"REPO", "DIR", "BRANCH", "AGE", "STATE"}, rows, h.actions())
-	return ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithFullHelp(h.fullHelp).WithAltScreen().WithGrouping().WithShrinkable(2, 1), nil
+	ov = ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithFullHelp(h.fullHelp).WithAltScreen().WithGrouping().WithShrinkable(2, 1)
+	if h.s.controls {
+		// Mouse wheel scrolling, on a terminal that takes controls (see
+		// terminalControls).
+		ov = ov.WithMouse()
+	}
+	return ov, nil
 }
 
 // scope returns the scope of the action name.
