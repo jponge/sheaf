@@ -139,6 +139,23 @@ func TestRemoteURL(t *testing.T) {
 	}
 }
 
+// RemoteURL returns the configured URL, not the one url.<base>.insteadOf
+// rewrites it to.
+func TestRemoteURLIgnoresInsteadOf(t *testing.T) {
+	t.Parallel()
+	o, dir := cloneOrigin(t, testutil.OriginOpts{})
+	const url = "https://github.com/acme/newcli.git"
+	testutil.Git(t, dir, "remote", "set-url", "origin", url)
+	testutil.Git(t, dir, "config", "url."+o.URL+".insteadOf", "https://github.com/")
+	if got := testutil.Git(t, dir, "remote", "get-url", "origin"); got != o.URL+"acme/newcli.git" {
+		t.Fatalf("setup: git remote get-url = %q, the rule does not apply", got)
+	}
+	got, err := RemoteURL(context.Background(), dir, "origin")
+	if err != nil || got != url {
+		t.Fatalf("RemoteURL = %q, %v; want %q", got, err, url)
+	}
+}
+
 func TestTopLevelAndIsRepo(t *testing.T) {
 	t.Parallel()
 	_, dir := cloneOrigin(t, testutil.OriginOpts{})

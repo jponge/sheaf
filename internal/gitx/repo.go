@@ -105,10 +105,18 @@ func CurrentBranch(ctx context.Context, dir string) (string, error) {
 	return "", fmt.Errorf("gitx: HEAD points outside refs/heads: %q", ref)
 }
 
-// RemoteURL returns the (fetch) URL configured for remote in dir.
+// RemoteURL returns the (fetch) URL configured for remote in dir as written
+// (remote.<remote>.url, the last value when there are several), not the URL
+// `git remote get-url` returns after url.<base>.insteadOf rewriting: sheaf
+// records and compares configured URLs, while git operations (clone, fetch,
+// ls-remote) keep applying the rewrites.
 func RemoteURL(ctx context.Context, dir, remote string) (string, error) {
-	out, err := Run(ctx, dir, "remote", "get-url", "--", remote)
+	out, err := Run(ctx, dir, "config", "--get", "remote."+remote+".url")
 	if err != nil {
+		var ge *GitError
+		if errors.As(err, &ge) && ge.ExitCode == 1 && ctx.Err() == nil {
+			return "", fmt.Errorf("gitx: no remote %q (remote.%s.url is not set)", remote, remote)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
