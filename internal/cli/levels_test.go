@@ -76,8 +76,8 @@ func TestLevelMark(t *testing.T) {
 func fakePaint(l tui.Level, s string) string { return fmt.Sprintf("<%d:%s>", l, s) }
 
 // levelWriter paints the level word of each line, also when lines arrive
-// in several writes (only a write starting a line is classified), and
-// passes everything else through.
+// in several writes (a line start that may be a level word waits for the
+// rest), and passes everything else through.
 func TestLevelWriter(t *testing.T) {
 	t.Parallel()
 	var b strings.Builder
@@ -87,9 +87,56 @@ func TestLevelWriter(t *testing.T) {
 			t.Fatalf("Write(%q) = %d, %v", s, n, err)
 		}
 	}
-	want := "<1:OK>    a\n<3:WARN>  b\n<1:done>     alpha: ok\n      hint: h\nFAIL  c\npartial OK not a word\n"
+	want := "<1:OK>    a\n<3:WARN>  b\n<1:done>     alpha: ok\n      hint: h\n<4:FAIL>  c\npartial OK not a word\n"
 	if b.String() != want {
 		t.Errorf("wrote %q, want %q", b.String(), want)
+	}
+}
+
+// The update summary, written by a tabwriter one cell at a time, gets its
+// level words painted like a summary written a line at a time (B1 of the
+// step 2 review: the word arrived without its space and was skipped).
+func TestLevelWriterTabwriterUpdateSummary(t *testing.T) {
+	t.Parallel()
+	r := ops.UpdateReport{Checkouts: []ops.CheckoutUpdate{
+		{Checkout: ops.Checkout{Repo: "alpha", Branch: "main", Dir: "main"}, Outcome: gitx.PullUpToDate},
+		{Checkout: ops.Checkout{Repo: "beta", Branch: "main", Dir: "main"}, Outcome: gitx.PullFastForwarded},
+		{Checkout: ops.Checkout{Repo: "gamma", Branch: "main", Dir: "main"}, Outcome: gitx.PullFailed, Err: errors.New("boom")},
+	}}
+	var plain, b strings.Builder
+	_ = printUpdateSummary(&plain, r, false)
+	_ = printUpdateSummary(&levelWriter{w: &b, paint: fakePaint}, r, false)
+	want := strings.NewReplacer("up to date ", "<1:up to date> ", "fast-forwarded ", "<1:fast-forwarded> ", "failed ", "<4:failed> ").Replace(plain.String())
+	if b.String() != want {
+		t.Errorf("wrote\n%q\nwant\n%q", b.String(), want)
+	}
+	if !strings.Contains(b.String(), "<1:up to date>") {
+		t.Fatalf("fixture: %q", b.String())
+	}
+}
+
+// A line start that may still become a level word is held back only while
+// it is a prefix of one; anything else (a prompt, text) passes at once.
+func TestLevelWriterHoldsOnlyLevelWordPrefixes(t *testing.T) {
+	t.Parallel()
+	var b strings.Builder
+	w := &levelWriter{w: &b, paint: fakePaint}
+	io.WriteString(w, "Remove alpha? [y/N] ")
+	if b.String() != "Remove alpha? [y/N] " {
+		t.Fatalf("prompt held back: %q", b.String())
+	}
+	b.Reset()
+	io.WriteString(w, "\nup to")
+	if b.String() != "\n" {
+		t.Fatalf("level word prefix not held: %q", b.String())
+	}
+	w.Flush()
+	if b.String() != "\nup to" {
+		t.Fatalf("Flush: %q", b.String())
+	}
+	io.WriteString(w, " date  x\n") // the line went out unclassified
+	if b.String() != "\nup to date  x\n" {
+		t.Fatalf("after Flush: %q", b.String())
 	}
 }
 
@@ -191,6 +238,30 @@ func TestTUISummaryAndWarningsColored(t *testing.T) {
 	if want := "sheaf: " + sgrYellow + "warning:" + sgrReset + " "; !strings.Contains(errb.String(), want) {
 		t.Errorf("sync stderr lacks %q:\n%q", want, errb.String())
 	}
+	// --json never colors, on standard output nor on standard error.
+	out, errb = syncBuffer{}, syncBuffer{}
+	executeDeps(Streams{In: newScript(t, false), Out: &out, Err: &errb}, d, []string{"sync", "--json"})
+	if !strings.Contains(errb.String(), "sheaf: warning: ") || strings.Contains(out.String()+errb.String(), "\x1b") {
+		t.Errorf("sync --json: stdout %q, stderr %q", out.String(), errb.String())
+	}
+}
+
+// The update summary of the TUI is colored on the terminal (its tabwriter
+// writes one cell at a time).
+func TestTUIUpdateSummaryColored(t *testing.T) {
+	t.Parallel()
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
+	d := e.deps()
+	d.UseTUI = func(io.Reader, io.Writer, bool) bool { return true }
+	d.environ = func() []string { return colorTTY }
+	var out, errb syncBuffer
+	if code := executeDeps(Streams{In: newScript(t, false), Out: &out, Err: &errb}, d, []string{"update"}); code != 0 {
+		t.Fatalf("exit %d:\n%s\n%s", code, out.String(), errb.String())
+	}
+	if want := sgrGreen + "up to date" + sgrReset + "  "; !strings.Contains(out.String(), want) {
+		t.Errorf("update summary lacks %q:\n%q", want, out.String())
+	}
 }
 
 // The report view of the home screen colors the level words of what the
@@ -235,10 +306,11 @@ func TestHomeLevel(t *testing.T) {
 		{"untracked", st(func(s *gitx.RepoStatus) { s.Untracked = 1 }), tui.LevelWarn},
 		{"dirty, no upstream", st(func(s *gitx.RepoStatus) { s.Upstream, s.Staged = "", 1 }), tui.LevelWarn},
 		{"ahead", st(func(s *gitx.RepoStatus) { s.Ahead = 2 }), tui.LevelWarn},
-		{"behind", st(func(s *gitx.RepoStatus) { s.Behind = 1 }), tui.LevelFail},
+		{"behind", st(func(s *gitx.RepoStatus) { s.Behind = 1 }), tui.LevelWarn},
 		{"diverged", st(func(s *gitx.RepoStatus) { s.Ahead, s.Behind = 1, 1 }), tui.LevelFail},
 		{"upstream gone", st(func(s *gitx.RepoStatus) { s.UpstreamGone = true }), tui.LevelFail},
-		{"dirty, behind", st(func(s *gitx.RepoStatus) { s.Conflicted, s.Behind = 1, 3 }), tui.LevelFail},
+		{"dirty, behind", st(func(s *gitx.RepoStatus) { s.Conflicted, s.Behind = 1, 3 }), tui.LevelWarn},
+		{"dirty, diverged", st(func(s *gitx.RepoStatus) { s.Untracked, s.Ahead, s.Behind = 1, 2, 3 }), tui.LevelFail},
 		{"error", ops.CheckoutStatus{Checkout: ops.Checkout{Repo: "a"}, Err: errors.New("boom")}, tui.LevelFail},
 	} {
 		if got := homeLevel(tc.c); got != tc.want {

@@ -121,7 +121,10 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 		fmt.Fprintf(c.ErrOrStderr(), "listing repositories of %s...\n", strings.Join(orgs, ", "))
 	}
 	label := "listing repositories"
-	if len(orgs) > 0 {
+	switch {
+	case menu && len(orgs) > 0:
+		label = "" // the line above names it
+	case len(orgs) > 0:
 		label += " of " + strings.Join(orgs, ", ")
 	}
 	stop := d.spin.start(label)
@@ -131,6 +134,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 		return err
 	}
 	out, errOut := c.OutOrStdout(), d.leveled(c, c.ErrOrStderr())
+	defer flush(errOut)
 	for _, o := range rep.Orgs {
 		switch {
 		case o.Err != nil:

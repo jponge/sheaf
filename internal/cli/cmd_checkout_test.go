@@ -2,12 +2,13 @@ package cli
 
 import (
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jponge/sheaf/internal/hosting"
 	"github.com/jponge/sheaf/internal/testutil"
@@ -69,17 +70,6 @@ func TestGitInteractiveDecision(t *testing.T) {
 	}
 }
 
-// https://no-color.org: NO_COLOR disables color when set to a non-empty value.
-func TestUseColor(t *testing.T) {
-	t.Parallel()
-	if !useColor(true, "") {
-		t.Error("TTY without NO_COLOR: no color")
-	}
-	if useColor(true, "1") || useColor(false, "") {
-		t.Error("color with NO_COLOR or without TTY")
-	}
-}
-
 var ansiEscape = regexp.MustCompile("\x1b\\[")
 
 func TestStatusTable(t *testing.T) {
@@ -136,17 +126,49 @@ func TestStatusTable(t *testing.T) {
 	}
 }
 
+// status colors its states like the level words of the other commands
+// (see leveled): in TUI mode on a terminal whose color profile allows it;
+// not with NO_COLOR, CLICOLOR=0, --no-tui (plain mode), when not on a
+// terminal, nor with --json.
 func TestStatusColor(t *testing.T) {
+	t.Parallel()
 	e := newBundleEnv(t)
-	e.addRepo(t, "alpha")
-	e.stdoutTTY = func(io.Writer) bool { return true }
-	t.Setenv("NO_COLOR", "")
-	if out := e.mustRun(t, "status"); !ansiEscape.MatchString(out) {
-		t.Errorf("no color on a terminal:\n%q", out)
+	_, alpha := e.addRepo(t, "alpha", "feat")
+	wt := addWorktree(t, alpha, "feat", "feat")
+	writeFile(t, filepath.Join(wt, "u.txt"), "u\n")
+	d := e.deps()
+	plain, _, _ := runDeps(t, d, "status")
+	out, _, code := runColored(t, d, true, colorTTY, "status")
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
 	}
-	t.Setenv("NO_COLOR", "1")
-	if out := e.mustRun(t, "status"); ansiEscape.MatchString(out) {
-		t.Errorf("color despite NO_COLOR:\n%q", out)
+	for _, want := range []string{sgrGreen + "clean" + sgrReset, sgrYellow + "dirty" + sgrReset} {
+		if !strings.Contains(out, want) {
+			t.Errorf("colored status lacks %q:\n%q", want, out)
+		}
+	}
+	if got := ansi.Strip(out); got != plain {
+		t.Errorf("colored status without its colors differs from the plain output:\n%q\nwant\n%q", got, plain)
+	}
+	for _, tc := range []struct {
+		name    string
+		tuiMode bool
+		environ []string
+		args    []string
+	}{
+		{"NO_COLOR", true, append(colorTTY, "NO_COLOR=1"), []string{"status"}},
+		{"CLICOLOR=0", true, append(colorTTY, "CLICOLOR=0"), []string{"status"}},
+		{"not a terminal", true, []string{"TERM=xterm-256color"}, []string{"status"}},
+		{"plain mode", false, colorTTY, []string{"status"}},
+		{"json", true, colorTTY, []string{"status", "--json"}},
+	} {
+		got, _, _ := runColored(t, d, tc.tuiMode, tc.environ, tc.args...)
+		if strings.Contains(got, "\x1b") {
+			t.Errorf("%s: escape sequences in\n%q", tc.name, got)
+		}
+		if tc.name != "json" && got != plain {
+			t.Errorf("%s: output changed:\n%q\nwant\n%q", tc.name, got, plain)
+		}
 	}
 }
 

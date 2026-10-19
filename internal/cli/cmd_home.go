@@ -219,9 +219,9 @@ func homeBranch(c ops.CheckoutStatus) string {
 }
 
 // homeLevel returns the level of the STATE cell of c (see homeState), the
-// worst of: failed for an error, an upstream gone or commits to pull
-// (behind, diverged); warning for local changes or commits to push
-// (ahead); info for no upstream; ok otherwise (clean, in sync or
+// worst of: failed for an error, an upstream gone or a divergence (ahead
+// and behind); warning for local changes or commits to push or pull (ahead,
+// behind); info for no upstream; ok otherwise (clean, in sync or
 // detached).
 func homeLevel(c ops.CheckoutStatus) tui.Level {
 	if c.Err != nil {
@@ -229,9 +229,9 @@ func homeLevel(c ops.CheckoutStatus) tui.Level {
 	}
 	s := c.Status
 	switch {
-	case s.Upstream != "" && (s.UpstreamGone || s.Behind > 0):
+	case s.Upstream != "" && (s.UpstreamGone || s.Ahead > 0 && s.Behind > 0):
 		return tui.LevelFail
-	case !c.Clean() || s.Upstream != "" && s.Ahead > 0:
+	case !c.Clean() || s.Upstream != "" && (s.Ahead > 0 || s.Behind > 0):
 		return tui.LevelWarn
 	case s.Upstream == "" && !c.Detached:
 		return tui.LevelInfo

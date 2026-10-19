@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/ops"
+	"github.com/jponge/sheaf/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -21,13 +21,6 @@ func (d Deps) stdinIsTerminal(r io.Reader) bool {
 		return d.stdinTTY(r)
 	}
 	return isTerminal(r)
-}
-
-func (d Deps) stdoutIsTerminal(w io.Writer) bool {
-	if d.stdoutTTY != nil {
-		return d.stdoutTTY(w)
-	}
-	return isTerminal(w)
 }
 
 // gitInteractive decides interactive git mode (see gitx.Net): only in plain
@@ -44,26 +37,13 @@ func (d Deps) interactiveGit(c *cobra.Command) bool {
 	return gitInteractive(false, OptionsFrom(c).Jobs, d.stdinIsTerminal(c.InOrStdin()))
 }
 
-// useColor reports whether output may use ANSI colors: only on a terminal,
-// and not when NO_COLOR is set to a non-empty value (https://no-color.org).
-func useColor(tty bool, noColor string) bool { return tty && noColor == "" }
-
-func (d Deps) colorFor(w io.Writer) bool {
-	return useColor(d.stdoutIsTerminal(w), os.Getenv("NO_COLOR"))
-}
-
-const (
-	ansiReset  = "\x1b[0m"
-	ansiRed    = "\x1b[31m"
-	ansiGreen  = "\x1b[32m"
-	ansiYellow = "\x1b[33m"
-)
-
-func paint(on bool, color, s string) string {
-	if !on {
+// paintWith renders s in the style of l with paint (see Deps.painter);
+// unstyled when paint is nil.
+func paintWith(paint func(tui.Level, string) string, l tui.Level, s string) string {
+	if paint == nil {
 		return s
 	}
-	return color + s + ansiReset
+	return paint(l, s)
 }
 
 // checkoutRenderer is the plain renderer plus the phases of the checkout
@@ -197,7 +177,7 @@ func newStatusCmd(d Deps) *cobra.Command {
 					return err
 				}
 			} else {
-				writeStatusTable(out, r, d.colorFor(out))
+				writeStatusTable(out, r, d.painter(c, out))
 			}
 			n := len(r.Problems)
 			for _, s := range r.Checkouts {
@@ -218,7 +198,7 @@ func newStatusCmd(d Deps) *cobra.Command {
 	return cmd
 }
 
-func writeStatusTable(out io.Writer, r ops.StatusReport, color bool) {
+func writeStatusTable(out io.Writer, r ops.StatusReport, paint func(tui.Level, string) string) {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "REPO\tDIR\tBRANCH\tUPSTREAM\tAHEAD\tBEHIND\tSTAGED\tUNSTAGED\tUNTRACKED\tCONFLICTS\tSTASHES\tSTATE")
 	stashShown := ""
@@ -235,7 +215,7 @@ func writeStatusTable(out io.Writer, r ops.StatusReport, color bool) {
 			// The state (last column) carries the error; the colored part is
 			// last so escapes do not disturb the alignment.
 			fmt.Fprintf(tw, "%s\t%s\t%s\t-\t-\t-\t-\t-\t-\t-\t-\t%s\n", c.Repo, displayDir(c.Checkout), branch,
-				paint(color, ansiRed, "error: "+firstLine(c.Err.Error())))
+				paintWith(paint, tui.LevelFail, "error: "+firstLine(c.Err.Error())))
 			continue
 		}
 		s := c.Status
@@ -256,20 +236,20 @@ func writeStatusTable(out io.Writer, r ops.StatusReport, color bool) {
 		if stashShown != c.Repo {
 			stashes, stashShown = strconv.Itoa(s.Stashes), c.Repo
 		}
-		state := paint(color, ansiGreen, "clean")
+		state := paintWith(paint, tui.LevelOK, "clean")
 		if !c.Clean() {
-			state = paint(color, ansiYellow, "dirty")
+			state = paintWith(paint, tui.LevelWarn, "dirty")
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\n", c.Repo, displayDir(c.Checkout), branch, upstream, ahead, behind,
 			s.Staged, s.Unstaged, s.Untracked, s.Conflicted, stashes, state)
 	}
 	_ = tw.Flush()
-	writeProblems(out, r.Problems, color)
+	writeProblems(out, r.Problems, paint)
 }
 
-func writeProblems(out io.Writer, ps []ops.Problem, color bool) {
+func writeProblems(out io.Writer, ps []ops.Problem, paint func(tui.Level, string) string) {
 	for _, p := range ps {
-		fmt.Fprintf(out, "%s %s\n", paint(color, ansiRed, "problem:"), p.Error())
+		fmt.Fprintf(out, "%s %s\n", paintWith(paint, tui.LevelFail, "problem:"), p.Error())
 	}
 }
 
@@ -474,7 +454,7 @@ func printUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error {
 	for _, d := range details {
 		fmt.Fprintln(out, d)
 	}
-	writeProblems(out, r.Problems, false)
+	writeProblems(out, r.Problems, nil)
 	fmt.Fprintf(out, "%d fast-forwarded, %d up to date, ", ff, upToDate)
 	if pinned > 0 {
 		fmt.Fprintf(out, "%d pinned, ", pinned)
@@ -594,7 +574,7 @@ func printRunSummary(out io.Writer, r ops.RunReport) error {
 	for _, res := range failed {
 		fmt.Fprintf(out, "failed: %s (%s)\n", displayName(res.Checkout), runFailure(res))
 	}
-	writeProblems(out, r.Problems, false)
+	writeProblems(out, r.Problems, nil)
 	switch {
 	case len(failed) > 0:
 		return fmt.Errorf("%d of %d commands failed", len(failed), len(r.Results))

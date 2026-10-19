@@ -233,10 +233,10 @@ sheaf prune                            # list worktrees whose branch is gone or 
 on a terminal, opens an overview of every checkout of the bundle (columns
 REPO, DIR, BRANCH, STATE). It reads local state only; nothing is fetched
 when it opens. Checkouts that cannot be inspected are shown as problem rows.
-STATE is coloured by its worst part: red for commits to pull (`behind`,
-diverged), `upstream gone`, errors and problem rows; yellow for local
-changes or commits to push (`dirty`, `ahead`); faint for `no upstream`;
-green otherwise (clean, in sync or detached).
+STATE is coloured by its worst part: red for a divergence (`ahead` and
+`behind`), `upstream gone`, errors and problem rows; yellow for local
+changes or commits to push or pull (`dirty`, `ahead`, `behind`); faint for
+`no upstream`; green otherwise (clean, in sync or detached).
 
 | Key | Action |
 |---|---|
@@ -585,22 +585,25 @@ terminals and `--no-tui` is not given. Otherwise it runs in plain mode:
 every TUI choice has a flag equivalent, progress goes to standard error,
 results to standard output. Commands with TUI variants: bare `sheaf`,
 `init`, `add`, `adopt`, `remove`, `fetch`, `update`, `wt rm`, `prune`,
-`sync`. The others are always plain (`status`, `path`, `wt list`, `wt add`,
-`wt pr`, `run`, `doctor`, `create`, `version`, `completion`, `shell-init`).
+`sync`. The others have no TUI (`status`, `path`, `wt list`, `wt add`,
+`wt pr`, `run`, `doctor`, `create`, `version`, `completion`, `shell-init`);
+`status` and `doctor` still colour their output outside plain mode (see
+below).
 
 Menus (`add --org`, `init`, `sync`): space toggles, `a` selects all
 visible, `n` none, `/` filters, enter confirms, esc or q cancels.
 
-**Colour.** Plain output uses colour only on a terminal and not when
-`NO_COLOR` is set to a non-empty value. The TUI drops colours when
-`NO_COLOR` is non-empty or `CLICOLOR=0` (without `CLICOLOR_FORCE`); bold
-and faint are kept. With the same rules, outside plain mode (terminals, no
-`--no-tui`), the level words of what commands print are coloured, OK
-green, INFO faint, WARN yellow, FAIL red: `OK`, `INFO`, `WARN`, `FAIL` of
-`doctor`; `done`, `skipped`, `failed` of summaries (and `fast-forwarded`,
-`up to date`, `pinned` of `update`); the `warning:` and `note:` markers.
-The report view of the home screen colours them the same way. `--json`
-output is never coloured.
+**Colour.** Colours are used only outside plain mode (standard input and
+output on terminals, no `--no-tui`), never in plain mode, when the output
+is not a terminal, or with `--json` (standard output and error). They are
+dropped when `NO_COLOR` is non-empty or `CLICOLOR=0` (without
+`CLICOLOR_FORCE`); bold and faint are kept. Besides the TUI itself, the
+level words of what commands print are coloured, OK green, INFO faint,
+WARN yellow, FAIL red: `OK`, `INFO`, `WARN`, `FAIL` of `doctor`; `done`,
+`skipped`, `failed` of summaries (and `fast-forwarded`, `up to date`,
+`pinned` of `update`); the `warning:` and `note:` markers; `clean`,
+`dirty`, `error:` and `problem:` of `status`. The report view of the home
+screen colours them the same way.
 
 **Working indicator.** When standard error is a terminal, a spinner line
 shows there during phases that print nothing for more than 200 ms: the

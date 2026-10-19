@@ -37,8 +37,8 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 type spinner struct {
 	mu   sync.Mutex
 	term io.Writer // where it draws; the spinner's lines never reach a copy
-	// width returns the columns of term (0 = unknown): the line is cut to
-	// fit, so that erasing it clears it entirely.
+	// width returns the columns of term (0 = unknown: nothing is drawn):
+	// the line is cut to fit, so that erasing it clears it entirely.
 	width func() int
 	now   func() time.Time
 	// ticker returns the channel of the frames and a function stopping
@@ -75,7 +75,8 @@ func newSpinner(f *os.File) *spinner {
 }
 
 // start begins a phase labelled label and returns the function ending it
-// (idempotent).
+// (idempotent). An empty label shows the frame alone, e.g. below a line
+// that already names the phase.
 func (s *spinner) start(label string) func() {
 	if s == nil {
 		return func() {}
@@ -125,10 +126,15 @@ func (s *spinner) step() {
 	if len(s.phases) == 0 || s.held > 0 || s.mid || s.now().Sub(s.quiet) < spinnerDelay {
 		return
 	}
-	line := spinnerFrames[s.frame%len(spinnerFrames)] + " " + *s.phases[len(s.phases)-1]
-	if w := s.width(); w > 0 {
-		line = ansi.Truncate(line, w-1, "")
+	w := s.width()
+	if w <= 0 {
+		return // a line that may wrap could not be erased entirely
 	}
+	line := spinnerFrames[s.frame%len(spinnerFrames)]
+	if label := *s.phases[len(s.phases)-1]; label != "" {
+		line += " " + label
+	}
+	line = ansi.Truncate(line, w-1, "")
 	_, _ = io.WriteString(s.term, "\r"+line+"\x1b[K")
 	s.shown = true
 	s.frame++

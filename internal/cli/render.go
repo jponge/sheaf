@@ -109,33 +109,76 @@ func levelMark(line string) tui.Mark {
 }
 
 // levelWriter writes to w, with the level word of each line (see
-// levelMark) rendered by paint. A line written in several parts is
-// classified by the part that starts it, which must hold its level word
-// and the space after it (as the commands print them).
+// levelMark) rendered by paint. A line written in several parts (e.g. by a
+// tabwriter, one cell at a time) is classified as soon as its start decides
+// it: the start of a line is held back while it is a strict prefix of a
+// level word of doctor or of a summary followed by its space (at most 15
+// bytes, e.g. "up to date" before its padding), and written out as soon as
+// it is anything else, so that text without a newline, such as a prompt,
+// is never held back unless it reads like the start of a level word. The
+// warning and note markers are classified on lines written whole, as the
+// commands print them. Flush writes a held start out unclassified; nothing
+// is held across a newline.
 type levelWriter struct {
 	mu    sync.Mutex
 	w     io.Writer
 	paint func(tui.Level, string) string
-	mid   bool // the last write ended inside a line
+	mid   bool   // the last write ended inside a line (after its start)
+	held  string // start of the current line, held back
 }
 
 func (l *levelWriter) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	var b strings.Builder
-	for rest := string(p); rest != ""; {
+	rest := l.held + string(p)
+	l.held = ""
+	for rest != "" {
 		line, after, nl := strings.Cut(rest, "\n")
-		if k := levelMark(line); !l.mid && k.Level != tui.LevelNone {
+		switch k := levelMark(line); {
+		case l.mid:
+		case k.Level != tui.LevelNone:
 			line = line[:k.Start] + l.paint(k.Level, line[k.Start:k.End]) + line[k.End:]
+		case !nl && levelWordPrefix(line):
+			l.held = line
+			line = ""
 		}
 		b.WriteString(line)
 		if nl {
 			b.WriteByte('\n')
 		}
-		l.mid, rest = !nl, after
+		l.mid, rest = !nl && l.held == "", after
 	}
 	if _, err := io.WriteString(l.w, b.String()); err != nil {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+// Flush writes out the start of a line held back, unclassified.
+func (l *levelWriter) Flush() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.held != "" {
+		_, _ = io.WriteString(l.w, l.held)
+		l.held, l.mid = "", true
+	}
+}
+
+// levelWordPrefix reports whether s is a strict prefix of a level word of
+// doctor or of a summary followed by a space.
+func levelWordPrefix(s string) bool {
+	for w := range levelWords {
+		if !strings.HasSuffix(w, ":") && len(s) <= len(w) && strings.HasPrefix(w, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// flush flushes w if it is a levelWriter.
+func flush(w io.Writer) {
+	if l, ok := w.(*levelWriter); ok {
+		l.Flush()
+	}
 }

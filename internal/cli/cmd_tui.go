@@ -25,9 +25,10 @@ import (
 func tuiAdd(c *cobra.Command, d Deps, w *ops.Workspace, h hosting.Hosting, req ops.AddRequest, jobs int) error {
 	s := newTUISession(c, d)
 	out := d.leveled(c, c.OutOrStdout())
+	defer flush(out)
 	if req.Org != "" && !req.All && len(req.Repos) == 0 {
 		fmt.Fprintf(c.ErrOrStderr(), "listing repositories of %s...\n", req.Org)
-		stop := d.spin.start("listing repositories of " + req.Org)
+		stop := d.spin.start("") // the line above names the phase
 		_, err := ops.Add(s.ctx, w, h, req, jobs, ops.Discard)
 		stop()
 		var sel *ops.SelectionRequiredError
@@ -81,7 +82,9 @@ func tuiSummary(c *cobra.Command, d Deps, title string, run func(ctx context.Con
 	var sum ops.Summary
 	s.progress(title, progressOpts{}, func(ctx context.Context, rep ops.Reporter, _ askFunc) { sum = run(ctx, rep) })
 	printFailureDetails(c.ErrOrStderr(), sum)
-	return printSummary(d.leveled(c, c.OutOrStdout()), sum)
+	out := d.leveled(c, c.OutOrStdout())
+	defer flush(out)
+	return printSummary(out, sum)
 }
 
 // tuiUpdate runs update in a progress view and prints its summary.
@@ -97,7 +100,9 @@ func tuiUpdate(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.UpdateOption
 	if uerr != nil {
 		return uerr
 	}
-	return printUpdateSummary(d.leveled(c, c.OutOrStdout()), r, strict)
+	out := d.leveled(c, c.OutOrStdout())
+	defer flush(out)
+	return printUpdateSummary(out, r, strict)
 }
 
 // tuiInitAdopt offers the checkouts found by init (all preselected) and
@@ -106,6 +111,7 @@ func tuiUpdate(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.UpdateOption
 func tuiInitAdopt(c *cobra.Command, d Deps, root string, cands []ops.Candidate, adoptAll bool, jobs int) error {
 	s := newTUISession(c, d)
 	out := d.leveled(c, c.OutOrStdout())
+	defer flush(out)
 	var paths, names []string
 	for _, cand := range cands {
 		paths = append(paths, cand.Path)
@@ -290,7 +296,9 @@ func tuiPrune(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.PruneOptions,
 	if len(plan.Candidates) == 0 {
 		d.reportUnchanged("nothing to prune")
 	}
-	printPrune(d.leveled(c, c.OutOrStdout()), plan, results, false)
+	out := d.leveled(c, c.OutOrStdout())
+	defer flush(out)
+	printPrune(out, plan, results, false)
 	return pruneErr(s.ctx, plan, results)
 }
 
@@ -303,6 +311,7 @@ func tuiPrune(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.PruneOptions,
 func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noFork bool) error {
 	s := newTUISession(c, d)
 	out := d.leveled(c, c.OutOrStdout())
+	defer flush(out)
 	if len(rep.Proposals) == 0 {
 		syWriteProposals(out, rep, false)
 		d.reportUnchanged("nothing to sync")

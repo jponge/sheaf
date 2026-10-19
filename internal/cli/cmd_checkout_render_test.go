@@ -48,7 +48,7 @@ func TestStatusTableStashOnFirstSuccessfulRow(t *testing.T) {
 		{Checkout: ops.Checkout{Repo: "a", Dir: "more", Branch: "more"}, Status: &gitx.RepoStatus{Branch: "more", Stashes: 2}},
 	}}
 	var b bytes.Buffer
-	writeStatusTable(&b, r, false)
+	writeStatusTable(&b, r, nil)
 	lines := strings.Split(b.String(), "\n")
 	if f := strings.Fields(lines[2]); len(f) < 2 || f[len(f)-2] != "2" {
 		t.Errorf("stash count not on the first successful row:\n%s", b.String())

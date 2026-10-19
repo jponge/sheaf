@@ -143,8 +143,8 @@ func TestWorktreeAddNoSpinnerOnPTY(t *testing.T) {
 	}
 }
 
-// The listing of sync shows the working indicator, erased before the
-// result is printed.
+// The listing of sync shows the working indicator below its static
+// "listing repositories of o..." line, erased before the result is printed.
 func TestSyncListingSpinnerOnPTY(t *testing.T) {
 	e := newBundleEnv(t)
 	yaml := filepath.Join(e.cwd, "sheaf.yaml")
@@ -164,8 +164,10 @@ func TestSyncListingSpinnerOnPTY(t *testing.T) {
 	s := startPTYShell(t, e.cwd, `PATH='`+bin+`'; export PATH; B=$(stty -g); "$SHEAF" sync`+sttyCheck, 0)
 	wantTerminalRestored(t, s, "0")
 	out := s.output()
-	if !spinnerLine("listing repositories of o").MatchString(out) {
-		t.Errorf("no working indicator during the listing:\n%q", out)
+	// The static line names the phase: the indicator is only the frame.
+	frameOnly := regexp.MustCompile("\r[" + strings.Join(spinnerFrames, "") + "]\x1b\\[K")
+	if !frameOnly.MatchString(out) || spinnerLine("listing repositories of o").MatchString(out) {
+		t.Errorf("want a frame alone as working indicator during the listing:\n%q", out)
 	}
 	vt := newVTScreen(24, 100)
 	vt.write(out)

@@ -187,6 +187,7 @@ func (s *tuiSession) runModel(m tea.Model) (tea.Model, error) {
 	if err := s.ctx.Err(); err != nil {
 		return nil, err
 	}
+	flush(s.errw) // the program owns the terminal
 	s.spin.hold()
 	final, err := tui.Run(m, s.in, s.out, tea.WithContext(s.ctx), tea.WithoutSignalHandler())
 	s.spin.release()
@@ -268,6 +269,7 @@ func (s *tuiSession) progress(title string, o progressOpts, work func(ctx contex
 		work(s.ctx, plain, func(string, []string) bool { return false })
 		return
 	}
+	flush(s.errw) // the program owns the terminal
 	s.spin.hold() // the work may start a phase (see spinHosting)
 	q := &msgQueue{wake: make(chan struct{}, 1)}
 	programDone := make(chan struct{})
@@ -354,6 +356,7 @@ func (s *tuiSession) progress(title string, o progressOpts, work func(ctx contex
 	if credentials {
 		fmt.Fprintln(s.errw, credentialHint)
 	}
+	flush(s.errw)
 }
 
 // msgQueue is an unbounded FIFO between the goroutines of progress.
@@ -480,17 +483,28 @@ func isNotice(e ops.Event) bool {
 
 // leveled returns w, standard output or error of c, for the summaries and
 // notes that c prints: in TUI mode, with their level words colored (see
-// levelWriter) as the terminal behind w allows (see tui.Painter); else w
-// itself.
+// levelWriter) as the terminal behind w allows (see tui.Painter); else,
+// and always with --json (stdout and stderr alike), w itself.
 func (d Deps) leveled(c *cobra.Command, w io.Writer) io.Writer {
-	if !d.tuiMode(c) {
+	paint := d.painter(c, w)
+	if paint == nil {
 		return w
+	}
+	return &levelWriter{w: w, paint: paint}
+}
+
+// painter returns how c renders text in the style of a level on w: in TUI
+// mode and without --json, as the terminal behind w allows (see
+// tui.Painter); else nil, for unstyled output.
+func (d Deps) painter(c *cobra.Command, w io.Writer) func(tui.Level, string) string {
+	if asJSON, err := c.Flags().GetBool("json"); !d.tuiMode(c) || err == nil && asJSON {
+		return nil
 	}
 	environ := os.Environ
 	if d.environ != nil {
 		environ = d.environ
 	}
-	return &levelWriter{w: w, paint: tui.Painter(terminalOf(w), environ())}
+	return tui.Painter(terminalOf(w), environ())
 }
 
 // teeWriter writes to Writer, a copy of term (the terminal) and of

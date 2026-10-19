@@ -19,9 +19,8 @@ import (
 type env struct {
 	fake *hostingtest.Fake
 	cwd  string
-	// stdinTTY and stdoutTTY become Deps.stdinTTY and Deps.stdoutTTY.
-	stdinTTY  func(io.Reader) bool
-	stdoutTTY func(io.Writer) bool
+	// stdinTTY becomes Deps.stdinTTY.
+	stdinTTY func(io.Reader) bool
 }
 
 func newEnv(t *testing.T) *env {
@@ -32,10 +31,9 @@ func newEnv(t *testing.T) *env {
 
 func (e *env) deps() Deps {
 	return Deps{
-		Hosting:   func() hosting.Hosting { return e.fake },
-		Getwd:     func() (string, error) { return e.cwd, nil },
-		stdinTTY:  e.stdinTTY,
-		stdoutTTY: e.stdoutTTY,
+		Hosting:  func() hosting.Hosting { return e.fake },
+		Getwd:    func() (string, error) { return e.cwd, nil },
+		stdinTTY: e.stdinTTY,
 	}
 }
 

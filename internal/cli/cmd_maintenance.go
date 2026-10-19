@@ -339,6 +339,7 @@ func newDoctorCmd(d Deps) *cobra.Command {
 				}
 			} else {
 				out := d.leveled(c, out)
+				defer flush(out)
 				for _, ch := range checks {
 					msg := ch.Message
 					if ch.Repo != "" {

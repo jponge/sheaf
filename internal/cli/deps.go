@@ -56,10 +56,9 @@ type Deps struct {
 	// programs render and which decides the TUI mode (see tuiMode): the
 	// home screen captures what its actions print for its report view.
 	term io.Writer
-	// stdinTTY and stdoutTTY replace isTerminal for standard input
-	// (interactive git mode) and standard output (colors); tests only.
-	stdinTTY  func(io.Reader) bool
-	stdoutTTY func(io.Writer) bool
+	// stdinTTY replaces isTerminal for standard input (interactive git
+	// mode); tests only.
+	stdinTTY func(io.Reader) bool
 	// environ replaces os.Environ for the color decisions (see leveled);
 	// tests only.
 	environ func() []string

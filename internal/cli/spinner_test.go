@@ -74,6 +74,53 @@ func TestSpinnerShowsAfterDelayAndIsErased(t *testing.T) {
 	}
 }
 
+// A phase without a label (after a line that names it) shows the frame
+// alone.
+func TestSpinnerWithoutLabel(t *testing.T) {
+	t.Parallel()
+	s, b, now := testSpinner()
+	defer s.start("")()
+	*now = now.Add(spinnerDelay)
+	s.step()
+	if want := "\r" + spinnerFrames[0] + "\x1b[K"; b.String() != want {
+		t.Fatalf("drew %q, want %q", b.String(), want)
+	}
+}
+
+// With the width of the terminal unknown, the line could wrap and leave a
+// trail when erased: the spinner does not draw.
+func TestSpinnerUnknownWidth(t *testing.T) {
+	t.Parallel()
+	s, b, now := testSpinner()
+	s.width = func() int { return 0 }
+	defer s.start("x")()
+	*now = now.Add(time.Second)
+	s.step()
+	if b.Len() != 0 {
+		t.Fatalf("drawn with an unknown width: %q", b.String())
+	}
+}
+
+// After a bubbletea program, the spinner waits spinnerDelay again before
+// drawing.
+func TestSpinnerWaitsAfterRelease(t *testing.T) {
+	t.Parallel()
+	s, b, now := testSpinner()
+	defer s.start("x")()
+	s.hold()
+	*now = now.Add(time.Second)
+	s.release()
+	s.step()
+	if b.Len() != 0 {
+		t.Fatalf("drawn right after release: %q", b.String())
+	}
+	*now = now.Add(spinnerDelay)
+	s.step()
+	if b.Len() == 0 {
+		t.Fatal("not drawn spinnerDelay after release")
+	}
+}
+
 // Output through the spinner's writer erases the spinner first; the spinner
 // comes back only after another spinnerDelay of silence, and never in the
 // middle of a line.
@@ -179,7 +226,7 @@ func TestSpinnerTicker(t *testing.T) {
 		}
 		return t0.Add(time.Second)
 	}
-	s := &spinner{term: lockedWriter{&mu, &b}, width: func() int { return 0 }, now: clock,
+	s := &spinner{term: lockedWriter{&mu, &b}, width: func() int { return 30 }, now: clock,
 		ticker: func(time.Duration) (<-chan time.Time, func()) { return ticks, func() { close(stopped) } }}
 	stop := s.start("work")
 	ticks <- time.Time{}
