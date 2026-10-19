@@ -264,6 +264,7 @@ lines that still do not fit are cut at the right.
 | u | update the selected rows (or the current row) |
 | f | fetch the repositories of the selected rows (or the current row) |
 | w | add a worktree to the current row's repository: a prompt asks for a branch (an existing local or remote one, else a new branch from the default branch, as `wt add`), tab switches to a tag |
+| # | check out a pull request of the current row's repository (GitHub only): a prompt asks for its number (`#123` also accepted), then `wt pr` runs |
 | r | remove the selected worktrees (or the current one); not the primary |
 | p, d, s | `prune`, `doctor`, `sync` on the whole bundle |
 | q, esc | quit with status 0 (esc first clears an applied filter) |

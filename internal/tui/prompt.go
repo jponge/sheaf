@@ -16,7 +16,8 @@ import (
 // Typed or pasted text (without control characters) is appended;
 // backspace deletes a rune, ctrl+w a word and ctrl+u everything (as the
 // filter of MultiSelect). enter confirms a value that is not blank (on a
-// blank one, a line asks for a value); esc and ctrl+c cancel. A hint per
+// blank one, a line asks for a value) and accepted by its check, if any
+// (WithCheck); esc and ctrl+c cancel. A hint per
 // mode (WithHints) is displayed below the input while it is edited. Update returns tea.Quit once answered; later messages
 // are ignored. The title is displayed with control characters replaced by
 // U+FFFD.
@@ -27,8 +28,10 @@ type Prompt struct {
 	value string
 	width int // 0 = unknown
 
-	hints []string // by mode, see WithHints
-	blank bool     // enter was pressed on a blank value
+	hints   []string            // by mode, see WithHints
+	blank   bool                // enter was pressed on a blank value
+	check   func(string) string // see WithCheck
+	refused string              // the message of check for the value, until edited
 
 	confirmed, cancelled, interrupted bool
 
@@ -64,6 +67,15 @@ func (m Prompt) WithHints(hints ...string) Prompt {
 	return m
 }
 
+// WithCheck returns a copy of m in which enter on a value that is not
+// blank calls check: a non-empty result refuses the value and is displayed
+// below the input until the value is edited (e.g. a value that is not a
+// number).
+func (m Prompt) WithCheck(check func(value string) string) Prompt {
+	m.check = check
+	return m
+}
+
 // Init implements tea.Model.
 func (m Prompt) Init() tea.Cmd { return nil }
 
@@ -96,9 +108,9 @@ func (m Prompt) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.SetWidth(msg.Width)
 	case tea.PasteMsg:
 		m.value += dropControl(msg.Content)
-		m.blank = false
+		m.blank, m.refused = false, ""
 	case tea.KeyPressMsg:
-		m.blank = false
+		m.blank, m.refused = false, ""
 		switch s := msg.String(); {
 		case s == "ctrl+c":
 			m.cancelled, m.interrupted = true, true
@@ -107,11 +119,17 @@ func (m Prompt) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancelled = true
 			return m, tea.Quit
 		case key.Matches(msg, m.keys.Confirm):
-			if strings.TrimSpace(m.value) != "" {
+			if strings.TrimSpace(m.value) == "" {
+				m.blank = true
+				break
+			}
+			if m.check != nil {
+				m.refused = m.check(m.value)
+			}
+			if m.refused == "" {
 				m.confirmed = true
 				return m, tea.Quit
 			}
-			m.blank = true
 		case key.Matches(msg, m.keys.Mode):
 			m.mode = (m.mode + 1) % len(m.modes)
 		case s == "ctrl+u":
@@ -143,6 +161,9 @@ func (m Prompt) View() tea.View {
 		}
 		if m.blank {
 			lines = append(lines, st.Question.Render("type a "+sanitize(m.Mode())+" first (esc cancels)"))
+		}
+		if m.refused != "" {
+			lines = append(lines, st.Question.Render(sanitize(m.refused)))
 		}
 		bindings := []key.Binding{m.keys.Confirm}
 		if len(m.modes) > 1 {

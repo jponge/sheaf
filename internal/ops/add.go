@@ -340,6 +340,13 @@ func existingOnAliasHost(b *bundle.Bundle, slug string) *bundle.Repository {
 	return nil
 }
 
+// OnGitHub reports whether r is hosted on github.com, or on a host that
+// looks like an SSH alias of it (see looksLikeGitHubAlias): the
+// repositories whose pull requests and web pages gh can reach.
+func OnGitHub(r bundle.Repository) bool {
+	return r.IsGitHub() || looksLikeGitHubAlias(r.HostName())
+}
+
 // looksLikeGitHubAlias reports whether host, other than github.com and
 // "local", looks like an SSH alias of github.com: it has no dot (not a
 // public host name) or contains "github" (case-insensitively; a GitHub

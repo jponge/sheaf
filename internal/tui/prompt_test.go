@@ -115,3 +115,35 @@ func TestPromptSanitizesTitle(t *testing.T) {
 		t.Fatalf("view:\n%s", view(m))
 	}
 }
+
+// A check refuses a value on enter: its message is displayed, the prompt
+// stays open, and the message goes away once the value is edited.
+func TestPromptCheckRefusesValues(t *testing.T) {
+	t.Parallel()
+	digits := func(v string) string {
+		if strings.Trim(v, "0123456789") != "" {
+			return "not a number: " + v
+		}
+		return ""
+	}
+	m, cmd := press(NewPrompt("Pull request of alpha", []string{"number"}).WithCheck(digits), "x", "1", "enter")
+	if p := asPrompt(t, m); isQuit(cmd) || p.Confirmed() || p.Cancelled() {
+		t.Fatalf("refused value: quit=%v confirmed=%v cancelled=%v", isQuit(cmd), p.Confirmed(), p.Cancelled())
+	}
+	if !hasLine(view(m), "not a number: x1") {
+		t.Fatalf("no message for a refused value:\n%s", view(m))
+	}
+	m, _ = press(m, "ctrl+u", "4", "2")
+	if strings.Contains(view(m), "not a number") {
+		t.Fatalf("message kept after editing:\n%s", view(m))
+	}
+	m, cmd = press(m, "enter")
+	if p := asPrompt(t, m); !isQuit(cmd) || !p.Confirmed() || p.Value() != "42" {
+		t.Fatalf("accepted value: quit=%v confirmed=%v value=%q", isQuit(cmd), p.Confirmed(), p.Value())
+	}
+	// A blank value still asks for one; the check does not see it.
+	m, _ = press(NewPrompt("t", []string{"number"}).WithCheck(func(string) string { return "checked" }), "enter")
+	if v := view(m); !hasLine(v, "type a number first (esc cancels)") || strings.Contains(v, "checked") {
+		t.Fatalf("blank value:\n%s", v)
+	}
+}

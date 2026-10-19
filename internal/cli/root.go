@@ -47,8 +47,8 @@ func NewRootCmdWithDeps(s Streams, d Deps) *cobra.Command {
 
 Without a command, inside a bundle and with a terminal, sheaf opens its
 home screen: an overview of the bundle's checkouts with actions (update,
-fetch, add and remove worktrees, prune, doctor, sync). Without a terminal
-or with --no-tui, it prints this help.`,
+fetch, add and remove worktrees, check out pull requests, prune, doctor,
+sync). Without a terminal or with --no-tui, it prints this help.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(c *cobra.Command, _ []string) error {

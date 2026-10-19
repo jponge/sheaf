@@ -97,6 +97,7 @@ type home struct {
 
 	cursor, filter, message string
 	rows                    map[string]homeRow // by row key, of the last overview
+	bundle                  *bundle.Bundle     // as read for the last overview
 	// selected are the selected rows of the next overview: those of the
 	// last one, unless its action applied to them and succeeded.
 	selected []string
@@ -180,7 +181,7 @@ func (h *home) overview() (tui.Overview, error) {
 	if err := h.s.ctx.Err(); err != nil {
 		return tui.Overview{}, err
 	}
-	h.rows = map[string]homeRow{}
+	h.rows, h.bundle = map[string]homeRow{}, w.Bundle()
 	now := h.d.clock()
 	var rows []tui.Row
 	for i := range r.Checkouts {
@@ -333,11 +334,23 @@ func (h *home) actions() []tui.OverviewAction {
 		}
 		return ""
 	}
+	onGitHub := func(targets []string) string {
+		if why := noProblem(targets); why != "" {
+			return why
+		}
+		for _, k := range targets {
+			if r, ok := h.bundle.Repository(h.rows[k].repo()); ok && !ops.OnGitHub(*r) {
+				return r.Name + " is not a GitHub repository (hosted on " + r.HostName() + ")"
+			}
+		}
+		return ""
+	}
 	return []tui.OverviewAction{
 		{Key: "enter", Name: "cd", Help: "cd", Scope: tui.ScopeCurrent, Check: noProblem},
 		{Key: "u", Name: "update", Help: "update", Scope: tui.ScopeRows, Check: noProblem},
 		{Key: "f", Name: "fetch", Help: "fetch", Scope: tui.ScopeRows},
 		{Key: "w", Name: "add", Help: "add worktree", Scope: tui.ScopeCurrent},
+		{Key: "#", Name: "pr", Help: "check out PR", Scope: tui.ScopeCurrent, Check: onGitHub},
 		{Key: "r", Name: "remove", Help: "remove worktree", Scope: tui.ScopeRows, Check: removable},
 		{Key: "p", Name: "prune", Help: "prune", Scope: tui.ScopeNone},
 		{Key: "d", Name: "doctor", Help: "doctor", Scope: tui.ScopeNone},
@@ -395,6 +408,8 @@ func (h *home) act(name string, targets []string) string {
 		return h.outcome(name, []error{h.command(args...)})
 	case "add":
 		return h.add(repos[0])
+	case "pr":
+		return h.pr(repos[0])
 	case "remove":
 		var errs []error
 		for _, k := range targets {
@@ -431,6 +446,27 @@ func (h *home) add(repo string) string {
 		return h.outcome("add", []error{h.command("wt", "add", "--tag="+value, "--", repo)})
 	}
 	return h.outcome("add", []error{h.command("wt", "add", "--", repo, value)})
+}
+
+// pr asks for the number of a pull request of repo and checks it out with
+// `wt pr`.
+func (h *home) pr(repo string) string {
+	prompt := tui.NewPrompt("Pull request of "+repo, []string{"number"}).WithHints(
+		"checked out in a worktree, as `sheaf wt pr` does (#123 also accepted)").WithCheck(func(v string) string {
+		if _, err := parsePRNumber(strings.TrimSpace(v)); err != nil {
+			return err.Error()
+		}
+		return ""
+	})
+	final, err := h.s.run(prompt)
+	if err != nil {
+		return h.outcome("pr", []error{err})
+	}
+	p, ok := final.(tui.Prompt)
+	if !ok || !p.Confirmed() {
+		return h.outcome("pr", []error{errCancelled})
+	}
+	return h.outcome("pr", []error{h.command("wt", "pr", "--", repo, strings.TrimSpace(p.Value()))})
 }
 
 // command runs `sheaf <args>` (global options of this run, the bundle of
