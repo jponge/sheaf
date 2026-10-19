@@ -636,6 +636,37 @@ func TestHomeAddWorktreeForBranchAndTag(t *testing.T) {
 	}
 }
 
+// The w prompt suggests the branches and the tags of the repository, read
+// from its local refs (B47): → accepts the suggested branch, ctrl+e the
+// suggested tag.
+func TestHomeAddWorktreeSuggestsBranchesAndTags(t *testing.T) {
+	t.Parallel()
+	e, alpha, _, _, _ := homeBundle(t)
+	testutil.Git(t, alpha, "branch", "fix/local")
+	testutil.Git(t, alpha, "tag", "v1.2")
+	var out syncBuffer
+	suggested := func(want string, ks ...string) []key {
+		k := keys(ks...)
+		k[0].wait = waitScreen(t, &out, want)
+		return k
+	}
+	in := newScript(t, false,
+		ovKeys(t, &out, "STATE", 1, "w"), slices.Concat(keys("f", "i"), suggested("branch: fi█x/local", "\x1b[C"), suggested("branch: fix/local█", "\r")), reportKey(t, &out, "wt add", "q"),
+		ovKeys(t, &out, "wt add: done", 1, "w"), slices.Concat(keys("\t", "v"), suggested("tag: v█1.2", "\x05"), suggested("tag: v1.2█", "\r")), reportKey(t, &out, "wt add", "q"),
+		ovKeys(t, &out, "wt add: done", 2, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	repo := filepath.Dir(alpha)
+	if got := testutil.Git(t, filepath.Join(repo, "fix-local"), "branch", "--show-current"); got != "fix/local" {
+		t.Errorf("branch %q", got)
+	}
+	if !exists(filepath.Join(repo, "v1.2", ".git")) {
+		t.Fatalf("tag worktree not created\nstdout:\n%s\nstderr:\n%s", out.String(), errs)
+	}
+}
+
 // a selects every row (as in every list) and no longer adds a worktree,
 // which w does; n deselects every row. The fetch summaries count the
 // repositories targeted: both after a, the current one after a then n.

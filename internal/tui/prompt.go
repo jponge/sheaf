@@ -14,7 +14,11 @@ import (
 //
 // Typed or pasted text (without control characters) is appended;
 // backspace deletes a rune, ctrl+w a word and ctrl+u everything (as the
-// filter of MultiSelect). enter confirms a value that is not blank (on a
+// filter of MultiSelect). With suggestions (WithSuggestions), the rest of
+// the first suggestion of the mode that starts with the value
+// (case-sensitively) is displayed faint after the cursor, and → or ctrl+e
+// appends it (tab keeps switching the mode). enter confirms the value
+// typed, if it is not blank (on a
 // blank one, a line asks for a value) and accepted by its check, if any
 // (WithCheck); esc and ctrl+c cancel. A hint per
 // mode (WithHints) is displayed below the input while it is edited. Update returns tea.Quit once answered; later messages
@@ -32,6 +36,9 @@ type Prompt struct {
 	check   func(string) string // see WithCheck
 	refused string              // the message of check for the value, until edited
 
+	load        func() [][]string // see WithSuggestions
+	suggestions [][]string        // by mode, once loaded
+
 	confirmed, cancelled, interrupted bool
 
 	keys   promptKeys
@@ -39,7 +46,7 @@ type Prompt struct {
 	styles Styles
 }
 
-type promptKeys struct{ Confirm, Mode, Cancel key.Binding }
+type promptKeys struct{ Confirm, Mode, Complete, Cancel key.Binding }
 
 // NewPrompt returns a Prompt titled title, starting in the first of modes
 // (at least one).
@@ -52,9 +59,10 @@ func NewPrompt(title string, modes []string) Prompt {
 		modes = []string{"value"}
 	}
 	k := promptKeys{
-		Confirm: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
-		Mode:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", strings.Join(modes, "/"))),
-		Cancel:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+		Confirm:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
+		Mode:     key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", strings.Join(modes, "/"))),
+		Complete: key.NewBinding(key.WithKeys("right", "ctrl+e"), key.WithHelp("→", "complete")),
+		Cancel:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 	}
 	return Prompt{title: title, modes: modes, keys: k, help: h, styles: st}
 }
@@ -75,8 +83,44 @@ func (m Prompt) WithCheck(check func(value string) string) Prompt {
 	return m
 }
 
-// Init implements tea.Model.
-func (m Prompt) Init() tea.Cmd { return nil }
+// WithSuggestions returns a copy of m that suggests completions of the
+// value (see Prompt): load returns the suggestions of each mode (by index,
+// as the modes; fewer for none in the last modes). Init runs it in the
+// background, so that the prompt opens without waiting; there are no
+// suggestions until it returns.
+func (m Prompt) WithSuggestions(load func() [][]string) Prompt {
+	m.load = load
+	return m
+}
+
+// suggestionsMsg carries the suggestions loaded by WithSuggestions' load.
+type suggestionsMsg [][]string
+
+// Init implements tea.Model: it loads the suggestions, if any (see
+// WithSuggestions).
+func (m Prompt) Init() tea.Cmd {
+	if m.load == nil {
+		return nil
+	}
+	load := m.load
+	return func() tea.Msg { return suggestionsMsg(load()) }
+}
+
+// suggestion returns what the suggestion for the value adds to it: the
+// rest of the first suggestion of the mode that starts with the value
+// (case-sensitively) and is longer; "" for an empty value or no such
+// suggestion.
+func (m Prompt) suggestion() string {
+	if m.value == "" || m.mode >= len(m.suggestions) {
+		return ""
+	}
+	for _, s := range m.suggestions[m.mode] {
+		if rest, ok := strings.CutPrefix(s, m.value); ok && rest != "" {
+			return rest
+		}
+	}
+	return ""
+}
 
 // Value returns the text entered.
 func (m Prompt) Value() string { return m.value }
@@ -105,6 +149,8 @@ func (m Prompt) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.help.SetWidth(msg.Width)
+	case suggestionsMsg:
+		m.suggestions = msg
 	case tea.PasteMsg:
 		m.value += dropControl(msg.Content)
 		m.blank, m.refused = false, ""
@@ -131,6 +177,8 @@ func (m Prompt) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.Mode):
 			m.mode = (m.mode + 1) % len(m.modes)
+		case key.Matches(msg, m.keys.Complete):
+			m.value += dropControl(m.suggestion())
 		case s == "ctrl+u":
 			m.value = ""
 		case s == "ctrl+w":
@@ -150,8 +198,12 @@ func (m Prompt) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Prompt) View() tea.View {
 	st := m.styles
 	input := st.FilterPrompt.Render(sanitize(m.Mode())+":") + " " + m.value
+	suggestion := m.suggestion()
 	if !m.confirmed && !m.cancelled {
 		input += "█"
+		if suggestion != "" {
+			input += st.Detail.Render(sanitize(suggestion))
+		}
 	}
 	lines := []string{st.Title.Render(sanitize(m.title)), input}
 	if !m.confirmed && !m.cancelled {
@@ -165,6 +217,9 @@ func (m Prompt) View() tea.View {
 			lines = append(lines, st.Question.Render(sanitize(m.refused)))
 		}
 		bindings := []key.Binding{m.keys.Confirm}
+		if suggestion != "" {
+			bindings = append(bindings, m.keys.Complete)
+		}
 		if len(m.modes) > 1 {
 			bindings = append(bindings, m.keys.Mode)
 		}

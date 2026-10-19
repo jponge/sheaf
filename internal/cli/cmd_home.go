@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -661,15 +662,31 @@ func (h *home) removeWorktrees(targets []string) []error {
 	return tuiWorktreeRemoveMany(c, d, w, items, ops.WorktreeRemoveOptions{WorkingDir: wd})
 }
 
-// add asks for a branch or a tag and adds the worktree with `wt add`.
+// add asks for a branch or a tag and adds the worktree with `wt add`. The
+// prompt suggests the branches and the tags of the repository's local refs
+// (see ops.SuggestWorktree), read in the background while it is open: the
+// git process is stopped once the prompt ends.
 func (h *home) add(repo string) string {
 	// The hints follow wt add: an existing branch (local, then origin's),
 	// else a new one from the default branch; --tag pins a detached
 	// worktree at the tag.
+	ctx, cancel := context.WithCancel(h.s.ctx)
+	defer cancel()
 	prompt := tui.NewPrompt("New worktree of "+repo, []string{"branch", "tag"}).WithHints(
 		"an existing local or remote branch, else a new branch from the default branch",
-		"a tag: a detached worktree pinned at it")
+		"a tag: a detached worktree pinned at it").WithSuggestions(func() [][]string {
+		w, err := ops.OpenWorkspace(h.root)
+		if err != nil {
+			return nil
+		}
+		s, err := ops.SuggestWorktree(ctx, w, repo)
+		if err != nil {
+			return nil
+		}
+		return [][]string{s.Branches, s.Tags}
+	})
 	final, err := h.session().run(prompt)
+	cancel()
 	if err != nil {
 		return h.outcome("add", []error{err})
 	}

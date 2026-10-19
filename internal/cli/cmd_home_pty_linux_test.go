@@ -794,6 +794,40 @@ func TestHomeOnPTYLinksRepositories(t *testing.T) {
 	}
 }
 
+// The w prompt opens, takes input and is cancelled while the git process
+// reading its suggestions (B47) still runs: they are loaded in the
+// background.
+func TestHomeOnPTYPromptDoesNotWaitForSuggestions(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	// The suggestions are the only for-each-ref of refs/tags and
+	// refs/remotes/origin.
+	writeFile(t, filepath.Join(bin, "git"), "#!/bin/sh\ntags=; origin=\nfor a in \"$@\"; do case $a in refs/tags) tags=1;; refs/remotes/origin) origin=1;; esac; done\nif [ \"$tags$origin\" = 11 ]; then sleep 60; fi\nexec '"+git+"' \"$@\"\n")
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	s := startPTYShell(t, e.cwd, `PATH='`+bin+`':$PATH; export PATH; B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	s.write("w")
+	s.waitFor(`New worktree of alpha`)
+	s.write("f")
+	waitScreenState(t, s, "the prompt with f typed", func(vt *vtScreen) bool {
+		return slices.Contains(vt.normalLines(), "branch: f█")
+	})
+	s.write("\x1b")
+	s.waitFor(`wt add: cancelled`)
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
+	if d := time.Since(start); d > 45*time.Second {
+		t.Errorf("the session took %v: the prompt waited for its suggestions", d)
+	}
+}
+
 // Mouse wheel reports (SGR, as the terminal sends them once asked) move the
 // cursor of the overview by up to 3 rows (B49); mouse reporting is on while
 // the overview is displayed, as cell motion with SGR encoding (DECSET 1002

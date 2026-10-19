@@ -27,6 +27,7 @@ var namedKeys = map[string]tea.Key{
 	"backspace": {Code: tea.KeyBackspace}, "tab": {Code: tea.KeyTab},
 	"shift+g": {Code: 'g', Mod: tea.ModShift},
 	"ctrl+u":  {Code: 'u', Mod: tea.ModCtrl}, "ctrl+w": {Code: 'w', Mod: tea.ModCtrl},
+	"right": {Code: tea.KeyRight}, "ctrl+e": {Code: 'e', Mod: tea.ModCtrl},
 }
 
 // keyMsg builds the KeyPressMsg bubbletea produces for a named key, or a

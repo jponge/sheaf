@@ -140,6 +140,14 @@ var gitCallCommands = []struct {
 		_, err := ResolvePath(ctx, f.w, PathQuery{Args: []string{"r3", "feat/b"}, Cwd: f.w.Root})
 		return err
 	}},
+	// The suggestions of the home screen's w prompt.
+	{"wt add suggest", 1 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+		s, err := SuggestWorktree(ctx, f.w, "r1")
+		if err == nil && len(s.Branches) == 0 {
+			err = errors.New("no branch suggested")
+		}
+		return err
+	}},
 	{"doctor", 31 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		cs := Doctor(ctx, DoctorOptions{Root: f.w.Root, GH: goodGH})
 		if DoctorFailed(cs) {
