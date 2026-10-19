@@ -190,8 +190,12 @@ func (h *home) overview() (tui.Overview, error) {
 		h.rows[key] = homeRow{problem: p}
 		rows = append(rows, tui.Row{Key: key, Cells: []string{p.Repo, filepath.Base(p.Path), "-", "problem: " + firstLine(p.Err.Error())}, Alert: true})
 	}
+	// Checkouts and problems are each sorted by repository: the problem
+	// rows of a repository go after its checkouts, so that the rows of a
+	// repository are contiguous for the grouping.
+	slices.SortStableFunc(rows, func(a, b tui.Row) int { return strings.Compare(a.Cells[0], b.Cells[0]) })
 	ov := tui.NewOverview("sheaf: "+w.Root, []string{"REPO", "DIR", "BRANCH", "STATE"}, rows, h.actions())
-	return ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithAltScreen(), nil
+	return ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithAltScreen().WithGrouping(), nil
 }
 
 // scope returns the scope of the action name.

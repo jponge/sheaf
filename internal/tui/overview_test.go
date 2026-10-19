@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -701,4 +702,59 @@ func TestOverviewStatusPartsAreShownWholeOrNotAtAll(t *testing.T) {
 	if l := statusLine(t, m); l != "0/25 selected" {
 		t.Errorf("width 18: status line %q, want %q", l, "0/25 selected")
 	}
+}
+
+// With grouping, the first cell of a row repeating the one of the visible
+// row above it is blank; the first visible row of a group, and the first
+// row rendered after scrolling, show it. The filter still matches the
+// blanked cells.
+func TestOverviewGroupsRowsByFirstCell(t *testing.T) {
+	t.Parallel()
+	rows := []Row{
+		{Key: "1", Cells: []string{"alpha", "main", "clean"}},
+		{Key: "2", Cells: []string{"alpha", "feat-x", "dirty"}},
+		{Key: "3", Cells: []string{"alpha", "feat-z", "clean"}},
+		{Key: "4", Cells: []string{"bravo", "main", "clean"}},
+	}
+	newGrouped := func() Overview {
+		return NewOverview("t", []string{"REPO", "DIR", "STATE"}, rows, nil).WithGrouping()
+	}
+	wantLines := func(m tea.Model, want ...string) {
+		t.Helper()
+		v := view(m)
+		for _, w := range want {
+			if !hasLine(v, w) {
+				t.Errorf("view lacks line %q:\n%s", w, v)
+			}
+		}
+	}
+	wantLines(newGrouped(),
+		"> [ ] alpha  main    clean",
+		"  [ ]        feat-x  dirty",
+		"  [ ]        feat-z  clean",
+		"  [ ] bravo  main    clean")
+	// The first visible row of a group shows its name.
+	wantLines(newGrouped().WithFilter("feat-z"), "> [ ] alpha  feat-z  clean")
+	wantLines(newGrouped().WithFilter("dirty"), "> [ ] alpha  feat-x  dirty")
+	// The filter matches the blanked names.
+	m := newGrouped().WithFilter("alph")
+	wantLines(m, "> [ ] alpha  main    clean", "  [ ]        feat-x  dirty", "  [ ]        feat-z  clean")
+	if v := view(m); !strings.Contains(v, "3 shown") || strings.Contains(v, "bravo") {
+		t.Errorf("filter alph:\n%s", v)
+	}
+	// The row above is the visible one, not the one hidden by the filter.
+	split := []Row{rows[0], rows[3], rows[1]}
+	wantLines(NewOverview("t", []string{"REPO", "DIR", "STATE"}, split, nil).WithGrouping().WithFilter("alpha"),
+		"> [ ] alpha  main    clean", "  [ ]        feat-x  dirty")
+	// After scrolling, the first row rendered shows its name although the
+	// row above it is scrolled off.
+	more := append(slices.Clone(rows), Row{Key: "5", Cells: []string{"bravo", "b1", "clean"}}, Row{Key: "6", Cells: []string{"bravo", "b2", "clean"}})
+	var sm tea.Model = NewOverview("t", []string{"REPO", "DIR", "STATE"}, more, nil).WithGrouping()
+	sm, _ = sm.Update(tea.WindowSizeMsg{Width: 80, Height: 8}) // 2 rows
+	sm, _ = press(sm, "down", "down")
+	if v := view(sm); !hasLine(v, "  [ ] alpha  feat-x  dirty") || !hasLine(v, "> [ ]        feat-z  clean") {
+		t.Errorf("scrolled:\n%s", v)
+	}
+	// Without grouping every row shows its first cell.
+	wantLines(NewOverview("t", []string{"REPO", "DIR", "STATE"}, rows, nil), "  [ ] alpha  feat-x  dirty")
 }

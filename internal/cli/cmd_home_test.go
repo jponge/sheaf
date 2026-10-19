@@ -2,13 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jponge/sheaf/internal/hosting"
 	"github.com/jponge/sheaf/internal/testutil"
@@ -183,6 +187,52 @@ func TestHomeShowsProblems(t *testing.T) {
 	errs, code := runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "q")), &out)
 	if code != 0 || !strings.Contains(out.String(), "problem: worktree directory missing") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+}
+
+// overviewRows returns the row lines of the first overview of the home
+// screen in bundle e, as rendered without a window size and colors.
+func overviewRows(t *testing.T, e *env) []string {
+	t.Helper()
+	h := &home{d: e.deps(), s: &tuiSession{ctx: context.Background()}, root: e.cwd, jobs: 4}
+	ov, err := h.overview()
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := regexp.MustCompile(`^(> |  )\[[ x]\] `)
+	var rows []string
+	for _, l := range strings.Split(ansi.Strip(ov.View().Content), "\n") {
+		if row.MatchString(l) {
+			rows = append(rows, l)
+		}
+	}
+	return rows
+}
+
+// The overview groups rows by repository: the rows of a repository are
+// contiguous, problem rows included, and only the first shows its name.
+func TestHomeGroupsRowsByRepository(t *testing.T) {
+	t.Parallel()
+	e, _, feat, _, _ := homeBundle(t)
+	want := func(rows []string, prefixes ...string) {
+		t.Helper()
+		if len(rows) != len(prefixes) {
+			t.Fatalf("rows:\n%s\nwant prefixes %q", strings.Join(rows, "\n"), prefixes)
+		}
+		for i, p := range prefixes {
+			if !strings.HasPrefix(rows[i], p) {
+				t.Errorf("row %d %q, want prefix %q\nrows:\n%s", i, rows[i], p, strings.Join(rows, "\n"))
+			}
+		}
+	}
+	want(overviewRows(t, e), "> [ ] alpha  main ", "  [ ]        feat ", "  [ ] beta   main ")
+	if err := os.RemoveAll(feat); err != nil {
+		t.Fatal(err)
+	}
+	rows := overviewRows(t, e)
+	want(rows, "> [ ] alpha  main ", "  [ ]        feat ", "  [ ] beta   main ")
+	if !strings.Contains(rows[1], "problem: worktree directory missing") {
+		t.Errorf("row 1 is not the problem: %q", rows[1])
 	}
 }
 
@@ -584,8 +634,9 @@ func TestHomePruneDoctorAndSync(t *testing.T) {
 	}
 }
 
-// Enter and u on a row with a problem (here a missing worktree, the last
-// row) are refused in the overview, which stays open.
+// Enter and u on a row with a problem (here a missing worktree of alpha,
+// the second row, below its primary) are refused in the overview, which
+// stays open.
 func TestHomeRefusesEnterAndUpdateOnProblemRows(t *testing.T) {
 	t.Parallel()
 	for _, k := range []string{"\r", "u"} {
@@ -594,7 +645,7 @@ func TestHomeRefusesEnterAndUpdateOnProblemRows(t *testing.T) {
 			t.Fatal(err)
 		}
 		var out syncBuffer
-		in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "\x1b[F", k),
+		in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "j", k),
 			key{keys: "q", wait: waitOutput(t, &out, "not available on a row with a problem")}))
 		errs, code := runHomeWith(t, e.deps(), in, &out)
 		if code != 0 || strings.Contains(out.String(), "Updating") || strings.HasSuffix(out.String(), feat+"\n") {

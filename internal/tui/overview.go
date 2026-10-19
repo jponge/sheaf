@@ -81,6 +81,7 @@ type Overview struct {
 
 	width, height int // 0 = unknown
 	altScreen     bool
+	grouped       bool // see WithGrouping
 
 	filter    string
 	filtering bool
@@ -129,6 +130,16 @@ func (m Overview) WithMessage(msg string) Overview {
 // showed before once the program ends.
 func (m Overview) WithAltScreen() Overview {
 	m.altScreen = true
+	return m
+}
+
+// WithGrouping returns a copy of m that groups rows by their first cell
+// (e.g. a repository): the first cell of a rendered row is left blank when
+// it equals that of the visible row above it, except on the first row
+// rendered, so that each group shown starts with its name. The filter still
+// matches the blanked cells.
+func (m Overview) WithGrouping() Overview {
+	m.grouped = true
 	return m
 }
 
@@ -590,7 +601,11 @@ func (m Overview) renderRow(i int, widths []int) string {
 		s := st.Level(r.Level)
 		last = &s
 	}
-	text := cells(r.Cells, widths, last)
+	cs := r.Cells
+	if prev := m.rows[m.visible[max(i-1, 0)]].Cells; m.grouped && i > m.offset && len(cs) > 0 && len(prev) > 0 && prev[0] == cs[0] {
+		cs = append([]string{""}, cs[1:]...)
+	}
+	text := cells(cs, widths, last)
 	if i == m.cursor {
 		text = st.CurrentRow.Render(text)
 	}

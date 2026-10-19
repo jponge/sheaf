@@ -233,6 +233,9 @@ sheaf prune                            # list worktrees whose branch is gone or 
 on a terminal, opens an overview of every checkout of the bundle (columns
 REPO, DIR, BRANCH, STATE). It reads local state only; nothing is fetched
 when it opens. Checkouts that cannot be inspected are shown as problem rows.
+Rows are grouped by repository (primary first, problem rows last): REPO is
+only shown on the first row of each group, and on the first row on screen
+when the list is scrolled or filtered (the filter still matches it).
 STATE is coloured by its worst part: red for a divergence (`ahead` and
 `behind`), `upstream gone`, errors and problem rows; yellow for local
 changes or commits to push or pull (`dirty`, `ahead`, `behind`); faint for
