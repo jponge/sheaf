@@ -548,3 +548,36 @@ func TestProgressSpacesTheHeader(t *testing.T) {
 		}
 	}
 }
+
+// Rows stopped by an interruption (B52 A6) have a state of their own: an
+// "!" marker and the word interrupted with the row's note, counted apart
+// from the failures in the header, and leaving the terminal's progress
+// indicator out of its error state; they are finished rows of the bar.
+// The message of the running work is not kept: it does not describe the
+// interrupted one.
+func TestProgressInterruptedRow(t *testing.T) {
+	t.Parallel()
+	p, _ := newTestProgress("Fetching")
+	m, _ := feed(p.WithTerminalProgress(), PlannedMsg{Units: 2},
+		RowUpdate{Key: "a", Label: "alpha", State: RowRunning, Message: "fetching origin"},
+		RowUpdate{Key: "b", Label: "beta", State: RowRunning},
+		RowUpdate{Key: "a", State: RowInterrupted},
+		RowUpdate{Key: "b", State: RowInterrupted, Message: "not started"},
+	)
+	v := view(m)
+	if l := rowLine(v, "alpha"); !strings.HasPrefix(l, "! alpha") || !strings.HasSuffix(l, "  interrupted") {
+		t.Errorf("alpha row = %q, want an interrupted row", l)
+	}
+	if l := rowLine(v, "beta"); !strings.HasPrefix(l, "! beta") || !strings.HasSuffix(l, "  interrupted: not started") {
+		t.Errorf("beta row = %q, want an interrupted row with its note", l)
+	}
+	if h := strings.Split(v, "\n")[0]; !strings.Contains(h, "0 running, 0 done, 0 skipped, 0 failed, 2 interrupted ·") || !strings.Contains(h, "100%") {
+		t.Errorf("header = %q, want the interrupted rows counted apart and finished", h)
+	}
+	if running, done, skipped, failed := asProgress(t, m).Counts(); running+done+skipped+failed != 0 {
+		t.Errorf("Counts = %d, %d, %d, %d, want none", running, done, skipped, failed)
+	}
+	if pb := m.View().ProgressBar; pb == nil || pb.State != tea.ProgressBarDefault || pb.Value != 100 {
+		t.Errorf("terminal progress %+v, want the default state at 100", pb)
+	}
+}

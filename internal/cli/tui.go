@@ -115,8 +115,8 @@ func eventRow(e ops.Event, aside string) tui.RowUpdate {
 	case ops.KindFailed:
 		u.State = tui.RowFailed
 		switch {
-		case errors.Is(e.Err, context.Canceled) && strings.HasPrefix(e.Message, "not started"):
-			u.Message = "not started (interrupted)"
+		case interruptedErr(e.Err):
+			u.State, u.Message = tui.RowInterrupted, interruptedNote(e.Message)
 		case e.Err != nil:
 			u.Message = errorText(e.Err)
 		}

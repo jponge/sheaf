@@ -55,14 +55,6 @@ func (r checkoutRenderer) Report(e ops.Event) {
 		fmt.Fprintf(r.w, "waiting for in-progress fast-forward in %s/%s to finish (Ctrl-C again to force)\n", e.Repo, e.Worktree)
 		return
 	}
-	if e.Kind == ops.KindFailed && errors.Is(e.Err, context.Canceled) && strings.HasPrefix(e.Message, "not started") {
-		who := e.Repo
-		if e.Worktree != "" {
-			who += "/" + e.Worktree
-		}
-		fmt.Fprintf(r.w, "%s: %s not started (interrupted)\n", who, e.Phase)
-		return
-	}
 	r.plainRenderer.Report(e)
 }
 
@@ -417,7 +409,7 @@ func newUpdateCmd(d Deps) *cobra.Command {
 
 func printUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	var ff, upToDate, pinned, skipped, failed int
+	var ff, upToDate, pinned, skipped, failed, interrupted int
 	var details []string
 	for _, u := range r.Checkouts {
 		var label string
@@ -435,6 +427,9 @@ func printUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error {
 		case u.Skipped():
 			label = "skipped"
 			skipped++
+		case interruptedErr(u.Err):
+			label, detail = "interrupted", interruptedNote(u.Reason)
+			interrupted++
 		default:
 			label = "failed"
 			failed++
@@ -460,6 +455,9 @@ func printUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error {
 		fmt.Fprintf(out, "%d pinned, ", pinned)
 	}
 	fmt.Fprintf(out, "%d skipped, %d failed", skipped, failed)
+	if interrupted > 0 {
+		fmt.Fprintf(out, ", %d interrupted", interrupted)
+	}
 	if n := len(r.Problems); n > 0 {
 		fmt.Fprintf(out, ", %s", plural(n, "problem"))
 	}
@@ -467,6 +465,8 @@ func printUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error {
 	switch {
 	case failed > 0 || len(r.Problems) > 0:
 		return fmt.Errorf("update: %d failed, %s", failed, plural(len(r.Problems), "problem"))
+	case interrupted > 0:
+		return fmt.Errorf("update: %d interrupted", interrupted)
 	case strict && skipped > 0:
 		return fmt.Errorf("update: %d skipped (--strict)", skipped)
 	}

@@ -236,17 +236,29 @@ func printPrune(out io.Writer, plan ops.PrunePlan, results []ops.PruneResult, dr
 		return
 	}
 	n := map[ops.PruneOutcome]int{}
+	interrupted := 0
 	for _, r := range results {
 		n[r.Outcome]++
-		switch r.Outcome {
-		case ops.PruneRemoved:
+		switch {
+		case r.Outcome == ops.PruneRemoved:
 			fmt.Fprintf(out, "%s/%s: %s\n", r.Repo, r.Branch, r.Message)
+		case r.Outcome == ops.PruneFailed && interruptedErr(r.Err):
+			interrupted++
+			line := r.Repo + "/" + r.Branch + ": interrupted"
+			if note := interruptedNote(r.Message); note != "" {
+				line += ": " + note
+			}
+			fmt.Fprintln(out, line)
 		default:
 			fmt.Fprintf(out, "%s/%s: %s: %s\n", r.Repo, r.Branch, pruneOutcome(r.Outcome), r.Message)
 		}
 		printNotes(out, r.Notes)
 	}
-	fmt.Fprintf(out, "%d removed, %d kept, %d failed\n", n[ops.PruneRemoved], n[ops.PruneKept], n[ops.PruneFailed])
+	fmt.Fprintf(out, "%d removed, %d kept, %d failed", n[ops.PruneRemoved], n[ops.PruneKept], n[ops.PruneFailed]-interrupted)
+	if interrupted > 0 {
+		fmt.Fprintf(out, ", %d interrupted", interrupted)
+	}
+	fmt.Fprintln(out)
 }
 
 // pruneCandidateLines describes what pruning c would do (a dry run), or

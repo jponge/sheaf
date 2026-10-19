@@ -27,12 +27,16 @@ const (
 	// RowCancelled means the user declined the work of the row (e.g. a
 	// removal not confirmed).
 	RowCancelled
+	// RowInterrupted means the work of the row was stopped, or never
+	// started, because the command was interrupted: not a failure.
+	RowInterrupted
 )
 
 // RowUpdate is a message creating or updating the row Key of a Progress.
 // Label is used when the row is created. A zero State keeps the row's state
 // (a new row starts running); a non-empty Message replaces the row's
-// message. Aside rows are displayed faint and not counted in the header
+// message, as does any Message with RowInterrupted (the message of the
+// running work does not describe the interrupted one). Aside rows are displayed faint and not counted in the header
 // (e.g. the fetch preceding the fast-forwards of a repository).
 type RowUpdate struct {
 	Key, Label string
@@ -82,8 +86,8 @@ type progressRow struct {
 
 // Progress is a bubbletea model displaying one row per unit of work (a
 // repository, a checkout) fed by RowUpdate messages: a spinner while
-// running, then a final marker (✓ done, - skipped or cancelled, ✗ failed)
-// and a short message. The header shows the counts and the elapsed time,
+// running, then a final marker (✓ done, - skipped or cancelled, ✗ failed,
+// ! interrupted) and a short message. The header shows the counts and the elapsed time,
 // then, once the rows are planned (PlannedMsg), a progress bar.
 //
 // ctrl+c does not quit: each press runs the interrupt function given to
@@ -168,7 +172,8 @@ func (m Progress) WithStyles(st Styles) Progress {
 func (m Progress) Init() tea.Cmd { return m.spin.Tick }
 
 // Counts returns the number of rows, aside rows excluded, in each state
-// but RowCancelled (which the header counts only when there are some).
+// but RowCancelled and RowInterrupted (which the header counts only when
+// there are some).
 func (m Progress) Counts() (running, done, skipped, failed int) {
 	for _, r := range m.rows {
 		if r.aside {
@@ -275,7 +280,7 @@ func (m *Progress) apply(u RowUpdate) {
 	if u.State != 0 {
 		r.state = u.State
 	}
-	if u.Message != "" {
+	if u.Message != "" || u.State == RowInterrupted {
 		r.message = u.Message
 	}
 }
@@ -331,14 +336,21 @@ func roundElapsed(d time.Duration) time.Duration {
 func (m Progress) header() string {
 	running, done, skipped, failed := m.Counts()
 	counts := fmt.Sprintf("%d done, %d skipped, %d failed", done, skipped, failed)
-	cancelled := 0
+	cancelled, interrupted := 0, 0
 	for _, r := range m.rows {
-		if !r.aside && r.state == RowCancelled {
+		switch {
+		case r.aside:
+		case r.state == RowCancelled:
 			cancelled++
+		case r.state == RowInterrupted:
+			interrupted++
 		}
 	}
 	if cancelled > 0 {
 		counts += fmt.Sprintf(", %d cancelled", cancelled)
+	}
+	if interrupted > 0 {
+		counts += fmt.Sprintf(", %d interrupted", interrupted)
 	}
 	if m.finished {
 		return m.styles.Title.Render(sanitize(m.title)) + fmt.Sprintf(": %s in %v", counts, m.elapsed())
@@ -544,6 +556,11 @@ func (m Progress) renderRow(r progressRow, width int) string {
 		}
 	case RowCancelled:
 		marker, msg = st.Tag.Render("-"), "cancelled"
+	case RowInterrupted:
+		marker, msg = st.Warn.Render("!"), "interrupted"
+		if r.message != "" {
+			msg += ": " + r.message
+		}
 	default:
 		marker, msg = m.spin.View(), r.message
 	}

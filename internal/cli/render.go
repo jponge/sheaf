@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -33,7 +34,12 @@ func formatEvent(e ops.Event) string {
 		line = fmt.Sprintf("%s: %s skipped: %s", who, e.Phase, e.Message)
 	case ops.KindFailed:
 		line = fmt.Sprintf("%s: %s failed", who, e.Phase)
-		if e.Err != nil {
+		if interruptedErr(e.Err) {
+			line = fmt.Sprintf("%s: %s interrupted", who, e.Phase)
+			if interruptedNote(e.Message) != "" {
+				line = fmt.Sprintf("%s: %s not started (interrupted)", who, e.Phase)
+			}
+		} else if e.Err != nil {
 			line += ": " + e.Err.Error()
 		} else if e.Message != "" {
 			line += ": " + e.Message
@@ -48,29 +54,61 @@ func formatEvent(e ops.Event) string {
 }
 
 // printSummary writes one line per result and the counts to w, and returns
-// the summary's error (non-nil when a repository failed).
+// the summary's error (non-nil when a repository failed or was
+// interrupted). Failures caused by an interruption (see interruptedErr)
+// are counted as interrupted, without their error.
 func printSummary(w io.Writer, s ops.Summary) error {
+	// The status column fits "skipped" and a space, or "interrupted".
+	interrupted, width := 0, 8
+	for _, r := range s.Results {
+		if r.Status == ops.StatusFailed && interruptedErr(r.Err) {
+			interrupted, width = interrupted+1, len("interrupted")
+		}
+	}
 	for _, r := range s.Results {
 		var status, detail string
-		switch r.Status {
-		case ops.StatusDone:
+		switch {
+		case r.Status == ops.StatusDone:
 			status, detail = "done", r.Message
-		case ops.StatusSkipped:
+		case r.Status == ops.StatusSkipped:
 			status, detail = "skipped", r.Message
+		case interruptedErr(r.Err):
+			status, detail = "interrupted", interruptedNote(r.Message)
 		default:
 			status = "failed"
 			if r.Err != nil {
 				detail = errorText(r.Err)
 			}
 		}
-		fmt.Fprintf(w, "%-8s %s", status, r.Repo)
+		fmt.Fprintf(w, "%-*s %s", width, status, r.Repo)
 		if detail != "" {
 			fmt.Fprintf(w, ": %s", detail)
 		}
 		fmt.Fprintln(w)
 	}
-	fmt.Fprintf(w, "%d done, %d skipped, %d failed\n", s.Count(ops.StatusDone), s.Count(ops.StatusSkipped), s.Count(ops.StatusFailed))
+	fmt.Fprintf(w, "%d done, %d skipped, %d failed", s.Count(ops.StatusDone), s.Count(ops.StatusSkipped), s.Count(ops.StatusFailed)-interrupted)
+	if interrupted > 0 {
+		fmt.Fprintf(w, ", %d interrupted", interrupted)
+	}
+	fmt.Fprintln(w)
 	return s.Err()
+}
+
+// interruptedErr reports whether err is the failure of work stopped by an
+// interruption: it wraps context.Canceled, which only the cancellation of
+// the command's context causes (see interruptCtl, and pipeWatch for a
+// closed standard output); sheaf's other contexts end with deadlines.
+func interruptedErr(err error) bool { return errors.Is(err, context.Canceled) }
+
+// interruptedNote returns what is said of work stopped by an interruption
+// besides "interrupted", from its message: "not started" when it never
+// started, else nothing (its error, e.g. a git command line ending in
+// "context canceled", is not shown).
+func interruptedNote(msg string) string {
+	if strings.HasPrefix(msg, "not started") {
+		return "not started"
+	}
+	return ""
 }
 
 // errorLine returns err on one line, for the places that show one (the
@@ -109,7 +147,7 @@ func firstLine(s string) string {
 var levelWords = map[string]tui.Level{
 	"OK": tui.LevelOK, "done": tui.LevelOK, "fast-forwarded": tui.LevelOK, "up to date": tui.LevelOK,
 	"INFO": tui.LevelInfo, "skipped": tui.LevelInfo, "pinned": tui.LevelInfo, "note:": tui.LevelInfo,
-	"WARN": tui.LevelWarn, "warning:": tui.LevelWarn,
+	"WARN": tui.LevelWarn, "warning:": tui.LevelWarn, "interrupted": tui.LevelWarn,
 	"FAIL": tui.LevelFail, "failed": tui.LevelFail,
 }
 
@@ -117,7 +155,7 @@ var levelWords = map[string]tui.Level{
 // group 1 is a word of doctor or of a summary, at the start of the line;
 // group 2 a warning or note marker, at the start of the line or after
 // indentation, "sheaf: " or the "<who>: <phase>: " of an event.
-var levelLine = regexp.MustCompile(`^(?:(OK|INFO|WARN|FAIL|done|fast-forwarded|up to date|skipped|pinned|failed)|(?: +|sheaf: |\S+: \S+: )?(warning:|note:)) `)
+var levelLine = regexp.MustCompile(`^(?:(OK|INFO|WARN|FAIL|done|fast-forwarded|up to date|skipped|pinned|failed|interrupted)|(?: +|sheaf: |\S+: \S+: )?(warning:|note:)) `)
 
 // levelMark marks the level word of a line printed by a command (see
 // levelWords); none for other lines.

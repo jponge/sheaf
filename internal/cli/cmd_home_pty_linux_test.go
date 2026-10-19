@@ -548,7 +548,7 @@ func TestHomeOnPTYAddProgressIsLive(t *testing.T) {
 
 // An action interrupted with ctrl+c (exit 130) leaves what its command
 // printed on the normal screen, as the command alone would: here the
-// summary of a fetch whose git processes were killed.
+// summary of a fetch whose git processes were killed, interrupted (B52 A6).
 func TestHomeOnPTYInterruptedActionLeavesItsOutput(t *testing.T) {
 	e, _, _, _, _ := homeBundle(t)
 	git, err := exec.LookPath("git")
@@ -573,11 +573,11 @@ func TestHomeOnPTYInterruptedActionLeavesItsOutput(t *testing.T) {
 	normal := vt.normalLines()
 	n := 0
 	for _, l := range normal {
-		if l == "0 done, 0 skipped, 2 failed" {
+		if l == "0 done, 0 skipped, 0 failed, 2 interrupted" {
 			n++
 		}
 	}
-	if n != 1 || !slices.ContainsFunc(normal, func(l string) bool { return strings.HasPrefix(l, "failed   alpha") }) {
+	if n != 1 || !slices.ContainsFunc(normal, func(l string) bool { return l == "interrupted alpha" }) {
 		t.Errorf("the summary of the interrupted fetch is not on the normal screen once (%d times):\n%s", n, strings.Join(normal, "\n"))
 	}
 }
