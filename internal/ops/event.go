@@ -63,6 +63,23 @@ type Reporter interface {
 	Report(Event)
 }
 
+// Planner is implemented by Reporters that want to know how much work is
+// coming, e.g. to display a progress ratio: Plan announces units more units
+// of work, each ending with one final event (KindDone, KindSkipped or
+// KindFailed): one per task of Execute, one per checkout of Update. It is
+// called before the first event of that work, and not concurrently with
+// Report. An operation running several batches announces each one.
+type Planner interface {
+	Plan(units int)
+}
+
+// plan announces units of work to rep if it is a Planner.
+func plan(rep Reporter, units int) {
+	if p, ok := rep.(Planner); ok {
+		p.Plan(units)
+	}
+}
+
 // ReporterFunc adapts a function to Reporter.
 type ReporterFunc func(Event)
 

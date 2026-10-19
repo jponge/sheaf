@@ -107,6 +107,36 @@ func TestUpdateClassifiesEveryCheckout(t *testing.T) {
 	}
 }
 
+// A Reporter that is a Planner is told the number of checkouts before the
+// first event: one final update event follows for each.
+func TestUpdatePlansOneUnitPerCheckout(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	_, alpha := addRepoWith(t, f, "alpha", "topic")
+	addRepoWith(t, f, "beta")
+	addWorktree(t, alpha, "topic", "topic", true)
+	testutil.Git(t, alpha, "worktree", "add", "-q", "--detach", filepath.Join(filepath.Dir(alpha), "det"), "HEAD")
+	rec := &planRecorder{}
+	if _, err := Update(context.Background(), f.w, UpdateOptions{Jobs: 2}, rec); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.events) == 0 || rec.events[0] != (Event{Message: "4"}) {
+		t.Fatalf("events = %+v, want Plan(4) first", rec.events)
+	}
+	final := 0
+	for _, e := range rec.events[1:] {
+		switch {
+		case e.Kind == 0:
+			t.Fatalf("Plan called again: %+v", rec.events)
+		case e.Phase == PhaseUpdate && e.Kind != KindStart && e.Kind != KindProgress:
+			final++
+		}
+	}
+	if final != 4 {
+		t.Fatalf("%d final update events, want 4: %+v", final, rec.events)
+	}
+}
+
 func TestUpdateFetchFailureFailsTheRepositoryCheckouts(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

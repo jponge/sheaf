@@ -185,6 +185,41 @@ func TestExecuteReporterCallsAreSerialized(t *testing.T) {
 	}
 }
 
+// planRecorder records the Plan calls and events it receives, in order:
+// a Plan call as an event of Kind 0 whose Message is the number of units.
+type planRecorder struct {
+	mu     sync.Mutex
+	events []Event
+}
+
+func (r *planRecorder) Report(e Event) { r.mu.Lock(); r.events = append(r.events, e); r.mu.Unlock() }
+
+func (r *planRecorder) Plan(units int) {
+	r.mu.Lock()
+	r.events = append(r.events, Event{Message: fmt.Sprint(units)})
+	r.mu.Unlock()
+}
+
+// A Reporter that is a Planner is told the number of tasks before the
+// first event.
+func TestExecutePlansTasksBeforeTheFirstEvent(t *testing.T) {
+	t.Parallel()
+	rec := &planRecorder{}
+	var tasks []Task
+	for i := range 3 {
+		tasks = append(tasks, Task{Repo: fmt.Sprint(i), Run: func(context.Context, func(Event)) (string, error) { return "", nil }})
+	}
+	Execute(context.Background(), 2, tasks, rec)
+	if len(rec.events) != 1+3*2 || rec.events[0] != (Event{Message: "3"}) {
+		t.Fatalf("events = %+v, want Plan(3) first, then 2 events per task", rec.events)
+	}
+	for _, e := range rec.events[1:] {
+		if e.Kind == 0 {
+			t.Fatalf("Plan called again: %+v", rec.events)
+		}
+	}
+}
+
 func TestExecuteCancellation(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())

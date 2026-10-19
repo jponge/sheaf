@@ -118,13 +118,19 @@ func (f *inflight) onCancel() {
 //
 // Events: fetch start/done/failed per repository, and one KindDone,
 // KindSkipped or KindFailed PhaseUpdate event per checkout (Worktree set to
-// its directory name). The error is only set for an invalid filter.
+// its directory name), announced to a Planner first. The error is only set
+// for an invalid filter.
 func Update(ctx context.Context, w *Workspace, opts UpdateOptions, rep Reporter) (UpdateReport, error) {
 	ctx = withCommandCache(ctx)
 	sets, probs, err := enumerate(ctx, w, opts.Filter, opts.Jobs)
 	if err != nil {
 		return UpdateReport{}, err
 	}
+	units := 0
+	for _, s := range sets {
+		units += len(s.checkouts)
+	}
+	plan(rep, units)
 	report := serialize(rep)
 	fl := &inflight{running: map[Checkout]bool{}, report: report}
 	stop := context.AfterFunc(ctx, fl.onCancel)

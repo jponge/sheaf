@@ -60,8 +60,8 @@ func Skip(reason string) error { return &SkipError{Reason: reason} }
 // completion order. A failing task does not stop the others.
 //
 // For each task it reports a KindStart event, the task's progress events and
-// a final KindDone, KindSkipped or KindFailed event. Calls to rep are
-// serialized. Once ctx is done no further task is started; the tasks not
+// a final KindDone, KindSkipped or KindFailed event; a Planner rep is told
+// the number of tasks first. Calls to rep are serialized. Once ctx is done no further task is started; the tasks not
 // started are reported (KindFailed only, no start) and returned as failed
 // with ctx.Err(). Running tasks are expected to honour ctx themselves.
 func Execute(ctx context.Context, jobs int, tasks []Task, rep Reporter) Summary {
@@ -71,6 +71,7 @@ func Execute(ctx context.Context, jobs int, tasks []Task, rep Reporter) Summary 
 	if rep == nil {
 		rep = Discard
 	}
+	plan(rep, len(tasks))
 	var mu sync.Mutex
 	report := func(e Event) {
 		mu.Lock()
