@@ -488,7 +488,7 @@ func TestHomeOnPTYDoctorReportScrolls(t *testing.T) {
 }
 
 // Scrolling the report view line by line gives the same screen whatever the
-// way: j j k and home j both show lines 2-6.
+// way: j j k and home j both show lines 2-5.
 func TestHomeOnPTYReportScrollsLineByLine(t *testing.T) {
 	e, _, _, _, _ := homeBundle(t)
 	s := doctorReport(t, e)
@@ -509,8 +509,8 @@ func TestHomeOnPTYReportScrollsLineByLine(t *testing.T) {
 	if strings.Join(a, "\n") != strings.Join(b, "\n") {
 		t.Errorf("j j k and home j show different screens:\n%s\n---\n%s", strings.Join(a, "\n"), strings.Join(b, "\n"))
 	}
-	if !slices.ContainsFunc(a, func(l string) bool { return strings.HasPrefix(l, "lines 2-6 of ") }) {
-		t.Errorf("no status line \"lines 2-6 of ...\":\n%s", strings.Join(a, "\n"))
+	if !slices.ContainsFunc(a, func(l string) bool { return strings.HasPrefix(l, "lines 2-5 of ") }) {
+		t.Errorf("no status line \"lines 2-5 of ...\":\n%s", strings.Join(a, "\n"))
 	}
 	s.write("\x03")
 	wantTerminalRestored(t, s, "130")

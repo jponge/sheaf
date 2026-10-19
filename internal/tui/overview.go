@@ -427,18 +427,19 @@ func (m *Overview) applyFilter() {
 // rows fit.
 type ovLayout struct {
 	title, filter, header, status, help bool // status: with the message
-	gaps                                int  // blank lines of the footer, see footer
+	gaps                                int  // blank lines below the title and of the footer, see splitGaps
 	rows                                int
 }
 
-// layout fits the view into the window height. The blank lines of the
-// footer are dropped (the one above the help first) when that lets every
-// visible row fit (see fitGaps). When the window is too small for at least
-// one row, the blank lines, then the help, title, status (with the
-// message), filter and header lines are dropped in that order. With an
-// unknown height every visible row is shown.
+// layout fits the view into the window height. The blank lines below the
+// title and of the footer are dropped (the one above the help first, then
+// the one below the title) when that lets every visible row fit (see
+// fitGaps and splitGaps). When the window is too small for at least one
+// row, the blank lines, then the help, title, status (with the message),
+// filter and header lines are dropped in that order. With an unknown
+// height every visible row is shown.
 func (m Overview) layout() ovLayout {
-	l := ovLayout{title: true, filter: m.filtering || m.filter != "", header: true, status: true, help: true, gaps: 2}
+	l := ovLayout{title: true, filter: m.filtering || m.filter != "", header: true, status: true, help: true, gaps: 3}
 	if m.height <= 0 {
 		l.rows = max(1, len(m.visible))
 		return l
@@ -562,10 +563,14 @@ func (m Overview) View() tea.View {
 	}
 	st := m.styles
 	l := m.layout()
+	titleGap, gaps := splitGaps(l.gaps)
 	widths := m.columnWidths()
 	var lines []string
 	if l.title {
 		lines = append(lines, st.Title.Render(sanitize(m.title)))
+		if titleGap {
+			lines = append(lines, "")
+		}
 	}
 	if l.filter {
 		f := st.FilterPrompt.Render("/") + m.filter
@@ -605,7 +610,7 @@ func (m Overview) View() tea.View {
 	if l.help {
 		help = m.helpLines()
 	}
-	lines = append(lines, footer(l.gaps, status, help)...)
+	lines = append(lines, footer(gaps, status, help)...)
 	if m.width > 0 {
 		trunc := lipgloss.NewStyle().MaxWidth(m.width)
 		for i, line := range lines {

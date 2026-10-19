@@ -181,20 +181,22 @@ func (m Report) wrapped() []string {
 // how many fit.
 type reportLayout struct {
 	title, status, help bool
-	gaps                int // blank lines of the footer, see footer
+	gaps                int // blank lines below the title and of the footer, see splitGaps
 	rows                int
 }
 
-// layout fits the view into the window height: the blank lines of the
-// footer are dropped (the one above the help first) when that lets every
-// line fit (see fitGaps), and the status line is shown when the lines do
-// not fit. When the window is too small for at least one line, the blank
-// lines, then the help, title and status lines are dropped in that order.
+// layout fits the view into the window height: the blank lines below the
+// title and of the footer are dropped (the one above the help first, then
+// the one below the title; without the status line, the one below the
+// title first) when that lets every line fit (see fitGaps and splitGaps),
+// and the status line is shown when the lines do not fit. When the window
+// is too small for at least one line, the blank lines, then the help,
+// title and status lines are dropped in that order.
 // With an unknown height every line is shown.
 func (m Report) layout() reportLayout {
 	n := len(m.wrapped())
 	if m.height <= 0 {
-		return reportLayout{title: true, help: true, gaps: 1, rows: max(1, n)}
+		return reportLayout{title: true, help: true, gaps: 2, rows: max(1, n)}
 	}
 	l := m.fit(false)
 	if n > l.rows {
@@ -206,9 +208,9 @@ func (m Report) layout() reportLayout {
 // fit fits the view into the window height, with or without the status
 // line (see layout).
 func (m Report) fit(status bool) reportLayout {
-	l := reportLayout{title: true, status: status, help: true, gaps: 1}
+	l := reportLayout{title: true, status: status, help: true, gaps: 2}
 	if status {
-		l.gaps = 2
+		l.gaps = 3
 	}
 	chrome := func() int {
 		c := l.gaps
@@ -239,10 +241,14 @@ func (m Report) View() tea.View {
 	}
 	st := m.styles
 	l := m.layout()
+	titleGap, gaps := splitGaps(l.gaps)
 	all := m.wrapped()
 	var lines []string
 	if l.title {
 		lines = append(lines, st.Title.Render(sanitize(m.title)))
+		if titleGap {
+			lines = append(lines, "")
+		}
 	}
 	end := min(m.offset+l.rows, len(all))
 	lines = append(lines, all[m.offset:end]...)
@@ -256,7 +262,7 @@ func (m Report) View() tea.View {
 			key.NewBinding(key.WithKeys(""), key.WithHelp("any other key:", m.back)),
 		})}
 	}
-	lines = append(lines, footer(l.gaps, status, help)...)
+	lines = append(lines, footer(gaps, status, help)...)
 	if m.width > 0 {
 		trunc := lipgloss.NewStyle().MaxWidth(m.width)
 		for i, line := range lines {

@@ -484,8 +484,9 @@ func ovShape(m tea.Model) string {
 	})
 }
 
-// A blank line separates the rows from the status line, which also shows
-// the message, and another one separates it from the key help.
+// A blank line separates the title from the rest (B41), another one the
+// rows from the status line, which also shows the message, and another one
+// it from the key help.
 func TestOverviewSpacesTheFooter(t *testing.T) {
 	t.Parallel()
 	for _, size := range []tea.Msg{nil, tea.WindowSizeMsg{Width: 80, Height: 24}} {
@@ -494,7 +495,7 @@ func TestOverviewSpacesTheFooter(t *testing.T) {
 			if size != nil {
 				m, _ = m.Update(size)
 			}
-			if got := ovShape(m); got != "T H R R R _ S _ K K" {
+			if got := ovShape(m); got != "T _ H R R R _ S _ K K" {
 				t.Errorf("size %v, message %q: shape %q:\n%s", size, msg, got, view(m))
 			}
 			want := "0/3 selected"
@@ -505,7 +506,7 @@ func TestOverviewSpacesTheFooter(t *testing.T) {
 				t.Errorf("size %v: no status line %q:\n%s", size, want, view(m))
 			}
 			m, _ = press(m, "/")
-			if got := ovShape(m); got != "T F H R R R _ S _ K" {
+			if got := ovShape(m); got != "T _ F H R R R _ S _ K" {
 				t.Errorf("size %v, message %q, filter mode: shape %q:\n%s", size, msg, got, view(m))
 			}
 		}
@@ -513,7 +514,8 @@ func TestOverviewSpacesTheFooter(t *testing.T) {
 }
 
 // On a short terminal the blank lines go first (the one above the help
-// first), then the help, title, status and header lines as before; the
+// first, then the one below the title), then the help, title, status and
+// header lines as before; the
 // view never exceeds the height and keeps the cursor row.
 func TestOverviewShortTerminalDropsSpacingFirst(t *testing.T) {
 	t.Parallel()
@@ -522,17 +524,18 @@ func TestOverviewShortTerminalDropsSpacingFirst(t *testing.T) {
 		rows = append(rows, Row{Key: fmt.Sprint(i), Cells: []string{fmt.Sprintf("r%02d", i), "main"}})
 	}
 	want := map[int]string{
-		9: "T H R R _ S _ K K",
-		8: "T H R _ S _ K K",
-		7: "T H R _ S K K",
-		6: "T H R S K K",
-		5: "T H R R S",
-		4: "T H R S",
-		3: "H R S",
-		2: "H R",
-		1: "R",
+		10: "T _ H R R _ S _ K K",
+		9:  "T _ H R _ S _ K K",
+		8:  "T _ H R _ S K K",
+		7:  "T H R _ S K K",
+		6:  "T H R S K K",
+		5:  "T H R R S",
+		4:  "T H R S",
+		3:  "H R S",
+		2:  "H R",
+		1:  "R",
 	}
-	for h := 1; h <= 9; h++ {
+	for h := 1; h <= 10; h++ {
 		var m tea.Model = NewOverview("t", []string{"REPO", "DIR"}, rows, ovActions()).WithMessage("m")
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
 		m, _ = press(m, "end")
@@ -544,17 +547,18 @@ func TestOverviewShortTerminalDropsSpacingFirst(t *testing.T) {
 }
 
 // An overview whose rows all fit without some of the blank lines drops
-// them (the one above the help first) rather than scroll; one that scrolls
-// anyway keeps them, unless no row would fit.
+// them (the one above the help first, then the one below the title) rather
+// than scroll; one that scrolls anyway keeps them, unless no row would fit.
 func TestOverviewDropsSpacingToFitWithoutScrolling(t *testing.T) {
 	t.Parallel()
 	want := map[int]string{
-		10: "T H R R R _ S _ K K",
+		11: "T _ H R R R _ S _ K K",
+		10: "T _ H R R R _ S K K",
 		9:  "T H R R R _ S K K",
 		8:  "T H R R R S K K",
 		7:  "T H R _ S K K",
 	}
-	for h := 7; h <= 10; h++ {
+	for h := 7; h <= 11; h++ {
 		var m tea.Model = newOv().WithMessage("m")
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
 		v := view(m)
@@ -750,7 +754,7 @@ func TestOverviewGroupsRowsByFirstCell(t *testing.T) {
 	// row above it is scrolled off.
 	more := append(slices.Clone(rows), Row{Key: "5", Cells: []string{"bravo", "b1", "clean"}}, Row{Key: "6", Cells: []string{"bravo", "b2", "clean"}})
 	var sm tea.Model = NewOverview("t", []string{"REPO", "DIR", "STATE"}, more, nil).WithGrouping()
-	sm, _ = sm.Update(tea.WindowSizeMsg{Width: 80, Height: 8}) // 2 rows
+	sm, _ = sm.Update(tea.WindowSizeMsg{Width: 80, Height: 9}) // 2 rows
 	sm, _ = press(sm, "down", "down")
 	if v := view(sm); !hasLine(v, "  [ ] alpha  feat-x  dirty") || !hasLine(v, "> [ ]        feat-z  clean") {
 		t.Errorf("scrolled:\n%s", v)

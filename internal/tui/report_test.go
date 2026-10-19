@@ -71,7 +71,7 @@ func TestReportScrolls(t *testing.T) {
 	t.Parallel()
 	m0, _ := newTestReport(30)
 	var m tea.Model = m0
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 12}) // title, blanks, status, help: 7 lines
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 13}) // title, blanks, status, help: 7 lines
 	for _, step := range []struct {
 		keys     []string
 		from, to int
@@ -97,8 +97,8 @@ func TestReportScrolls(t *testing.T) {
 		if want := fmt.Sprintf("lines %d-%d of 30", step.from, step.to); !strings.Contains(view(m), want) {
 			t.Fatalf("after %v: no status %q\n%s", step.keys, want, view(m))
 		}
-		if n := strings.Count(view(m), "\n") + 1; n > 12 {
-			t.Fatalf("after %v: %d lines in a window of 12", step.keys, n)
+		if n := strings.Count(view(m), "\n") + 1; n > 13 {
+			t.Fatalf("after %v: %d lines in a window of 13", step.keys, n)
 		}
 	}
 	// A report that fits has no status line.
@@ -192,8 +192,8 @@ func TestReportExpandsTabs(t *testing.T) {
 	m := NewReport("t", []string{"\tnew.txt", "M\tfile.txt", "ab\tc\td"}, "back")
 	lines := strings.Split(view(m), "\n")
 	want := []string{"        new.txt", "M       file.txt", "ab      c       d"}
-	if !slices.Equal(lines[1:4], want) {
-		t.Errorf("lines %q, want %q", lines[1:4], want)
+	if !slices.Equal(lines[2:5], want) {
+		t.Errorf("lines %q, want %q", lines[2:5], want)
 	}
 }
 
@@ -216,8 +216,10 @@ func reportShape(m tea.Model) string {
 	})
 }
 
-// A blank line separates the report lines from the status line (shown when
-// they do not fit), and another one separates it from the key help.
+// A blank line separates the title from the report lines (B41), another
+// one the report lines from the status line (shown when they do not fit),
+// and another one it from the key help; the one below the title goes
+// before the one after the report lines when that lets them fit.
 func TestReportSpacesTheFooter(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -225,10 +227,11 @@ func TestReportSpacesTheFooter(t *testing.T) {
 		size tea.Msg
 		want string
 	}{
-		{3, nil, "T L L L _ K"},
-		{3, tea.WindowSizeMsg{Width: 80, Height: 10}, "T L L L _ K"},
+		{3, nil, "T _ L L L _ K"},
+		{3, tea.WindowSizeMsg{Width: 80, Height: 10}, "T _ L L L _ K"},
+		{7, tea.WindowSizeMsg{Width: 80, Height: 11}, "T _ L L L L L L L _ K"},
 		{7, tea.WindowSizeMsg{Width: 80, Height: 10}, "T L L L L L L L _ K"},
-		{30, tea.WindowSizeMsg{Width: 80, Height: 12}, "T L L L L L L L _ S _ K"},
+		{30, tea.WindowSizeMsg{Width: 80, Height: 12}, "T _ L L L L L L _ S _ K"},
 	} {
 		var m tea.Model
 		m, _ = newTestReport(c.n)
@@ -242,19 +245,21 @@ func TestReportSpacesTheFooter(t *testing.T) {
 }
 
 // On a short terminal the blank lines go first (the one above the help
-// first), then the help, title and status lines as before.
+// first, then the one below the title), then the help, title and status
+// lines as before.
 func TestReportShortTerminalDropsSpacingFirst(t *testing.T) {
 	t.Parallel()
 	want := map[int]string{
-		7: "T L L _ S _ K",
-		6: "T L _ S _ K",
+		8: "T _ L L _ S _ K",
+		7: "T _ L _ S _ K",
+		6: "T _ L _ S K",
 		5: "T L _ S K",
 		4: "T L S K",
 		3: "T L S",
 		2: "L S",
 		1: "L",
 	}
-	for h := 1; h <= 7; h++ {
+	for h := 1; h <= 8; h++ {
 		r, _ := newTestReport(30)
 		m, _ := r.Update(tea.WindowSizeMsg{Width: 80, Height: h})
 		if got := reportShape(m); got != want[h] || lineCount(view(m)) > h {
@@ -264,16 +269,17 @@ func TestReportShortTerminalDropsSpacingFirst(t *testing.T) {
 }
 
 // A report that fits without some of the blank lines drops them (the one
-// above the help first) rather than scroll, and then needs no status line;
-// one that scrolls anyway keeps them.
+// below the title first) rather than scroll, and then needs no status
+// line; one that scrolls anyway keeps them.
 func TestReportDropsSpacingToFitWithoutScrolling(t *testing.T) {
 	t.Parallel()
 	want := map[int]string{
+		7: "T _ L L L _ K",
 		6: "T L L L _ K",
 		5: "T L L L K",
 		4: "T L S K",
 	}
-	for h := 4; h <= 6; h++ {
+	for h := 4; h <= 7; h++ {
 		r, _ := newTestReport(3)
 		m, _ := r.Update(tea.WindowSizeMsg{Width: 80, Height: h})
 		if got := reportShape(m); got != want[h] || lineCount(view(m)) > h {

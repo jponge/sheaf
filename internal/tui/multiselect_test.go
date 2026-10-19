@@ -102,7 +102,7 @@ func TestMultiSelectCursorMovement(t *testing.T) {
 }
 
 func TestMultiSelectPageKeysMoveByViewportHeight(t *testing.T) {
-	m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 100, Height: 9}) // 4 list rows
+	m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 100, Height: 10}) // 4 list rows
 	m, _ = press(m, "pgdown")
 	if l := currentLine(t, m); !strings.Contains(l, "item04") {
 		t.Fatalf("after pgdown cursor line = %q, want item04", l)
@@ -281,7 +281,7 @@ func TestMultiSelectFilterModeView(t *testing.T) {
 }
 
 func TestMultiSelectViewportKeepsCursorVisible(t *testing.T) {
-	height := 9
+	height := 10
 	m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 100, Height: height})
 	check := func(when string, in, out []string) {
 		t.Helper()
@@ -385,7 +385,7 @@ func TestMultiSelectArrowsNavigateInFilterMode(t *testing.T) {
 }
 
 func TestMultiSelectStatusShowsScrollPosition(t *testing.T) {
-	m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 100, Height: 9})
+	m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 100, Height: 10})
 	m, _ = press(m, "end")
 	if !strings.Contains(view(m), "rows 17-20 of 20") {
 		t.Fatalf("status lacks scroll position:\n%s", view(m))
@@ -419,8 +419,8 @@ func TestMultiSelectViewStripsControlCharacters(t *testing.T) {
 		v := view(m)
 		assertNoControlChars(t, v)
 		assertNoInjectedSGR(t, m)
-		if n := lineCount(v); n != 7 { // title, 2 rows, blank, status, blank, help
-			t.Fatalf("view has %d lines, want 7:\n%s", n, v)
+		if n := lineCount(v); n != 8 { // title, blank, 2 rows, blank, status, blank, help
+			t.Fatalf("view has %d lines, want 8:\n%s", n, v)
 		}
 	}
 }
@@ -434,8 +434,8 @@ func TestMultiSelectFilterDropsPastedControlCharacters(t *testing.T) {
 	if !hasLine(v, "/br█") || !strings.Contains(v, "bravo") {
 		t.Fatalf("filter should read br and match bravo:\n%s", v)
 	}
-	if n := lineCount(v); n != 7 { // title, filter, 1 row, blank, status, blank, help
-		t.Fatalf("view has %d lines, want 7:\n%s", n, v)
+	if n := lineCount(v); n != 8 { // title, blank, filter, 1 row, blank, status, blank, help
+		t.Fatalf("view has %d lines, want 8:\n%s", n, v)
 	}
 }
 
@@ -575,35 +575,36 @@ func msShape(m tea.Model) string {
 	})
 }
 
-// A blank line separates the rows from the status line, and another one
-// separates it from the key help.
+// A blank line separates the title from the rest (B41), another one the
+// rows from the status line, and another one it from the key help.
 func TestMultiSelectSpacesTheFooter(t *testing.T) {
 	for _, size := range []tea.Msg{nil, tea.WindowSizeMsg{Width: 100, Height: 24}} {
 		var m tea.Model = NewMultiSelect("Pick", abc())
 		if size != nil {
 			m, _ = m.Update(size)
 		}
-		if got := msShape(m); got != "T R R R _ S _ K" {
+		if got := msShape(m); got != "T _ R R R _ S _ K" {
 			t.Errorf("size %v: shape %q:\n%s", size, got, view(m))
 		}
 		m, _ = press(m, "/")
-		if got := msShape(m); got != "T F R R R _ S _ K" {
+		if got := msShape(m); got != "T _ F R R R _ S _ K" {
 			t.Errorf("size %v, filter mode: shape %q:\n%s", size, got, view(m))
 		}
 	}
 }
 
 // A menu whose items all fit without some of the blank lines drops them
-// (the one above the help first) rather than scroll; one that scrolls
-// anyway keeps them, unless no item would fit.
+// (the one above the help first, then the one below the title) rather than
+// scroll; one that scrolls anyway keeps them, unless no item would fit.
 func TestMultiSelectDropsSpacingToFitWithoutScrolling(t *testing.T) {
 	want := map[int]string{
-		8: "T R R R _ S _ K",
+		9: "T _ R R R _ S _ K",
+		8: "T _ R R R _ S K",
 		7: "T R R R _ S K",
 		6: "T R R R S K",
 		5: "T R _ S K",
 	}
-	for h := 5; h <= 8; h++ {
+	for h := 5; h <= 9; h++ {
 		m, _ := NewMultiSelect("Pick", abc()).Update(tea.WindowSizeMsg{Width: 100, Height: h})
 		v := view(m)
 		if got := msShape(m); got != want[h] || lineCount(v) > h {
@@ -616,18 +617,20 @@ func TestMultiSelectDropsSpacingToFitWithoutScrolling(t *testing.T) {
 }
 
 // On a short terminal the blank lines go first (the one above the help
-// first), then the help, title and status lines as before.
+// first, then the one below the title), then the help, title and status
+// lines as before.
 func TestMultiSelectShortTerminalDropsSpacingFirst(t *testing.T) {
 	want := map[int]string{
-		7: "T R R _ S _ K",
-		6: "T R _ S _ K",
+		8: "T _ R R _ S _ K",
+		7: "T _ R _ S _ K",
+		6: "T _ R _ S K",
 		5: "T R _ S K",
 		4: "T R S K",
 		3: "T R S",
 		2: "R S",
 		1: "R",
 	}
-	for h := 1; h <= 7; h++ {
+	for h := 1; h <= 8; h++ {
 		m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 100, Height: h})
 		m, _ = press(m, "end")
 		v := view(m)
@@ -677,17 +680,18 @@ func TestMultiSelectKeyHelpWrapsToWidth(t *testing.T) {
 	// At 80 columns the help takes two lines; on a short terminal the
 	// blank lines go first, then the help, title and status lines.
 	want := map[int]string{
-		9: "T R R R _ S _ K K",
-		8: "T R R _ S _ K K",
-		7: "T R _ S _ K K",
-		6: "T R _ S K K",
-		5: "T R S K K",
-		4: "T R R S",
-		3: "T R S",
-		2: "R S",
-		1: "R",
+		10: "T _ R R R _ S _ K K",
+		9:  "T _ R R _ S _ K K",
+		8:  "T _ R _ S _ K K",
+		7:  "T _ R _ S K K",
+		6:  "T R _ S K K",
+		5:  "T R S K K",
+		4:  "T R R S",
+		3:  "T R S",
+		2:  "R S",
+		1:  "R",
 	}
-	for h := 1; h <= 9; h++ {
+	for h := 1; h <= 10; h++ {
 		m, _ := NewMultiSelect("Pick", manyItems(20)).Update(tea.WindowSizeMsg{Width: 80, Height: h})
 		m, _ = press(m, "end")
 		if got := msShape(m); got != want[h] {
