@@ -822,3 +822,45 @@ func hasAllLines(v string, want []string) bool {
 	}
 	return true
 }
+
+// An action with Do runs in the overview (B44): its message is displayed,
+// its command returned, and the overview stays open, with no action chosen;
+// a refusal of Check comes first, and Do receives the targets of the scope.
+func TestOverviewActionWithDoRunsInPlace(t *testing.T) {
+	t.Parallel()
+	type copied struct{ path string }
+	var got []string
+	actions := append(ovActions(), OverviewAction{Key: "y", Name: "copy", Help: "copy path", Scope: ScopeCurrent,
+		Check: func(targets []string) string {
+			if targets[0] == "/b/bravo/main" {
+				return "not this one"
+			}
+			return ""
+		},
+		Do: func(targets []string) (string, tea.Cmd) {
+			got = targets
+			return "copied " + targets[0], func() tea.Msg { return copied{targets[0]} }
+		}})
+	var m tea.Model = NewOverview("t", []string{"REPO"}, ovRows(), actions)
+	m, cmd := press(m, "down", "y")
+	if cmd == nil || isQuit(cmd) {
+		t.Fatalf("command %v: want Do's command", cmd)
+	}
+	if msg, ok := cmd().(copied); !ok || msg.path != "/b/a/feat-x" {
+		t.Fatalf("command message %#v", msg)
+	}
+	assertChosen(t, m, "")
+	if asOv(t, m).Cancelled() || !slices.Equal(got, []string{"/b/a/feat-x"}) || !strings.Contains(view(m), "copied /b/a/feat-x") {
+		t.Fatalf("targets %q, view:\n%s", got, view(m))
+	}
+	// Still open: keys keep working.
+	m, _ = press(m, "space")
+	if !slices.Equal(asOv(t, m).SelectedKeys(), []string{"/b/a/feat-x"}) {
+		t.Fatalf("selection %q after Do", asOv(t, m).SelectedKeys())
+	}
+	got = nil
+	m, cmd = press(m, "down", "y")
+	if cmd != nil || got != nil || !strings.Contains(view(m), "not this one") {
+		t.Fatalf("refused Do ran (targets %q, command %v):\n%s", got, cmd != nil, view(m))
+	}
+}

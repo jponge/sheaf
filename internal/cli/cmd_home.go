@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 
@@ -395,8 +396,24 @@ func (h *home) actions() []tui.OverviewAction {
 		}
 		return ""
 	}
+	// The clipboard is set with an OSC 52 sequence, which needs terminal
+	// controls (see terminalControls); terminals may still ignore it.
+	copyable := func(targets []string) string {
+		if why := noProblem(targets); why != "" {
+			return why
+		}
+		if !h.s.controls {
+			return "copy not available: the output is not a terminal, or TERM=dumb"
+		}
+		return ""
+	}
+	copyPath := func(targets []string) (string, tea.Cmd) {
+		path := h.rows[targets[0]].checkout.Path
+		return "sent to the clipboard: " + path, tea.SetClipboard(path)
+	}
 	return []tui.OverviewAction{
 		{Key: "enter", Name: "cd", Help: "cd", Scope: tui.ScopeCurrent, Check: noProblem},
+		{Key: "y", Name: "copy", Help: "copy path", Scope: tui.ScopeCurrent, Check: copyable, Do: copyPath},
 		{Key: "u", Name: "update", Help: "update", Scope: tui.ScopeRows, Check: noProblem},
 		{Key: "f", Name: "fetch", Help: "fetch", Scope: tui.ScopeRows},
 		{Key: "w", Name: "add", Help: "add worktree", Scope: tui.ScopeCurrent},

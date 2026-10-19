@@ -780,6 +780,29 @@ func TestHomeRefusesEnterAndUpdateOnProblemRows(t *testing.T) {
 	}
 }
 
+// y (copy the path, B44) is refused on a row with a problem, and on an
+// output that is not a terminal (a TUI forced on), where it sends no OSC 52
+// sequence; the overview stays open.
+func TestHomeCopyRefusedOnProblemRowsAndNonTerminals(t *testing.T) {
+	t.Parallel()
+	e, _, feat, _, _ := homeBundle(t)
+	if err := os.RemoveAll(feat); err != nil {
+		t.Fatal(err)
+	}
+	var out syncBuffer
+	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "j", "y"),
+		key{keys: "k", wait: waitOutput(t, &out, "not available on a row with a problem")},
+		key{keys: "y"},
+		key{keys: "q", wait: waitOutput(t, &out, "copy not available: the output is not a terminal, or TERM=dumb")}))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	if strings.Contains(out.String(), "\x1b]52;") {
+		t.Errorf("output contains an OSC 52 sequence:\n%q", out.String())
+	}
+}
+
 // r on a worktree outside its repository directory is refused: selecting
 // it by directory name could remove another worktree of the same name.
 func TestHomeRefusesRemovingOutsideWorktree(t *testing.T) {

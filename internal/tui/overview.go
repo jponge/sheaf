@@ -46,6 +46,10 @@ type OverviewAction struct {
 	// Check, if set, may refuse the action for its targets: a non-empty
 	// message is displayed and the overview stays open.
 	Check func(targets []string) string
+	// Do, if set, runs the action in the overview instead of choosing it:
+	// the overview displays the message it returns, runs its command and
+	// stays open (e.g. copying a path to the clipboard).
+	Do func(targets []string) (message string, cmd tea.Cmd)
 }
 
 // noRowMessage is displayed when an action needing a row has none.
@@ -60,7 +64,8 @@ const noRowMessage = "no row to act on"
 // row (rows hidden by the filter keep their state, as in MultiSelect);
 // / enters filter mode (case-insensitive substring over the cells; editing
 // as in MultiSelect: enter keeps the filter, esc clears it); the keys of
-// the actions choose an action; q, esc and ctrl+c quit. In list mode esc first clears an applied filter and only
+// the actions choose an action (or run it in place, see OverviewAction.Do);
+// q, esc and ctrl+c quit. In list mode esc first clears an applied filter and only
 // quits when no filter is set. Key events of several runes and bracketed
 // pastes are ignored in list mode, so pasted text never triggers actions.
 // Text fields are displayed with control characters replaced by U+FFFD.
@@ -346,6 +351,11 @@ func (m Overview) choose(a OverviewAction) (tea.Model, tea.Cmd) {
 			m.message = why
 			return m, nil
 		}
+	}
+	if a.Do != nil {
+		var cmd tea.Cmd
+		m.message, cmd = a.Do(targets)
+		return m, cmd
 	}
 	m.chosen, m.targets = a.Name, targets
 	return m, tea.Quit

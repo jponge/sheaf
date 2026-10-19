@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"encoding/base64"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -701,6 +702,33 @@ func TestHomeOnPTYDumbTerminalSendsNoWindowControls(t *testing.T) {
 	}
 	if all := terminalProgress.FindAllString(s.output(), -1); len(all) > 0 {
 		t.Errorf("terminal progress sequences %q with TERM=dumb", all)
+	}
+}
+
+// y copies the path of the current checkout to the clipboard with OSC 52
+// (B44) and says so in the overview's message; with TERM=dumb it is
+// refused and nothing is sent.
+func TestHomeOnPTYCopiesPathWithOSC52(t *testing.T) {
+	for _, c := range []struct {
+		term, message string
+		sent          bool
+	}{
+		{"xterm-256color", "sent to the clipboard: ", true},
+		{"dumb", "copy not available: the output is not a terminal, or TERM=dumb", false},
+	} {
+		t.Run(c.term, func(t *testing.T) {
+			e, alpha, _, _, _ := homeBundle(t)
+			s := startPTYShell(t, e.cwd, `B=$(stty -g); TERM=`+c.term+` "$SHEAF"`+sttyCheck, 0)
+			s.waitFor(`STATE`)
+			s.write("y")
+			s.waitFor(regexp.QuoteMeta(c.message))
+			s.write("q")
+			wantTerminalRestored(t, s, "0")
+			want := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(alpha)) + "\x07"
+			if got := regexp.MustCompile(`\x1b\]52;[^\x07\x1b]*(?:\x07|\x1b\\)`).FindAllString(s.output(), -1); c.sent != (len(got) == 1 && got[0] == want) || !c.sent && len(got) > 0 {
+				t.Errorf("OSC 52 sequences %q, want %q sent: %v", got, want, c.sent)
+			}
+		})
 	}
 }
 

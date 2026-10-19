@@ -263,6 +263,7 @@ lines that still do not fit are cut at the right.
 | a, n | select / deselect every visible row (rows hidden by the filter keep their selection) |
 | / | filter (case-insensitive substring over the cells; enter keeps it, esc clears it) |
 | enter | change directory to the current checkout and exit (see below) |
+| y | copy the absolute path of the current checkout to the clipboard; the overview's message says `sent to the clipboard: <path>`. The terminal is asked with an OSC 52 sequence, which some terminals ignore or block by default (inside tmux, it depends on its `set-clipboard` option); not available with `TERM=dumb` |
 | u | update the selected rows (or the current row) |
 | f | fetch the repositories of the selected rows (or the current row) |
 | w | add a worktree to the current row's repository: a prompt asks for a branch (an existing local or remote one, else a new branch from the default branch, as `wt add`), tab switches to a tag |
