@@ -619,7 +619,9 @@ func TestTUIProgressFinalLineHasNoCounts(t *testing.T) {
 		var out syncBuffer
 		errs, code := e.runTUI(t, newScript(t, true), &out, tc.args...)
 		o := out.String()
-		if code != 0 || !strings.Contains(o, tc.final) || !strings.Contains(o, tc.sums) || strings.Count(o, " failed") != 1 {
+		// From the final line on (earlier frames of the view have counts).
+		final := o[max(0, strings.Index(o, tc.final)):]
+		if code != 0 || !strings.Contains(o, tc.final) || !strings.Contains(final, tc.sums) || strings.Count(final, " failed") != 1 {
 			t.Errorf("%v: exit %d, want the final line %q and one count line %q\nstdout:\n%s\nstderr:\n%s", tc.args, code, tc.final, tc.sums, o, errs)
 		}
 	}
