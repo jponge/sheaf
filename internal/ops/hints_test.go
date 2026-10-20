@@ -159,16 +159,17 @@ func TestRemoveWorktreeOfPrimaryRunHint(t *testing.T) {
 // allows it.
 func TestSyncMassRemovalRunHint(t *testing.T) {
 	t.Parallel()
+	f := newFixture(t)
 	p := Proposal{Key: "gone:o/a", Kind: ProposalGone, Org: "o", Name: "a", Slug: "o/a", MassRemoval: true}
 	for _, tc := range []struct {
 		force bool
 		want  string
 	}{
-		{false, "; check, then run: sheaf sync --org o --remove-gone --yes --allow-mass-removal"},
-		{true, "; check, then run: sheaf sync --org o --remove-gone --yes --force --allow-mass-removal"},
+		{false, "; check, then run: sheaf --bundle " + f.w.Root + " sync --org o --remove-gone --yes --allow-mass-removal"},
+		{true, "; check, then run: sheaf --bundle " + f.w.Root + " sync --org o --remove-gone --yes --force --allow-mass-removal"},
 	} {
 		opts := SyncRemoveOptions{Remove: RemoveOptions{Force: tc.force, WorkingDir: t.TempDir()}}
-		s := SyncRemoveGone(context.Background(), nil, []Proposal{p}, opts, 1, Discard)
+		s := SyncRemoveGone(context.Background(), f.w, []Proposal{p}, opts, 1, Discard)
 		if len(s.Results) != 1 || s.Results[0].Err == nil || !strings.HasSuffix(s.Results[0].Err.Error(), tc.want) {
 			t.Errorf("force %v: summary %+v, want an error ending with %q", tc.force, s, tc.want)
 		}
@@ -240,7 +241,7 @@ func TestCommandLineNamesTheBundle(t *testing.T) {
 		t.Errorf("CommandLine = %q, want %q", got, want)
 	}
 	p := Proposal{Key: "gone:o/a", Kind: ProposalGone, Org: "o", Name: "a", Slug: "o/a", MassRemoval: true}
-	s := SyncRemoveGone(ctx, nil, []Proposal{p}, SyncRemoveOptions{Remove: RemoveOptions{WorkingDir: t.TempDir()}}, 1, Discard)
+	s := SyncRemoveGone(ctx, newFixture(t).w, []Proposal{p}, SyncRemoveOptions{Remove: RemoveOptions{WorkingDir: t.TempDir()}}, 1, Discard)
 	if want := "run: sheaf --bundle '/my bundle' sync --org o --remove-gone --yes --allow-mass-removal"; len(s.Results) != 1 || !strings.HasSuffix(s.Results[0].Err.Error(), want) {
 		t.Errorf("summary %+v, want an error ending with %q", s, want)
 	}

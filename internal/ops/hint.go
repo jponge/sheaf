@@ -55,8 +55,7 @@ func hintYes(ctx context.Context) bool {
 // bundle as the bundle of hints. With yes, --yes is added before the "--"
 // of args (at the end without one), and the bundle is named even when the
 // user did not give --bundle (root, the resolved bundle root, when bundle
-// is ""): pasted in another bundle with a repository of the same name, a
-// command that needs no confirmation must still act on this bundle.
+// is "", see YesCommandLine).
 func hintCommand(yes bool, bundle, root string, args ...string) string {
 	if !yes {
 		return commandLineIn(bundle, args...)
@@ -65,11 +64,26 @@ func hintCommand(yes bool, bundle, root string, args ...string) string {
 	if i < 0 {
 		i = len(args)
 	}
-	args = slices.Concat(args[:i], []string{"--yes"}, args[i:])
+	return yesCommandLineIn(bundle, root, slices.Concat(args[:i], []string{"--yes"}, args[i:])...)
+}
+
+// yesCommandLineIn is commandLineIn for args that carry --yes: the bundle
+// is named even when the user did not give --bundle (root, the resolved
+// bundle root, when bundle is "").
+func yesCommandLineIn(bundle, root string, args ...string) string {
 	if bundle == "" {
 		bundle = root
 	}
 	return commandLineIn(bundle, args...)
+}
+
+// YesCommandLine is CommandLine for a command line that carries --yes in
+// args, in the bundle of resolved root root: it always names the bundle,
+// root unless the user gave --bundle (see WithHintBundle). Pasted in another
+// bundle with a repository of the same name, a command that needs no
+// confirmation must still act on this bundle.
+func YesCommandLine(ctx context.Context, root string, args ...string) string {
+	return yesCommandLineIn(hintBundle(ctx), root, args...)
 }
 
 // confirmedCommandLine is CommandLine of args with --yes and the bundle

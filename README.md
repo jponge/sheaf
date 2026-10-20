@@ -621,9 +621,12 @@ the refused removal again with `--force` or `-D`, the `wt rm` hint of a
 worktree that `prune` kept, and the `prune --include-branches` hint include
 `--yes`, so that they run as printed; such a hint always names the bundle
 with `--bundle <root>`, so that pasted in another bundle it still acts on
-this one. Every other hint leaves `--yes` out, so that the pasted command
-asks for confirmation (a dialog in TUI mode, a hint with `--yes` in plain
-mode), and names the bundle only when `--bundle` was given. That is the
+this one. So do the other hints that carry `--yes`: the "needs
+confirmation" hints of `remove` and `wt rm` in plain mode, the dry-run
+hint of `prune`, and the `sync --remove-gone --yes` hints of `sync`. Every
+other hint leaves `--yes` out, so that the pasted command asks for
+confirmation (a dialog in TUI mode, a hint with `--yes` in plain mode), and
+names the bundle only when `--bundle` was given. That is the
 case in TUI mode, without `--yes`, and always for the `--offline` hints
 (offline, the stale remote-tracking refs that the failed fetch could not
 refresh count, so the plan must be confirmed again), the hints about pull

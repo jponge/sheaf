@@ -163,7 +163,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 	if err != nil {
 		return err
 	}
-	syWriteProposals(c.Context(), out, rep, fl.orgs, !(fl.addNew || fl.removeGone || len(fl.exclude) > 0))
+	syWriteProposals(c.Context(), out, rep, w.Root, fl.orgs, !(fl.addNew || fl.removeGone || len(fl.exclude) > 0))
 
 	errs := []error{rep.Err()}
 	if len(excluded) > 0 {
@@ -276,8 +276,8 @@ func syResolveExcludes(rep ops.SyncReport, args []string, includeArchived bool) 
 }
 
 // syWriteProposals prints one line per proposal and, when hints is set,
-// how to act on them.
-func syWriteProposals(ctx context.Context, w io.Writer, rep ops.SyncReport, orgs []string, hints bool) {
+// how to act on them in the bundle of resolved root root.
+func syWriteProposals(ctx context.Context, w io.Writer, rep ops.SyncReport, root string, orgs []string, hints bool) {
 	if len(rep.Proposals) == 0 {
 		var orgs []string
 		for _, o := range rep.Orgs {
@@ -323,6 +323,9 @@ func syWriteProposals(ctx context.Context, w io.Writer, rep ops.SyncReport, orgs
 		args := []string{"sync"}
 		for _, o := range orgs {
 			args = append(args, "--org", o)
+		}
+		if slices.Contains(flags, "--yes") {
+			return ops.YesCommandLine(ctx, root, append(args, flags...)...)
 		}
 		return ops.CommandLine(ctx, append(args, flags...)...)
 	}

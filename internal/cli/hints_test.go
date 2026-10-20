@@ -12,18 +12,19 @@ import (
 
 // The hints that tell to run a command again with a flag print the complete
 // command, with the flags and arguments of the run (global options aside)
-// and the flag, shell-quoted, so that it can be pasted (B52 A3).
+// and the flag, shell-quoted, so that it can be pasted (B52 A3). With
+// --yes, they name the bundle (B59).
 func TestConfirmationHintsPrintTheCommand(t *testing.T) {
 	t.Parallel()
-	e, _ := worktreeBundle(t)
+	e, root := worktreeBundle(t)
 	e.mustRun(t, "wt", "add", "a", "work", "--no-fetch")
 	for _, tc := range []struct {
 		args []string
 		want string
 	}{
-		{[]string{"--no-tui", "remove", "--offline", "b"}, "run: sheaf remove --offline --yes -- b\n"},
-		{[]string{"wt", "rm", "a", "work", "--offline"}, "run: sheaf wt rm --offline --yes -- a work\n"},
-		{[]string{"wt", "rm", "--dir=work", "--", "a"}, "run: sheaf wt rm --dir work --yes -- a\n"},
+		{[]string{"--no-tui", "remove", "--offline", "b"}, "run: sheaf --bundle " + root + " remove --offline --yes -- b\n"},
+		{[]string{"wt", "rm", "a", "work", "--offline"}, "run: sheaf --bundle " + root + " wt rm --offline --yes -- a work\n"},
+		{[]string{"wt", "rm", "--dir=work", "--", "a"}, "run: sheaf --bundle " + root + " wt rm --dir work --yes -- a\n"},
 	} {
 		_, errs, code := e.run(t, tc.args...)
 		if code == 0 || !strings.Contains(errs, "needs confirmation") || !strings.HasSuffix(errs, tc.want) || strings.Contains(errs, "pass --yes") {
@@ -34,13 +35,13 @@ func TestConfirmationHintsPrintTheCommand(t *testing.T) {
 
 func TestPruneDryRunHintPrintsTheCommand(t *testing.T) {
 	t.Parallel()
-	e, _, _ := pruneBundle(t)
+	e, root, _ := pruneBundle(t)
 	for _, tc := range []struct {
 		args []string
 		want string
 	}{
-		{[]string{"prune"}, "dry run: to prune 1 candidate(s), run: sheaf prune --yes\n"},
-		{[]string{"prune", "--dry-run", "--offline", "--repo", "a", "--delete-branches"}, "dry run: to prune 1 candidate(s), run: sheaf prune --delete-branches --offline --repo a --yes\n"},
+		{[]string{"prune"}, "dry run: to prune 1 candidate(s), run: sheaf --bundle " + root + " prune --yes\n"},
+		{[]string{"prune", "--dry-run", "--offline", "--repo", "a", "--delete-branches"}, "dry run: to prune 1 candidate(s), run: sheaf --bundle " + root + " prune --delete-branches --offline --repo a --yes\n"},
 	} {
 		out, errs, code := e.run(t, tc.args...)
 		if code != 0 || !strings.HasSuffix(out, tc.want) {
@@ -216,7 +217,7 @@ func TestYesHintsActOnTheirBundle(t *testing.T) {
 // --yes with the complete command, which then runs.
 func TestRefusalHintsWithoutYes(t *testing.T) {
 	t.Parallel()
-	e, _ := worktreeBundle(t)
+	e, root := worktreeBundle(t)
 	work := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "work", "--no-fetch"))
 	writeFile(t, filepath.Join(work, "untracked.txt"), "u\n")
 	_, errs, code := e.run(t, "wt", "rm", "a", "work")
@@ -224,7 +225,7 @@ func TestRefusalHintsWithoutYes(t *testing.T) {
 		t.Fatalf("wt rm: exit %d\n%s", code, errs)
 	}
 	_, errs, code = e.run(t, hintArgs(t, errs)...)
-	if code == 0 || !strings.Contains(errs, "needs confirmation") || !strings.HasSuffix(errs, "run: sheaf wt rm --force --dir work --yes -- a\n") {
+	if code == 0 || !strings.Contains(errs, "needs confirmation") || !strings.HasSuffix(errs, "run: sheaf --bundle "+root+" wt rm --force --dir work --yes -- a\n") {
 		t.Fatalf("hint of the refusal: exit %d\n%s", code, errs)
 	}
 	e.mustRun(t, hintArgs(t, errs)...)
@@ -315,10 +316,52 @@ func TestHintsNameAnExplicitBundle(t *testing.T) {
 	if exists(filepath.Join(root, "a", "feat")) {
 		t.Fatal("the hint did not prune the bundle")
 	}
-	// Without --bundle, no --bundle.
+	// Without --bundle, no --bundle in a hint without --yes (one with
+	// --yes always names the bundle, B59).
 	e.cwd = root
-	e.mustRun(t, "wt", "add", "a", "x", "--no-fetch")
-	if _, errs, _ := e.run(t, "wt", "rm", "a", "x"); !strings.HasSuffix(errs, "run: sheaf wt rm --yes -- a x\n") {
+	x := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "x", "--no-fetch"))
+	writeFile(t, filepath.Join(x, "untracked.txt"), "u\n")
+	if _, errs, _ := e.run(t, "wt", "rm", "a", "x"); !strings.HasSuffix(errs, "run: sheaf wt rm --force --dir x -- a\n") {
 		t.Errorf("stderr %q", errs)
+	}
+}
+
+// The "needs confirmation" hints of plain mode (remove, wt rm) and the
+// dry-run hint of prune carry --yes, so they name the bundle even without
+// --bundle: pasted in another bundle with repositories of the same names,
+// they act on the bundle that printed them (B59).
+func TestConfirmationHintsActOnTheirBundle(t *testing.T) {
+	t.Parallel()
+	e, root, _ := pruneBundle(t)
+	e.origin(t, "o", "b", false)
+	e.mustRun(t, "add", "o/b")
+	feat := filepath.Join(root, "a", "feat")
+	work := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "work", "--no-fetch"))
+	root2 := filepath.Join(t.TempDir(), "other")
+	e.mustRun(t, "create", root2)
+	root2, _ = filepath.EvalSymlinks(root2)
+	e.cwd = root2
+	e.mustRun(t, "add", "o/a", "o/b")
+	// feat no longer exists on the remote: a new branch, not a candidate.
+	feat2 := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "feat", "--no-fetch"))
+	work2 := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "work", "--no-fetch"))
+	for _, tc := range []struct {
+		args       []string
+		gone, kept string
+	}{
+		{[]string{"prune"}, feat, feat2},
+		{[]string{"wt", "rm", "a", "work"}, work, work2},
+		{[]string{"remove", "b"}, filepath.Join(root, "b"), filepath.Join(root2, "b", "main")},
+	} {
+		e.cwd = root
+		out, errs, _ := e.run(t, tc.args...)
+		if !strings.Contains(out+errs, "run: sheaf --bundle "+root+" ") {
+			t.Fatalf("%v: stdout\n%s\nstderr\n%s", tc.args, out, errs)
+		}
+		e.cwd = root2
+		e.mustRun(t, hintArgs(t, out+errs)...)
+		if exists(tc.gone) || !exists(tc.kept) {
+			t.Fatalf("%v pasted in the other bundle: %s exists %v, %s exists %v", tc.args, tc.gone, exists(tc.gone), tc.kept, exists(tc.kept))
+		}
 	}
 }

@@ -413,7 +413,7 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 		opts.Interactive = d.singleRepoInteractiveGit(c)
 		msg, err := ops.RemoveWorktree(plainHintContext(c, yes), w, repo, target, opts, emit)
 		if errors.Is(err, ops.ErrNotConfirmed) {
-			return fmt.Errorf("removing worktree %s of %s needs confirmation (sheaf never prompts in CLI mode); run: %s", target.Name, repo, worktreeRemoveCommand(c.Context(), repo, target, opts))
+			return fmt.Errorf("removing worktree %s of %s needs confirmation (sheaf never prompts in CLI mode); run: %s", target.Name, repo, worktreeRemoveCommand(c.Context(), w.Root, repo, target, opts))
 		}
 		if err != nil {
 			return err
@@ -431,8 +431,9 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 }
 
 // worktreeRemoveCommand returns the command line of wt rm for target of
-// repo with opts, confirmed with --yes (see ops.CommandLine).
-func worktreeRemoveCommand(ctx context.Context, repo string, target ops.WorktreeTarget, opts ops.WorktreeRemoveOptions) string {
+// repo with opts, confirmed with --yes, in the bundle of resolved root root
+// (see ops.YesCommandLine).
+func worktreeRemoveCommand(ctx context.Context, root, repo string, target ops.WorktreeTarget, opts ops.WorktreeRemoveOptions) string {
 	args := []string{"wt", "rm"}
 	if opts.Force {
 		args = append(args, "--force")
@@ -456,7 +457,7 @@ func worktreeRemoveCommand(ctx context.Context, repo string, target ops.Worktree
 	if target.Kind == ops.TargetAny && target.Name != "" {
 		args = append(args, target.Name)
 	}
-	return ops.CommandLine(ctx, args...)
+	return ops.YesCommandLine(ctx, root, args...)
 }
 
 // worktreeRemovePlanLines describes a worktree removal plan: risks, what is

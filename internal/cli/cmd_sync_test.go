@@ -148,7 +148,7 @@ func TestSyncRemoveGone(t *testing.T) {
 	e.origin(t, "o", "c", false)
 
 	out := e.mustRun(t, "sync")
-	for _, want := range []string{"gone     o/a", "gone     o/b", "--remove-gone --yes"} {
+	for _, want := range []string{"gone     o/a", "gone     o/b", "remove the gone ones with: sheaf --bundle " + root + " sync --remove-gone --yes "} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout lacks %q:\n%s", want, out)
 		}
