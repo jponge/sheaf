@@ -202,9 +202,14 @@ func TestAdoptNameRefusalsSuggestRenaming(t *testing.T) {
 		d := filepath.Join(f.w.Root, name)
 		plainClone(t, testutil.NewOrigin(t, testutil.OriginOpts{}), d)
 		before := snapshotGitDir(d)
-		_, err := Adopt(context.Background(), f.w, d, AdoptOptions{}, noEmit)
+		// The snapshot cannot tell a move rolled back from no move at all.
+		moved := false
+		_, err := Adopt(context.Background(), f.w, d, AdoptOptions{afterMove: func() error { moved = true; return nil }}, noEmit)
 		if err == nil || strings.Contains(err.Error(), "--as") || !strings.Contains(err.Error(), "rename the directory, then adopt it") {
 			t.Errorf("Adopt(%s) err = %v, want a refusal suggesting renaming the directory, without --as", name, err)
+		}
+		if moved {
+			t.Errorf("%s: moved before being refused", name)
 		}
 		if after := snapshotGitDir(d); after != before {
 			t.Errorf("%s: directory changed: %q -> %q", name, before, after)
