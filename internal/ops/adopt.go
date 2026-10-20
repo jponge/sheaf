@@ -111,8 +111,11 @@ func Adopt(ctx context.Context, w *Workspace, dir string, opts AdoptOptions, emi
 	if _, ok := b.Repository(name); ok {
 		return "", Skip(name + " is already registered; use --recheck to re-examine its remotes")
 	}
-	if err := bundle.ValidateRepoName(name); err != nil {
+	if err := bundle.ValidateAdoptedName(name); err != nil {
 		return "", fmt.Errorf("cannot adopt %s: %w", dir, err)
+	}
+	if other, ok := caseVariant(b, name); ok {
+		return "", fmt.Errorf("cannot adopt %s: a repository named %q already exists in the bundle (names that differ only by case collide on case-insensitive file systems); rename the directory, then adopt it", dir, other)
 	}
 	plain := isPrimaryCheckout(ctx, dir)
 	checkout := dir

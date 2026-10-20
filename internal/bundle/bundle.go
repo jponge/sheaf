@@ -129,19 +129,31 @@ func ValidateHost(h string) error {
 // under the bundle root: non-empty, characters in [A-Za-z0-9._-], not
 // starting with '.' or '-' (it would be read as an option by the commands
 // sheaf prints, git and gh), and not the bundle file name
-// (case-insensitively).
+// (case-insensitively). The fix it suggests is add's --as.
 func ValidateRepoName(name string) error {
+	return validateRepoName(name, "use --as <dir> to choose another name")
+}
+
+// ValidateAdoptedName is ValidateRepoName for the directory of a checkout
+// to adopt, whose name is the repository name: the fix it suggests is
+// renaming the directory (adopt has no --as).
+func ValidateAdoptedName(name string) error {
+	return validateRepoName(name, "rename the directory, then adopt it")
+}
+
+// validateRepoName is ValidateRepoName with fix as the suggested fix.
+func validateRepoName(name, fix string) error {
 	switch {
 	case name == "":
 		return errors.New("repository name must not be empty")
 	case strings.HasPrefix(name, "."):
 		return fmt.Errorf("invalid repository name %q: must not start with '.'", name)
 	case strings.HasPrefix(name, "-"):
-		return fmt.Errorf("invalid repository name %q: must not start with '-' (use --as <dir> to choose another name)", name)
+		return fmt.Errorf("invalid repository name %q: must not start with '-' (%s)", name, fix)
 	case strings.EqualFold(name, FileName):
 		return fmt.Errorf("invalid repository name %q: reserved for the bundle file", name)
 	case !validSlugPart(name):
-		return fmt.Errorf("invalid repository name %q: only letters, digits, '.', '_' and '-' are allowed (use --as <dir> to choose another name)", name)
+		return fmt.Errorf("invalid repository name %q: only letters, digits, '.', '_' and '-' are allowed (%s)", name, fix)
 	}
 	return nil
 }

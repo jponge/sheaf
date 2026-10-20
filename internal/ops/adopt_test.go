@@ -188,6 +188,33 @@ func snapshotGitDir(d string) string {
 	return strings.Join(m, ",")
 }
 
+// A directory whose name is not a valid repository name, or differs only
+// by case from a registered one, is refused with a fix that adopt has:
+// rename the directory (adopt has no --as, B59). Nothing is moved.
+func TestAdoptNameRefusalsSuggestRenaming(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	plainClone(t, testutil.NewOrigin(t, testutil.OriginOpts{}), filepath.Join(f.w.Root, "api"))
+	if _, err := Adopt(context.Background(), f.w, filepath.Join(f.w.Root, "api"), AdoptOptions{}, noEmit); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"-x", "a+b", "API"} {
+		d := filepath.Join(f.w.Root, name)
+		plainClone(t, testutil.NewOrigin(t, testutil.OriginOpts{}), d)
+		before := snapshotGitDir(d)
+		_, err := Adopt(context.Background(), f.w, d, AdoptOptions{}, noEmit)
+		if err == nil || strings.Contains(err.Error(), "--as") || !strings.Contains(err.Error(), "rename the directory, then adopt it") {
+			t.Errorf("Adopt(%s) err = %v, want a refusal suggesting renaming the directory, without --as", name, err)
+		}
+		if after := snapshotGitDir(d); after != before {
+			t.Errorf("%s: directory changed: %q -> %q", name, before, after)
+		}
+	}
+	if got := repoNames(f.onDisk(t)); len(got) != 1 {
+		t.Fatalf("registered = %v, want only api", got)
+	}
+}
+
 func TestAdoptRestoresOnFailureAfterMove(t *testing.T) {
 	f := newFixture(t)
 	o := testutil.NewOrigin(t, testutil.OriginOpts{Branches: []string{"feat"}})
