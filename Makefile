@@ -64,30 +64,27 @@ vet-windows:
 	GOOS=windows go vet ./...
 	go run -exec 'env GOOS=windows' $(STATICCHECK) ./...
 
-# Records demo/sheaf.gif with vhs (needs vhs, ttyd and ffmpeg on PATH; see
-# the README). demo/setup.sh creates the demo bundle in DEMO_DIR (replaced if
-# an earlier run left it; a symbolic link or another existing directory is
-# refused and kept), with sheaf built into a temporary directory first on
-# PATH; both are removed afterwards, also on interruption (the bundle is
-# kept when setup.sh fails). Nothing uses the network, gh or the user's
-# configuration. The INT and TERM traps exit so that the EXIT trap runs:
-# dash does not run it on a signal.
-DEMO_DIR ?= /tmp/sheaf-demo
+# Records demo/sheaf.gif with vhs in a container (needs only docker; see the
+# README): vhs renders through Chromium, which stays inside the image built
+# from demo/Dockerfile. sheaf is built for the container's architecture into
+# bin/linux/, then demo/record.sh creates the demo bundle in the container's
+# /tmp (demo/setup.sh) and runs vhs. Nothing uses the network (beyond pulling
+# the image), gh or the user's configuration. The container runs with the
+# user's ids so that the GIF is theirs.
+DEMO_IMAGE := sheaf-demo-vhs
 demo:
-	@for t in vhs ttyd ffmpeg; do \
-	  command -v $$t >/dev/null || { echo "make demo: $$t not found on PATH (see Regenerating the demo in README.md)" >&2; exit 1; }; \
-	done
-	@set -e; bin=$$(mktemp -d); made=; \
-	trap 'rm -rf "$$bin"; if [ -n "$$made" ]; then rm -rf "$(DEMO_DIR)"; fi' EXIT; \
-	trap 'exit 130' INT; trap 'exit 143' TERM; \
-	go build -ldflags "$(LDFLAGS)" -o "$$bin/sheaf" ./cmd/sheaf; \
-	PATH="$$bin:$$PATH" demo/setup.sh "$(DEMO_DIR)"; made=1; \
-	PATH="$$bin:$$PATH" SHEAF_DEMO_DIR="$(DEMO_DIR)" vhs demo/sheaf.tape
+	@command -v docker >/dev/null || { echo "make demo: docker not found on PATH (see Regenerating the demo in README.md)" >&2; exit 1; }
+	@set -e; \
+	arch=$$(docker version --format '{{.Server.Arch}}'); \
+	docker build -q -t $(DEMO_IMAGE) - < demo/Dockerfile >/dev/null; \
+	CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -ldflags "$(LDFLAGS)" -o bin/linux/sheaf ./cmd/sheaf; \
+	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp \
+	  -v "$(CURDIR):/vhs" -w /vhs --entrypoint bash $(DEMO_IMAGE) demo/record.sh
 
 # Checks the demo without vhs: demo/check.sh runs the steps of the tape in
 # plain mode against a fresh demo bundle (temporary, offline), and vhs's
 # parser validates the tape (vhs at a pinned version through `go run`, like
-# staticcheck; ttyd and ffmpeg are not needed).
+# staticcheck; docker is not needed).
 VHS := github.com/charmbracelet/vhs@v0.12.1
 demo-check:
 	@set -e; bin=$$(mktemp -d); \

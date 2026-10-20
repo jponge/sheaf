@@ -756,7 +756,7 @@ make vet                             # go vet ./... and staticcheck (pinned, run
 make vet-windows                     # the same for the Windows build (GOOS=windows)
 make test-symlinked-tmp              # suite with TMPDIR behind a symbolic link (macOS /var case)
 make test-shells SHELLS_ROOT=DIR     # cli tests with fish and zsh required
-make demo                            # record demo/sheaf.gif with vhs
+make demo                            # record demo/sheaf.gif with vhs, in docker
 make demo-check                      # check the demo bundle and the tape, without vhs
 ```
 
@@ -774,24 +774,25 @@ fixtures).
 ### Regenerating the demo
 
 `demo/sheaf.gif` is recorded by [vhs](https://github.com/charmbracelet/vhs)
-from `demo/sheaf.tape`. vhs needs `ttyd` and `ffmpeg` on `PATH`:
+from `demo/sheaf.tape`. vhs renders through a headless Chromium, so `make
+demo` runs it in a container and only needs docker: the image is the
+official vhs image, pinned by digest, plus git (`demo/Dockerfile`), and
+Chromium stays inside it.
 
 ```sh
-brew install vhs ttyd ffmpeg                         # macOS (Homebrew)
-go install github.com/charmbracelet/vhs@v0.12.1      # or with Go, plus ttyd and ffmpeg
 make demo                                            # writes demo/sheaf.gif
 ```
 
-`make demo` builds sheaf into a temporary directory put first on `PATH`,
-and `demo/setup.sh` creates a throwaway bundle in `DEMO_DIR` (default
-`/tmp/sheaf-demo`, removed afterwards): three repositories with local bare
-remotes (`file://` URLs), worktrees, a checkout behind its remote and a
-dirty one. The setup and the recording shell drop the `GIT_*` and gh
-variables, get their own `HOME`, git and gh configuration, and a `gh` stub
-that fails first on `PATH`; the shell also gets the `sheaf` shell function.
-Nothing uses the network, GitHub or your configuration. `make demo-check` runs the steps of the tape in plain mode
-against such a bundle (`demo/check.sh`) and checks the tape with vhs's
-parser, without ttyd or ffmpeg.
+`make demo` builds sheaf for the container into `bin/linux/`, and
+`demo/record.sh` creates a throwaway bundle in the container's `/tmp`
+(`demo/setup.sh`): three repositories with local bare remotes (`file://`
+URLs), worktrees, a checkout behind its remote and a dirty one. The setup
+and the recording shell drop the `GIT_*` and gh variables, get their own
+`HOME`, git and gh configuration, and a `gh` stub that fails first on
+`PATH`; the shell also gets the `sheaf` shell function. Nothing uses the
+network (beyond pulling the image), GitHub or your configuration. `make
+demo-check` runs the steps of the tape in plain mode against such a bundle
+(`demo/check.sh`) and checks the tape with vhs's parser, without docker.
 
 ## License
 

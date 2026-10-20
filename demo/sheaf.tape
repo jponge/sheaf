@@ -1,6 +1,6 @@
 # The demo of the README, rendered by `make demo` into demo/sheaf.gif.
 # demo/setup.sh first creates the demo bundle in $SHEAF_DEMO_DIR, offline
-# (see the Makefile); its env.sh isolates the shell from the user's
+# (see demo/record.sh); its env.sh isolates the shell from the user's
 # configuration and defines the sheaf shell function.
 #
 # Waits let the work finish whatever the machine; the Sleeps that follow set

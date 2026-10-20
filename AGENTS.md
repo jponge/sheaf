@@ -42,7 +42,7 @@ optional at runtime and never needed for tests.
 | `make vet-windows` | the same for `GOOS=windows` (Windows is refused at runtime but must compile) |
 | `make test-symlinked-tmp` | the suite with `TMPDIR` behind a symbolic link (the macOS `/var` → `/private/var` class of bugs) |
 | `make test-shells` | the cli tests with fish and zsh required (`SHELLS_ROOT=` for unpacked shells) |
-| `make demo-check` | checks the demo bundle and the vhs tape without vhs; `make demo` records it (needs vhs, ttyd, ffmpeg) |
+| `make demo-check` | checks the demo bundle and the vhs tape without docker; `make demo` records it with vhs in a container (needs docker) |
 
 Before considering a change done: `gofmt -l internal` prints nothing, `make
 vet`, `make vet-windows`, `go test -race -count=1 ./...` and `make
