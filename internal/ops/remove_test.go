@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -37,6 +38,20 @@ func (f *fixture) remove(t *testing.T, name string, force bool, confirm func(Rem
 func exists(p string) bool {
 	_, err := os.Lstat(p)
 	return err == nil
+}
+
+// wantRemoved checks that the repository name is gone: its directory no
+// longer exists (any other Lstat error fails the test) and sheaf.yaml no
+// longer lists it.
+func (f *fixture) wantRemoved(t *testing.T, name string) {
+	t.Helper()
+	dir := filepath.Join(f.w.Root, name)
+	if _, err := os.Lstat(dir); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("%s: want it deleted, Lstat: %v", dir, err)
+	}
+	if slices.ContainsFunc(f.onDisk(t).Repositories, func(r bundle.Repository) bool { return r.Name == name }) {
+		t.Errorf("%s still listed in %s", name, bundle.FileName)
+	}
 }
 
 func riskKinds(c RemoveItem) []gitx.RiskKind {
@@ -178,6 +193,7 @@ func TestRemoveRefusesUnknownEntriesUnlessForced(t *testing.T) {
 	if _, err := f.remove(t, "a", true, yes); err != nil {
 		t.Fatal(err)
 	}
+	f.wantRemoved(t, "a")
 }
 
 func TestRemoveNeverDeletesOutsideTheRepositoryDirectory(t *testing.T) {
@@ -355,6 +371,7 @@ func TestRemoveRecheckIgnoresInformationalChanges(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("remove aborted by an informational change: %v", err)
 	}
+	f.wantRemoved(t, "a")
 }
 
 // The working directory comes from the caller.

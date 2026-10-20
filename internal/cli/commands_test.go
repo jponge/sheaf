@@ -299,6 +299,9 @@ func TestRemoveDisplaysInformationalRisks(t *testing.T) {
 	if !strings.Contains(errs, "1 commit only reachable from local tags") || !strings.Contains(errs, filepath.Join("a", "main")) {
 		t.Fatalf("stderr does not show the informational risk:\n%s", errs)
 	}
+	if exists(filepath.Join(root, "a")) || slices.Contains(names(load(t, root)), "a") {
+		t.Fatal("a not removed")
+	}
 }
 
 func TestAdoptDefaultBranchFlag(t *testing.T) {

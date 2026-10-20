@@ -85,6 +85,7 @@ func TestRemoveOwnUnlistedWorktreeIsForceable(t *testing.T) {
 	if _, err := f.remove(t, "a", true, yes); err != nil {
 		t.Fatalf("forced removal: %v", err)
 	}
+	f.wantRemoved(t, "a")
 }
 
 // Remove and wt rm word their hard refusals alike.
@@ -165,6 +166,7 @@ func TestRemoveWorktreeOfEmbeddedRepositoryIsForceable(t *testing.T) {
 	if _, err := f.remove(t, "a", true, yes); err != nil {
 		t.Fatalf("forced removal: %v", err)
 	}
+	f.wantRemoved(t, "a")
 }
 
 // When `git worktree remove` fails (here: the worktree was

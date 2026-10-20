@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -39,39 +40,49 @@ func (r *recorder) kinds(repo string) []Kind {
 	return ks
 }
 
+// The check that no third worker starts runs in a synctest bubble, so it
+// does not depend on the machine's speed: synctest.Wait returns only once
+// every goroutine of the bubble is durably blocked (a worker that would
+// wrongly start has started by then), and the fake clock gives late
+// starters an hour at no cost.
 func TestExecuteBoundedParallelism(t *testing.T) {
-	var cur, peak atomic.Int32
-	release := make(chan struct{})
-	var tasks []Task
-	for i := range 6 {
-		tasks = append(tasks, Task{Repo: fmt.Sprint("r", i), Phase: "p", Run: func(ctx context.Context, _ func(Event)) (string, error) {
-			n := cur.Add(1)
-			for {
-				p := peak.Load()
-				if n <= p || peak.CompareAndSwap(p, n) {
-					break
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		var cur, peak atomic.Int32
+		release := make(chan struct{})
+		var tasks []Task
+		for i := range 6 {
+			tasks = append(tasks, Task{Repo: fmt.Sprint("r", i), Phase: "p", Run: func(ctx context.Context, _ func(Event)) (string, error) {
+				n := cur.Add(1)
+				for {
+					p := peak.Load()
+					if n <= p || peak.CompareAndSwap(p, n) {
+						break
+					}
 				}
-			}
-			<-release
-			cur.Add(-1)
-			return "", nil
-		}})
-	}
-	done := make(chan Summary)
-	go func() { done <- Execute(context.Background(), 2, tasks, Discard) }()
-	deadline := time.Now().Add(5 * time.Second)
-	for peak.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	time.Sleep(20 * time.Millisecond) // give a third worker a chance to (wrongly) start
-	close(release)
-	s := <-done
-	if p := peak.Load(); p != 2 {
-		t.Fatalf("peak parallelism = %d, want 2", p)
-	}
-	if got := s.Count(StatusDone); got != 6 {
-		t.Fatalf("done = %d, want 6", got)
-	}
+				<-release
+				cur.Add(-1)
+				return "", nil
+			}})
+		}
+		done := make(chan Summary)
+		go func() { done <- Execute(context.Background(), 2, tasks, Discard) }()
+		synctest.Wait()
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		running := cur.Load()
+		close(release)
+		s := <-done
+		if running != 2 {
+			t.Fatalf("running = %d with every worker blocked, want 2", running)
+		}
+		if p := peak.Load(); p != 2 {
+			t.Fatalf("peak parallelism = %d, want 2", p)
+		}
+		if got := s.Count(StatusDone); got != 6 {
+			t.Fatalf("done = %d, want 6", got)
+		}
+	})
 }
 
 func TestExecuteResultsSortedIndependentOfCompletionOrder(t *testing.T) {

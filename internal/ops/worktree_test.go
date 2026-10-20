@@ -44,10 +44,23 @@ func (f *fixture) rmWTT(t *testing.T, repo string, target WorktreeTarget, opts W
 	return RemoveWorktree(context.Background(), f.w, repo, target, opts, noEmit)
 }
 
+// branchExists reports whether the local branch exists in the repository at
+// dir. Only git's "no such ref" exit status (1) means absent: any other
+// failure (dir not a repository, corrupt repository, git not started) fails
+// the test, so that "branch deleted" assertions cannot pass on a broken
+// repository.
 func branchExists(t *testing.T, dir, branch string) bool {
 	t.Helper()
 	_, err := gitx.Run(context.Background(), dir, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
-	return err == nil
+	if err == nil {
+		return true
+	}
+	var ge *gitx.GitError
+	if errors.As(err, &ge) && ge.ExitCode == 1 {
+		return false
+	}
+	t.Fatalf("checking branch %s: %v", branch, err)
+	return false
 }
 
 func messages(evs []Event) string {
@@ -458,7 +471,14 @@ func TestRemoveWorktreeDeleteBranch(t *testing.T) {
 	if branchExists(t, primary, "feat") {
 		t.Fatal("feat not deleted")
 	}
-	if out, _ := gitx.Run(context.Background(), primary, "config", "--get-regexp", `^branch\.feat\.`); strings.TrimSpace(out) != "" {
+	// git config --get-regexp exits 1 when nothing matches; any other
+	// failure must not pass for "no config left".
+	out, err := gitx.Run(context.Background(), primary, "config", "--get-regexp", `^branch\.feat\.`)
+	var ge *gitx.GitError
+	if err != nil && (!errors.As(err, &ge) || ge.ExitCode != 1) {
+		t.Fatalf("reading branch config: %v", err)
+	}
+	if strings.TrimSpace(out) != "" {
 		t.Fatalf("branch config left behind:\n%s", out)
 	}
 

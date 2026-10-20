@@ -57,6 +57,7 @@ func TestRemoveForkGoneWithForkOnlyCommitsIsADataRisk(t *testing.T) {
 	if _, err := f.remove(t, "x", true, yes); err != nil {
 		t.Fatalf("--force must override: %v", err)
 	}
+	f.wantRemoved(t, "x")
 }
 
 func TestRemoveForkGoneWithoutForkOnlyCommitsProceeds(t *testing.T) {
@@ -74,6 +75,7 @@ func TestRemoveForkGoneWithoutForkOnlyCommitsProceeds(t *testing.T) {
 	if !strings.Contains(messages(evs), "your fork (origin) appears to be gone") {
 		t.Fatalf("no note about the gone fork: %s", messages(evs))
 	}
+	f.wantRemoved(t, "x")
 }
 
 func TestRemoveForkUpstreamGoneIsADataRisk(t *testing.T) {
@@ -91,6 +93,7 @@ func TestRemoveForkUpstreamGoneIsADataRisk(t *testing.T) {
 	if _, err := f.remove(t, "x", true, yes); err != nil {
 		t.Fatalf("--force must override: %v", err)
 	}
+	f.wantRemoved(t, "x")
 }
 
 func TestRemoveForkExpectedGoneAppliesToTheReference(t *testing.T) {
@@ -161,6 +164,7 @@ func TestRemoveForkGoneCommitOnlyOnStaleForkRefIsADataRisk(t *testing.T) {
 	if _, err := f.remove(t, "x", true, yes); err != nil {
 		t.Fatalf("--force must override: %v", err)
 	}
+	f.wantRemoved(t, "x")
 }
 
 func branchExistsRef(t *testing.T, dir, ref string) bool {

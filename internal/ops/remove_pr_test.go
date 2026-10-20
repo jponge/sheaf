@@ -107,6 +107,7 @@ func TestRemovePRWorktreeWithoutRecordedHead(t *testing.T) {
 	if _, err := f.removeOpts(t, "a", RemoveOptions{WorkingDir: f.w.Root, Confirm: yes}); err != nil {
 		t.Fatalf("online: %v", err)
 	}
+	f.wantRemoved(t, "a")
 }
 
 // When the head cannot be fetched, the recorded one is not trusted.

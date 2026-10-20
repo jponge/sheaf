@@ -107,6 +107,9 @@ func TestRemoveWorktreeForkGoneDetachedCommitOnlyOnStaleRefBlocks(t *testing.T) 
 	if _, err := f.rmWT(t, "x", "other", WorktreeRemoveOptions{Force: true, WorkingDir: f.w.Root, Confirm: confirmAll}); err != nil {
 		t.Fatalf("--force must override: %v", err)
 	}
+	if exists(res.Path) {
+		t.Fatalf("%s kept", res.Path)
+	}
 }
 
 func TestRemoveWorktreeForkOtherFetchFailureIsHard(t *testing.T) {
@@ -138,6 +141,9 @@ func TestRemoveWorktreeOfflineDeleteBranchDoesNotTrustForkRefs(t *testing.T) {
 	// Online, origin/topic is trusted: merged into its upstream.
 	if _, err := f.rmWT(t, "x", "topic", WorktreeRemoveOptions{DeleteBranch: true, WorkingDir: f.w.Root, Confirm: confirmAll}); err != nil {
 		t.Fatal(err)
+	}
+	if p := filepath.Join(f.w.Root, "x", "topic"); exists(p) || branchExists(t, primary, "topic") {
+		t.Fatalf("%s kept (%v) or branch topic kept", p, exists(p))
 	}
 }
 

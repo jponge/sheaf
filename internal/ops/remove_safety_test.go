@@ -54,6 +54,7 @@ func TestRemoveCleanNestedRepoIsInformational(t *testing.T) {
 	if !slices.Contains(riskKinds(plan.Items[0]), gitx.RiskNestedRepositoryClean) {
 		t.Fatalf("plan = %+v, want the clean nested repository listed", plan.Items)
 	}
+	f.wantRemoved(t, "a")
 }
 
 func TestRemoveRefusesNestedWorktreeOfAnotherRepo(t *testing.T) {
@@ -154,6 +155,7 @@ func TestRemoveIgnoresOSJunk(t *testing.T) {
 	if _, err := f.remove(t, "a", false, yes); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
+	f.wantRemoved(t, "a")
 }
 
 // A failed fetch is refused with a hint to use --offline, which --force
