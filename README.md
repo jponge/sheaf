@@ -1,5 +1,7 @@
 # sheaf
 
+![sheaf demo: the home screen lists the checkouts of a bundle; the primary checkouts are filtered and selected, fetched, then updated; a worktree of a new branch is added, enter changes the shell to it, and sheaf status lists every checkout](demo/sheaf.gif)
+
 sheaf manages a group of git repositories checked out side by side in one
 directory, the *bundle*. Each repository gets a fixed layout: a primary
 checkout in a directory named after the default branch, and linked worktrees
@@ -12,8 +14,6 @@ on a terminal and as a plain CLI otherwise.
 
 Worktrees are not recorded in `sheaf.yaml`: git (`git worktree list`) is the
 source of truth, so worktrees created or removed with plain git are picked up.
-
-![sheaf demo: the home screen lists the checkouts of a bundle; the primary checkouts are filtered and selected, fetched, then updated; a worktree of a new branch is added, enter changes the shell to it, and sheaf status lists every checkout](demo/sheaf.gif)
 
 ## Contents
 
