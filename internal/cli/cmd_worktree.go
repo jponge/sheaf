@@ -411,7 +411,7 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 			return err
 		}
 		opts.Interactive = d.singleRepoInteractiveGit(c)
-		msg, err := ops.RemoveWorktree(c.Context(), w, repo, target, opts, emit)
+		msg, err := ops.RemoveWorktree(plainHintContext(c, yes), w, repo, target, opts, emit)
 		if errors.Is(err, ops.ErrNotConfirmed) {
 			return fmt.Errorf("removing worktree %s of %s needs confirmation (sheaf never prompts in CLI mode); run: %s", target.Name, repo, worktreeRemoveCommand(c.Context(), repo, target, opts))
 		}

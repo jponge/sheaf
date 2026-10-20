@@ -91,6 +91,7 @@ type RisksError struct {
 	// command of the hint (see Error).
 	Offline bool
 	bundle  string // of hints (see WithHintBundle)
+	yes     bool   // --yes in the commands of hints (see WithHintYes)
 }
 
 func (e *RisksError) Error() string {
@@ -163,6 +164,9 @@ func (e *RisksError) command(flag string) string {
 	}
 	if flag == "--offline" || e.Offline {
 		args = append(args, "--offline")
+	}
+	if e.yes {
+		args = append(args, "--yes")
 	}
 	return commandLineIn(e.bundle, append(args, "--", e.Plan.Repo)...)
 }
@@ -299,7 +303,7 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 		if err := nameUnpushedBranches(ctx, &plan, rs, distrust, published); err != nil {
 			return "", err
 		}
-		return "", &RisksError{Plan: plan, Force: opts.Force, Offline: opts.Offline, bundle: hintBundle(ctx)}
+		return "", &RisksError{Plan: plan, Force: opts.Force, Offline: opts.Offline, bundle: hintBundle(ctx), yes: hintYes(ctx)}
 	}
 	if opts.Confirm == nil || !opts.Confirm(plan) {
 		return "", fmt.Errorf("%w: %s", ErrNotConfirmed, name)

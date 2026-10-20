@@ -24,6 +24,36 @@ func hintBundle(ctx context.Context) string {
 	return root
 }
 
+// hintYesKey is the context key of --yes in the commands of hints (see
+// WithHintYes).
+type hintYesKey struct{}
+
+// WithHintYes returns ctx with --yes repeated in the commands of the hints
+// that run the refused removal again (with --force, --offline, -D) or
+// another removal (see CommandLine): set by a command confirmed with --yes
+// in plain mode, so that a pasted hint runs as stated instead of asking
+// for --yes. TUI mode does not set it: the pasted command then shows its
+// confirmation dialog.
+func WithHintYes(ctx context.Context) context.Context {
+	return context.WithValue(ctx, hintYesKey{}, true)
+}
+
+// hintYes reports whether ctx has --yes in the commands of hints (see
+// WithHintYes).
+func hintYes(ctx context.Context) bool {
+	yes, _ := ctx.Value(hintYesKey{}).(bool)
+	return yes
+}
+
+// withYes returns args with --yes appended when ctx has it (see
+// WithHintYes).
+func withYes(ctx context.Context, args ...string) []string {
+	if hintYes(ctx) {
+		return append(args, "--yes")
+	}
+	return args
+}
+
 // CommandLine returns the sheaf command line of args, each one quoted for
 // the shell if need be (see shellQuote): "sheaf wt rm --force --dir abc --
 // api", with --bundle and the bundle of hints of ctx first, if any (see

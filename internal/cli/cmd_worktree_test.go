@@ -161,7 +161,7 @@ func TestWorktreeRemoveUnmergedBranchNeedsD(t *testing.T) {
 	e, root := worktreeBundle(t)
 	p := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "work", "--no-fetch"))
 	testutil.CommitFile(t, p, "w.txt", "w\n", "work")
-	for extra, hint := range map[string]string{"-d": "run: sheaf wt rm -D --dir work -- a", "-d --force": "run: sheaf wt rm --force -D --dir work -- a"} {
+	for extra, hint := range map[string]string{"-d": "run: sheaf wt rm -D --dir work --yes -- a", "-d --force": "run: sheaf wt rm --force -D --dir work --yes -- a"} {
 		_, errs, code := e.run(t, append([]string{"wt", "rm", "a", "work", "--yes"}, strings.Fields(extra)...)...)
 		if code == 0 || !strings.Contains(errs, "branch work is not merged") || !strings.Contains(errs, "its 1 commit would be lost\n") || !strings.Contains(errs, hint+"\n") || !exists(p) {
 			t.Fatalf("%v: exit %d, stderr:\n%s", extra, code, errs)

@@ -791,6 +791,7 @@ type WorktreeRefusedError struct {
 	// removal, repeated in the command of the hint (see Error).
 	DeleteBranch, Offline bool
 	bundle                string // of hints (see WithHintBundle)
+	yes                   bool   // --yes in the commands of hints (see WithHintYes)
 }
 
 func (e *WorktreeRefusedError) Error() string {
@@ -909,7 +910,11 @@ func (e *WorktreeRefusedError) command(force, forceDelete, offline bool) string 
 	if offline || e.Offline {
 		args = append(args, "--offline")
 	}
-	return commandLineIn(e.bundle, append(args, "--dir", e.Plan.Worktree.Dir, "--", e.Plan.Repo)...)
+	args = append(args, "--dir", e.Plan.Worktree.Dir)
+	if e.yes {
+		args = append(args, "--yes")
+	}
+	return commandLineIn(e.bundle, append(args, "--", e.Plan.Repo)...)
 }
 
 // RemoveWorktree removes the linked worktree of repo named by target (its
@@ -1128,7 +1133,7 @@ func (x *worktreeRemoval) planFirst(ctx context.Context) error {
 // refusal is the error of a plan refused with opts.
 func (x *worktreeRemoval) refusal(ctx context.Context, opts WorktreeRemoveOptions) *WorktreeRefusedError {
 	return &WorktreeRefusedError{Plan: x.plan, Force: opts.Force, ForceDeleteBranch: opts.ForceDeleteBranch,
-		DeleteBranch: opts.DeleteBranch, Offline: opts.Offline, bundle: hintBundle(ctx)}
+		DeleteBranch: opts.DeleteBranch, Offline: opts.Offline, bundle: hintBundle(ctx), yes: hintYes(ctx)}
 }
 
 // apply removes the confirmed worktree (see RemoveWorktree): under the

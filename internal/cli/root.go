@@ -133,6 +133,16 @@ func hintContext(c *cobra.Command, d Deps) context.Context {
 	return ops.WithHintBundle(ctx, b)
 }
 
+// plainHintContext returns the context of c for a removal run in plain
+// mode, confirmed with --yes when yes: its hints then repeat --yes (see
+// ops.WithHintYes).
+func plainHintContext(c *cobra.Command, yes bool) context.Context {
+	if yes {
+		return ops.WithHintYes(c.Context())
+	}
+	return c.Context()
+}
+
 // OptionsFrom reads the global options from a command's flags.
 func OptionsFrom(c *cobra.Command) Options {
 	var o Options

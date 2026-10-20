@@ -138,7 +138,7 @@ func newPruneCmd(d Deps) *cobra.Command {
 			if !dryRun && !asJSON && d.tuiMode(c) {
 				return tuiPrune(c, d, w, opts, yes)
 			}
-			ctx := c.Context()
+			ctx := plainHintContext(c, yes)
 			opts.Interactive = d.interactiveGit(c)
 			rep := plainRenderer{c.ErrOrStderr()}
 			plan, err := ops.PlanPrune(ctx, w, opts, rep)

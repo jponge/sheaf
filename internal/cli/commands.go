@@ -319,7 +319,7 @@ func newRemoveCmd(d Deps) *cobra.Command {
 				}
 				return yes
 			}
-			msg, err := ops.Remove(c.Context(), w, name, ops.RemoveOptions{Force: force, Offline: offline, Confirm: confirm, WorkingDir: wd, Interactive: d.singleRepoInteractiveGit(c)}, emit)
+			msg, err := ops.Remove(plainHintContext(c, yes), w, name, ops.RemoveOptions{Force: force, Offline: offline, Confirm: confirm, WorkingDir: wd, Interactive: d.singleRepoInteractiveGit(c)}, emit)
 			if errors.Is(err, ops.ErrNotConfirmed) {
 				args := []string{"remove"}
 				if force {
