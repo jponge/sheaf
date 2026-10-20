@@ -37,6 +37,7 @@ optional at runtime and never needed for tests.
 | Command | What it does |
 |---|---|
 | `make build` / `make install` | build `bin/sheaf` / install into `$GOBIN` (`VERSION=` stamps the version) |
+| `make clean` | remove `bin/` (the build outputs) |
 | `make test` | `go test -race ./...` |
 | `make vet` | `go vet` and staticcheck (pinned version, run with `go run`, not a module dependency) |
 | `make vet-windows` | the same for `GOOS=windows` (Windows is refused at runtime but must compile) |

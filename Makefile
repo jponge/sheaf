@@ -1,7 +1,7 @@
 VERSION ?= dev
 LDFLAGS := -X github.com/jponge/sheaf/internal/cli.Version=$(VERSION)
 
-.PHONY: build install test test-shells test-symlinked-tmp vet vet-windows demo demo-check
+.PHONY: build install clean test test-shells test-symlinked-tmp vet vet-windows demo demo-check
 
 # staticcheck runs at a pinned version through `go run` (downloaded into the
 # module cache on first use): it is a tool, not a dependency of the module.
@@ -13,6 +13,11 @@ build:
 # Installs sheaf into $GOBIN (default: $(go env GOPATH)/bin).
 install:
 	go install -ldflags "$(LDFLAGS)" ./cmd/sheaf
+
+# Removes the build outputs: bin/ (sheaf, and the demo's Linux build and
+# video).
+clean:
+	rm -rf bin
 
 test:
 	go test -race ./...

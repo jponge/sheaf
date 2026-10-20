@@ -751,6 +751,7 @@ These commands accept `--json`; each document has a `"version": 1` field.
 
 ```sh
 make build                           # bin/sheaf (VERSION=... to stamp)
+make clean                           # remove bin/
 make test                            # go test -race ./...
 make vet                             # go vet ./... and staticcheck (pinned, run with go run)
 make vet-windows                     # the same for the Windows build (GOOS=windows)
