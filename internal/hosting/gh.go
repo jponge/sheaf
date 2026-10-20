@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,9 @@ var (
 	// ErrGHNotAuthenticated means gh has no credentials (exit code 4, see
 	// `gh help exit-codes`) or the service rejected them.
 	ErrGHNotAuthenticated = errors.New("gh is not authenticated")
+	// ErrGHCredentialsRejected means the service rejected gh's credentials
+	// (HTTP 401, e.g. an expired GH_TOKEN); it wraps ErrGHNotAuthenticated.
+	ErrGHCredentialsRejected = fmt.Errorf("gh's credentials were rejected: %w", ErrGHNotAuthenticated)
 	// ErrPossiblyTruncated is returned by ListRepos, together with the result
 	// trimmed to Limit, when gh returned more than Limit repositories (Limit+1 is
 	// requested to make this exact).
@@ -89,8 +93,10 @@ func childEnv() []string {
 	return append(env, "GH_PROMPT_DISABLED=1", "NO_COLOR=1", "GH_PAGER=cat", "CLICOLOR_FORCE=0")
 }
 
-// notFoundMarkers are substrings of the stderr gh prints for a missing
-// repository, pull request or owner. Verified against real gh output on
+// notFoundAnswers match the whole stderr gh prints for a missing
+// repository, pull request or owner, and nothing else: a not-found message
+// joined to another error (e.g. SAML enforcement, a rate limit) is not
+// taken for a missing repository. Verified against real gh output on
 // 2026-10-14 (the gh version on the recording machine is unknown):
 //
 //	repo view: GraphQL: Could not resolve to a Repository with the name 'o/n'. (repository)
@@ -101,15 +107,20 @@ func childEnv() []string {
 // v2.102.0), for `gh pr view <branch>` without a pull request of that head:
 //
 //	no pull requests found for branch "feat"
-var notFoundMarkers = []string{
-	"Could not resolve to a",
-	"was not recognized as either a GitHub user or an organization",
-	"no pull requests found for branch ",
+//
+// The "with the login of" form of the GraphQL message (for an owner) is
+// not recorded: it follows the same pattern.
+var notFoundAnswers = []*regexp.Regexp{
+	regexp.MustCompile(`^(?:GraphQL: )?Could not resolve to an? [A-Za-z]+ with the (?:name|login of) '[^'\n]*'\.(?: \([A-Za-z.]+\))?$`),
+	regexp.MustCompile(`^(?:GraphQL: )?Could not resolve to an? [A-Za-z]+ with the number of [0-9]+\.(?: \([A-Za-z.]+\))?$`),
+	regexp.MustCompile(`^the owner handle "[^"\n]*" was not recognized as either a GitHub user or an organization$`),
+	regexp.MustCompile(`^no pull requests found for branch ".*"$`),
 }
 
+// isNotFound reports whether stderr, trimmed, is one of notFoundAnswers.
 func isNotFound(stderr string) bool {
-	for _, m := range notFoundMarkers {
-		if strings.Contains(stderr, m) {
+	for _, re := range notFoundAnswers {
+		if re.MatchString(stderr) {
 			return true
 		}
 	}
@@ -126,11 +137,9 @@ const ghExitAuth = 4
 //	Try authenticating with:  gh auth login
 const badCredentialsMarker = "HTTP 401: Bad credentials"
 
-func isUnauthenticated(err error, stderr string) bool {
-	if ee, ok := errors.AsType[*exec.ExitError](err); ok && ee.ExitCode() == ghExitAuth {
-		return true
-	}
-	return strings.Contains(stderr, badCredentialsMarker)
+func isUnauthenticated(err error) bool {
+	ee, ok := errors.AsType[*exec.ExitError](err)
+	return ok && ee.ExitCode() == ghExitAuth
 }
 
 // isChdirError reports whether err is the failure to enter the working
@@ -175,18 +184,21 @@ type GHError struct {
 	Args   []string // the arguments of gh
 	Stderr string   // what gh printed on standard error, trimmed
 	// Err is the error of the run (an *exec.ExitError), wrapped in
-	// ErrNotFound or ErrGHNotAuthenticated when gh's answer says so.
+	// ErrNotFound, ErrGHCredentialsRejected or ErrGHNotAuthenticated when
+	// gh's answer says so.
 	Err error
 }
 
 // Error returns one actionable line for the common failures: for
-// ErrGHNotAuthenticated, how to log in; for ErrNotFound, what is missing
-// (see notFoundLine). Other failures name the command and keep the error
+// ErrGHCredentialsRejected, what to check; for ErrGHNotAuthenticated, how
+// to log in; for ErrNotFound, what is missing (see notFoundLine). Other failures name the command and keep the error
 // of the run and gh's standard error.
 func (e *GHError) Error() string {
 	switch {
 	case errors.Is(e.Err, ErrNotFound):
 		return notFoundLine(e.Stderr)
+	case errors.Is(e.Err, ErrGHCredentialsRejected):
+		return "gh's credentials were rejected (" + badCredentialsMarker + "): check GH_TOKEN or GITHUB_TOKEN, or run `gh auth login`"
 	case errors.Is(e.Err, ErrGHNotAuthenticated):
 		return ErrGHNotAuthenticated.Error() + ": run `gh auth login`"
 	}
@@ -201,8 +213,8 @@ func (e *GHError) Unwrap() error { return e.Err }
 
 // notFoundLine returns what is missing according to stderr, gh's answer
 // recognized by isNotFound: no such owner, repository (which may also be
-// one the account cannot see) or pull request; else the first line of
-// stderr (e.g. gh's "no pull requests found for branch ...").
+// one the account cannot see) or pull request; else stderr (gh's "no pull
+// requests found for branch ...").
 func notFoundLine(stderr string) string {
 	switch {
 	case strings.Contains(stderr, "Could not resolve to a RepositoryOwner"),
@@ -213,8 +225,7 @@ func notFoundLine(stderr string) string {
 	case strings.Contains(stderr, "Could not resolve to a PullRequest"):
 		return "no such pull request on GitHub"
 	}
-	l, _, _ := strings.Cut(stderr, "\n")
-	return l
+	return stderr
 }
 
 // failure returns the error of the gh command args whose run ended with
@@ -234,7 +245,9 @@ func (g *GH) failure(ctx context.Context, args []string, err error, stderr strin
 	wrapped := err
 	if isNotFound(msg) {
 		wrapped = fmt.Errorf("%w: %w", ErrNotFound, err)
-	} else if isUnauthenticated(err, msg) {
+	} else if strings.Contains(msg, badCredentialsMarker) {
+		wrapped = fmt.Errorf("%w: %w", ErrGHCredentialsRejected, err)
+	} else if isUnauthenticated(err) {
 		wrapped = fmt.Errorf("%w: %w", ErrGHNotAuthenticated, err)
 	}
 	return &GHError{Args: args, Stderr: msg, Err: wrapped}

@@ -146,6 +146,45 @@ func TestGHDefaultUnusableWarnsOncePerCommand(t *testing.T) {
 	}
 }
 
+// The warning for gh without credentials keeps what gh said, from the gh
+// adapter's error (whose text is one line, see hosting.GHError), and tells
+// rejected credentials (HTTP 401, e.g. an expired GH_TOKEN) apart from
+// missing ones: logging in is not the fix when GH_TOKEN is set.
+func TestGHDefaultUnauthenticatedWarningKeepsGHText(t *testing.T) {
+	t.Parallel()
+	const tail = "; not tried for the other repositories of this command; gh commands run in their checkouts (e.g. `gh pr list`) may ask which repository to use; fix: "
+	exit := errors.New("exit status 4")
+	for name, c := range map[string]struct {
+		err  error
+		want string
+	}{
+		"no credentials": {&hosting.GHError{Args: []string{"repo", "set-default", "o/a"},
+			Stderr: "To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.",
+			Err:    fmt.Errorf("%w: %w", hosting.ErrGHNotAuthenticated, exit)},
+			"warning: gh default repository not set: gh is not authenticated (To get started with GitHub CLI, please run:  gh auth login)" + tail +
+				"run `gh auth login`, then run `sheaf adopt --recheck --all`"},
+		"rejected credentials": {&hosting.GHError{Args: []string{"repo", "set-default", "o/a"},
+			Stderr: "HTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login",
+			Err:    fmt.Errorf("%w: %w", hosting.ErrGHCredentialsRejected, exit)},
+			"warning: gh default repository not set: gh's credentials were rejected (HTTP 401: Bad credentials (https://api.github.com/graphql))" + tail +
+				"check GH_TOKEN or GITHUB_TOKEN, or run `gh auth login`, then run `sheaf adopt --recheck --all`"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture(t)
+			f.repo(t, "o", "a", "main", false)
+			f.fake.DefaultRepoErr = c.err
+			rec := &recorder{}
+			if s, err := Add(context.Background(), f.w, f.fake, AddRequest{Slugs: []string{"o/a"}}, 1, rec); err != nil || s.Err() != nil {
+				t.Fatalf("add: %+v, %v", s, err)
+			}
+			if w := messagesWith(rec.events, "gh default repository"); len(w) != 1 || w[0] != c.want {
+				t.Fatalf("warnings %q\nwant %q", w, c.want)
+			}
+		})
+	}
+}
+
 // A failure specific to a repository (e.g. no remote gh recognises) is
 // warned about for that repository, with the fix, and does not stop the
 // other repositories.

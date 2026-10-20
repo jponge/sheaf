@@ -86,6 +86,9 @@ func (g *ghDefaults) set(ctx context.Context, primary string, entry bundle.Repos
 	switch {
 	case errors.Is(err, hosting.ErrGHNotFound):
 		why, fix = "gh not found", "install the GitHub CLI from https://cli.github.com/ and run `gh auth login`"
+	case errors.Is(err, hosting.ErrGHCredentialsRejected):
+		why, fix = "gh's credentials were rejected", "check GH_TOKEN or GITHUB_TOKEN, or run `gh auth login`"
+		why += " (" + ghDetail(err) + ")"
 	case errors.Is(err, hosting.ErrGHNotAuthenticated):
 		why, fix = "gh is not authenticated", "run `gh auth login`"
 		if d := ghDetail(err); !strings.Contains(d, hosting.ErrGHNotAuthenticated.Error()) {
@@ -104,9 +107,13 @@ func (g *ghDefaults) set(ctx context.Context, primary string, entry bundle.Repos
 		fix + ", then run `sheaf adopt --recheck --all`"})
 }
 
-// ghDetail returns what gh said in err (the text after "exit status <n>: "
-// in the gh adapter's errors), else the first line of err.
+// ghDetail returns the first line of what gh said in err (the stderr of
+// a *hosting.GHError, else the text after "exit status <n>: "), else the
+// first line of err.
 func ghDetail(err error) string {
+	if ge, ok := errors.AsType[*hosting.GHError](err); ok && ge.Stderr != "" {
+		return firstLineOf(ge.Stderr)
+	}
 	s := firstLineOf(err.Error())
 	if i := strings.Index(s, "exit status "); i >= 0 {
 		if _, after, ok := strings.Cut(s[i:], ": "); ok && after != "" {

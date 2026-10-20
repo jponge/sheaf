@@ -414,6 +414,7 @@ func TestGHNotFoundMapped(t *testing.T) {
 func TestGHErrorsOneLine(t *testing.T) {
 	const (
 		authLine = "gh is not authenticated: run `gh auth login`"
+		rejected = "gh's credentials were rejected (HTTP 401: Bad credentials): check GH_TOKEN or GITHUB_TOKEN, or run `gh auth login`"
 		repoMsg  = "GraphQL: Could not resolve to a Repository with the name 'o/nope'. (repository)"
 		prMsg    = "GraphQL: Could not resolve to a PullRequest with the number of 7. (repository.pullRequest)"
 		ownerMsg = `the owner handle "nobody" was not recognized as either a GitHub user or an organization`
@@ -432,7 +433,7 @@ func TestGHErrorsOneLine(t *testing.T) {
 		{"pr view, no credentials", "pr view", resp{stderr: unauthenticatedStderr, code: 4},
 			func(g *GH) error { _, err := g.PR(ctx, "o", "r", 7); return err }, authLine, ErrGHNotAuthenticated},
 		{"repo list, bad credentials", "repo list", resp{stderr: badCredentialsStderr, code: 1},
-			func(g *GH) error { _, err := g.ListRepos(ctx, "o"); return err }, authLine, ErrGHNotAuthenticated},
+			func(g *GH) error { _, err := g.ListRepos(ctx, "o"); return err }, rejected, ErrGHCredentialsRejected},
 		{"api user, no credentials", "api user", resp{stderr: unauthenticatedStderr, code: 4},
 			func(g *GH) error { _, err := g.CurrentUser(ctx); return err }, authLine, ErrGHNotAuthenticated},
 		{"no such repository", "repo view", resp{stderr: repoMsg, code: 1},
@@ -447,15 +448,11 @@ func TestGHErrorsOneLine(t *testing.T) {
 			func(g *GH) error { _, err := g.ListRepos(ctx, "nobody"); return err }, "no such user or organization on GitHub", ErrNotFound},
 		{"no pull request for a branch", "pr view", resp{stderr: branch, code: 1},
 			func(g *GH) error { return g.Browse(ctx, "o", "r", Page{Head: "feat"}) }, branch, ErrNotFound},
-		// Not a recorded answer: another "Could not resolve to a" keeps
-		// gh's first line only.
-		{"other not found answer", "repo view", resp{stderr: "GraphQL: Could not resolve to a Thing. (x)\nmore", code: 1},
-			func(g *GH) error { _, err := g.Repo(ctx, "o", "r"); return err }, "GraphQL: Could not resolve to a Thing. (x)", ErrNotFound},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			path, _ := stubGH(t, map[string]resp{c.cmd: c.r})
 			err := c.call(NewGH(GHOptions{Path: path, Protocol: "ssh"}))
-			if err == nil || err.Error() != c.want || !errors.Is(err, c.kind) {
+			if err == nil || err.Error() != c.want || !errors.Is(err, c.kind) || c.kind == ErrGHCredentialsRejected && !errors.Is(err, ErrGHNotAuthenticated) {
 				t.Fatalf("err = %q, want %q wrapping %v", err, c.want, c.kind)
 			}
 			ge, ok := errors.AsType[*GHError](err)
@@ -464,10 +461,23 @@ func TestGHErrorsOneLine(t *testing.T) {
 			}
 		})
 	}
-	path, _ := stubGH(t, map[string]resp{"repo view": {stderr: "HTTP 502: Bad Gateway", code: 1}})
-	_, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).Repo(ctx, "o", "r")
-	if want := "gh repo view o/r --json " + repoFields + ": exit status 1: HTTP 502: Bad Gateway"; err == nil || err.Error() != want {
-		t.Fatalf("other failure: err = %q, want %q", err, want)
+	// Other failures keep their full text; so does a not-found answer
+	// that is not gh's whole answer (not recorded from a real gh: e.g. a
+	// SAML enforcement error joined to it, whose hint must not be lost),
+	// which is then not ErrNotFound either.
+	for _, stderr := range []string{
+		"HTTP 502: Bad Gateway",
+		"GraphQL: Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization. (repository), Could not resolve to a Repository with the name 'o/r'. (repository)",
+		"GraphQL: Could not resolve to a Repository with the name 'o/r'. (repository)\nAPI rate limit exceeded",
+		"GraphQL: Could not resolve to a Thing. (x)",
+		"GraphQL: Could not resolve to a PullRequest with the number of 7. (repository.pullRequest), Resource protected by organization SAML enforcement.",
+		`the owner handle "x" was not recognized as either a GitHub user or an organization; API rate limit exceeded`,
+	} {
+		path, _ := stubGH(t, map[string]resp{"repo view": {stderr: stderr, code: 1}})
+		_, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).Repo(ctx, "o", "r")
+		if want := "gh repo view o/r --json " + repoFields + ": exit status 1: " + stderr; err == nil || err.Error() != want || errors.Is(err, ErrNotFound) {
+			t.Errorf("other failure: err = %q, want %q, not ErrNotFound", err, want)
+		}
 	}
 }
 
