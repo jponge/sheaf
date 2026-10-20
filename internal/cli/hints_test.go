@@ -66,8 +66,9 @@ func hintArgs(t *testing.T, s string) []string {
 
 // The commands that hints print do what they say when run: each step runs
 // the hint of the previous one (B52 U1 review). A refusal of a command
-// confirmed with --yes prints hints with --yes: pasted, they run as stated
-// and remove exactly their target (B59).
+// confirmed with --yes prints --force hints with --yes and the bundle:
+// pasted, they run as stated and remove exactly their target; its --offline
+// hint has neither, so the offline plan is confirmed again (B59).
 func TestHintCommandsRun(t *testing.T) {
 	t.Parallel()
 	e, root := worktreeBundle(t)
@@ -76,7 +77,7 @@ func TestHintCommandsRun(t *testing.T) {
 	writeFile(t, filepath.Join(work, "untracked.txt"), "u\n")
 	// wt rm: refused (untracked file), then --force --yes, done.
 	_, errs, code := e.run(t, "wt", "rm", "a", "work", "--yes")
-	if code == 0 || !exists(work) || !strings.Contains(errs, "run: sheaf wt rm --force --dir work --yes -- a\n") {
+	if code == 0 || !exists(work) || !strings.Contains(errs, "run: sheaf --bundle "+root+" wt rm --force --dir work --yes -- a\n") {
 		t.Fatalf("wt rm: exit %d\n%s", code, errs)
 	}
 	e.mustRun(t, hintArgs(t, errs)...)
@@ -85,18 +86,22 @@ func TestHintCommandsRun(t *testing.T) {
 	}
 	// wt rm of a dirty worktree with a failed fetch: refused (hard
 	// problem, no --force hint), then --offline is refused (untracked
-	// file), then --force --offline, done.
+	// file), then --force --offline needs --yes, then done.
 	writeFile(t, filepath.Join(other, "untracked.txt"), "u\n")
 	third := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "third", "--no-fetch"))
 	testutil.Git(t, filepath.Join(root, "a", "main"), "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone.git"))
 	_, errs, code = e.run(t, "wt", "rm", "a", "other", "--yes")
 	if code == 0 || !strings.Contains(errs, "fetch failed") || strings.Contains(errs, "run: sheaf wt rm --force") ||
-		!strings.Contains(errs, "run: sheaf wt rm --offline --dir other --yes -- a\n") {
+		!strings.Contains(errs, "run: sheaf wt rm --offline --dir other -- a\n") {
 		t.Fatalf("wt rm, fetch failed: exit %d\n%s", code, errs)
 	}
 	_, errs, code = e.run(t, hintArgs(t, errs)...)
-	if code == 0 || !strings.Contains(errs, "untracked") || !strings.Contains(errs, "run: sheaf wt rm --force --offline --dir other --yes -- a\n") {
+	if code == 0 || !strings.Contains(errs, "untracked") || !strings.Contains(errs, "run: sheaf wt rm --force --offline --dir other -- a\n") {
 		t.Fatalf("hint of the fetch failure: exit %d\n%s", code, errs)
+	}
+	_, errs, code = e.run(t, hintArgs(t, errs)...)
+	if code == 0 || !strings.Contains(errs, "needs confirmation") {
+		t.Fatalf("hint of the offline refusal: exit %d\n%s", code, errs)
 	}
 	e.mustRun(t, hintArgs(t, errs)...)
 	if exists(other) || !exists(third) {
@@ -105,12 +110,104 @@ func TestHintCommandsRun(t *testing.T) {
 	// remove: refused (dirty), then --force --yes, done.
 	writeFile(t, filepath.Join(root, "b", "main", "untracked.txt"), "u\n")
 	_, errs, code = e.run(t, "remove", "b", "--yes")
-	if code == 0 || !strings.Contains(errs, "run: sheaf remove --force --yes -- b\n") {
+	if code == 0 || !strings.Contains(errs, "run: sheaf --bundle "+root+" remove --force --yes -- b\n") {
 		t.Fatalf("remove: exit %d\n%s", code, errs)
 	}
 	e.mustRun(t, hintArgs(t, errs)...)
 	if exists(filepath.Join(root, "b")) || !exists(filepath.Join(root, "a", "main")) || !exists(third) {
 		t.Fatal("the hint did not remove exactly b")
+	}
+}
+
+// The --offline hint of a failed fetch never carries --yes, even when the
+// refused command had it: offline, the stale remote-tracking refs that the
+// fetch could not refresh count, so a branch deleted on the remote looks
+// pushed (or merged into its own stale upstream). Pasted, the hint must stop
+// at the confirmation rather than delete it (B59 review: data loss).
+func TestOfflineHintOfAFailedFetchNeedsConfirmation(t *testing.T) {
+	t.Parallel()
+	e, root := worktreeBundle(t)
+	// topic: one commit, pushed, then deleted on the remote; the clones
+	// keep a stale origin/topic. origin is then unreachable (state unknown,
+	// not gone: no transport for the scheme, no network).
+	stale := func(repo string) string {
+		primary := filepath.Join(root, repo, "main")
+		bare := strings.TrimPrefix(strings.TrimSpace(testutil.Git(t, primary, "remote", "get-url", "origin")), "file://")
+		testutil.Git(t, primary, "branch", "topic")
+		testutil.CommitFile(t, primary, "f.txt", "f\n", "topic work") // on main: moved to topic below
+		testutil.Git(t, primary, "branch", "-f", "topic", "HEAD")
+		testutil.Git(t, primary, "reset", "-q", "--hard", "HEAD~1")
+		testutil.Git(t, primary, "push", "-q", "origin", "topic")
+		testutil.Git(t, primary, "fetch", "-q", "origin")
+		testutil.Git(t, bare, "branch", "-q", "-D", "topic")
+		testutil.Git(t, primary, "branch", "--set-upstream-to=origin/topic", "topic")
+		testutil.Git(t, primary, "remote", "set-url", "origin", "sheaf-no-such-transport://example.invalid/"+repo+".git")
+		return primary
+	}
+	// remove: the unpushed topic would count as pushed offline.
+	stale("a")
+	_, errs, code := e.run(t, "remove", "a", "--yes")
+	if code == 0 || !strings.Contains(errs, "fetch failed") {
+		t.Fatalf("remove: exit %d\n%s", code, errs)
+	}
+	hint := errs
+	_, errs, code = e.run(t, hintArgs(t, hint)...)
+	if code == 0 || !strings.Contains(errs, "needs confirmation") || !exists(filepath.Join(root, "a", "main")) {
+		t.Fatalf("pasted --offline hint: exit %d, a exists %v\n%s", code, exists(filepath.Join(root, "a", "main")), errs)
+	}
+	if !strings.HasSuffix(hint, "run: sheaf remove --offline -- a\n") {
+		t.Fatalf("remove: hint\n%s", hint)
+	}
+	// wt rm -d: topic would count as merged into its stale upstream offline.
+	primary := stale("b")
+	e.mustRun(t, "wt", "add", "b", "topic", "--no-fetch")
+	_, errs, code = e.run(t, "wt", "rm", "-d", "b", "topic", "--yes")
+	if code == 0 || !strings.Contains(errs, "fetch failed") {
+		t.Fatalf("wt rm -d: exit %d\n%s", code, errs)
+	}
+	hint = errs
+	_, errs, code = e.run(t, hintArgs(t, hint)...)
+	if code == 0 || !strings.Contains(errs, "needs confirmation") || testutil.Git(t, primary, "branch", "--list", "topic") == "" {
+		t.Fatalf("pasted --offline hint: exit %d, branch topic deleted\n%s", code, errs)
+	}
+	if !strings.HasSuffix(hint, "run: sheaf wt rm -d --offline --dir topic -- b\n") {
+		t.Fatalf("wt rm -d: hint\n%s", hint)
+	}
+}
+
+// A hint with --yes names the bundle even without --bundle: pasted in
+// another bundle that has a repository of the same name, it acts on the
+// bundle that printed it, never on that other one (B59).
+func TestYesHintsActOnTheirBundle(t *testing.T) {
+	t.Parallel()
+	e, root := worktreeBundle(t)
+	work := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "work", "--no-fetch"))
+	writeFile(t, filepath.Join(work, "untracked.txt"), "u\n")
+	writeFile(t, filepath.Join(root, "b", "main", "untracked.txt"), "u\n")
+	root2 := filepath.Join(t.TempDir(), "other")
+	e.mustRun(t, "create", root2)
+	root2, _ = filepath.EvalSymlinks(root2)
+	e.cwd = root2
+	e.mustRun(t, "add", "o/a", "o/b")
+	work2 := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "work", "--no-fetch"))
+	writeFile(t, filepath.Join(work2, "untracked.txt"), "u\n")
+	for _, tc := range []struct {
+		args       []string
+		gone, kept string
+	}{
+		{[]string{"wt", "rm", "a", "work", "--yes"}, work, work2},
+		{[]string{"remove", "b", "--yes"}, filepath.Join(root, "b"), filepath.Join(root2, "b", "main")},
+	} {
+		e.cwd = root
+		_, errs, code := e.run(t, tc.args...)
+		if code == 0 || !strings.Contains(errs, "run: sheaf --bundle "+root+" ") {
+			t.Fatalf("%v: exit %d\n%s", tc.args, code, errs)
+		}
+		e.cwd = root2
+		e.mustRun(t, hintArgs(t, errs)...)
+		if exists(tc.gone) || !exists(tc.kept) {
+			t.Fatalf("%v pasted in the other bundle: %s exists %v, %s exists %v", tc.args, tc.gone, exists(tc.gone), tc.kept, exists(tc.kept))
+		}
 	}
 }
 
@@ -149,9 +246,9 @@ func TestTUIRefusalHintsOmitYes(t *testing.T) {
 	}
 }
 
-// prune --yes keeps a dirty worktree with a hint that repeats --yes; the
-// pasted hint refuses with its own --force --yes hint, which removes exactly
-// that worktree (B59).
+// prune --yes keeps a dirty worktree with a hint that repeats --yes (and
+// names the bundle); the pasted hint refuses with its own --force --yes
+// hint, which removes exactly that worktree (B59).
 func TestPruneHintsRunWithYes(t *testing.T) {
 	t.Parallel()
 	e, root, _ := pruneBundle(t)
@@ -159,11 +256,11 @@ func TestPruneHintsRunWithYes(t *testing.T) {
 	keep := strings.TrimSpace(e.mustRun(t, "wt", "add", "a", "keep", "--no-fetch"))
 	writeFile(t, filepath.Join(feat, "untracked.txt"), "u\n")
 	out, errs, _ := e.run(t, "prune", "--yes")
-	if !strings.Contains(out+errs, "review it, then run: sheaf wt rm --dir feat --yes -- a\n") || !exists(feat) {
+	if !strings.Contains(out+errs, "review it, then run: sheaf --bundle "+root+" wt rm --dir feat --yes -- a\n") || !exists(feat) {
 		t.Fatalf("prune --yes: stdout\n%s\nstderr\n%s", out, errs)
 	}
 	_, errs, code := e.run(t, hintArgs(t, out+errs)...)
-	if code == 0 || !strings.HasSuffix(errs, "run: sheaf wt rm --force --dir feat --yes -- a\n") {
+	if code == 0 || !strings.HasSuffix(errs, "run: sheaf --bundle "+root+" wt rm --force --dir feat --yes -- a\n") {
 		t.Fatalf("hint of prune: exit %d\n%s", code, errs)
 	}
 	e.mustRun(t, hintArgs(t, errs)...)
@@ -172,10 +269,11 @@ func TestPruneHintsRunWithYes(t *testing.T) {
 	}
 }
 
-// sync --remove-gone (always confirmed with --yes) refuses a gone
-// repository whose remote is gone with a remove hint that repeats --yes;
-// pasted, it removes exactly that repository (B59).
-func TestSyncRemoveGoneHintRunsWithYes(t *testing.T) {
+// sync --remove-gone refuses a gone repository whose remote is gone with a
+// remove hint without --yes: sync's --yes confirmed removing gone
+// repositories, not forcing past their risks; pasted, the hint asks for
+// confirmation (B59).
+func TestSyncRemoveGoneHintOmitsYes(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	o := e.origin(t, "o", "a", false)
@@ -191,12 +289,12 @@ func TestSyncRemoveGoneHintRunsWithYes(t *testing.T) {
 	e.fake = hostingtest.NewFake()
 	e.origin(t, "o", "c", false)
 	out, errs, code := e.run(t, "sync", "--remove-gone", "--yes")
-	if code != 1 || !strings.Contains(errs, "run: sheaf remove --force --yes -- a\n") {
+	if code != 1 || !strings.Contains(errs, "run: sheaf remove --force -- a\n") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out, errs)
 	}
-	e.mustRun(t, hintArgs(t, errs)...)
-	if exists(filepath.Join(root, "a")) || !exists(filepath.Join(root, "c", "main")) {
-		t.Fatal("the hint did not remove exactly a")
+	_, errs, code = e.run(t, hintArgs(t, errs)...)
+	if code == 0 || !strings.Contains(errs, "needs confirmation") || !exists(filepath.Join(root, "a", "main")) {
+		t.Fatalf("pasted hint: exit %d\n%s", code, errs)
 	}
 }
 

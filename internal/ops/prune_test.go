@@ -233,12 +233,13 @@ func TestPlanPruneSkipsPullRequestBranches(t *testing.T) {
 		!strings.HasSuffix(s.Reason, "; to remove its worktree, run: sheaf wt rm --dir pr-9 -- a") {
 		t.Fatalf("skip = %+v, %v", s, ok)
 	}
-	// Confirmed with --yes in plain mode, the hint repeats it (B59).
+	// Not with --yes even when prune had it: prune never covers these
+	// worktrees (B59).
 	plan, err := PlanPrune(WithHintYes(context.Background()), f.w, PruneOptions{IncludeBranches: true, WorkingDir: f.w.Root}, Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s, ok := skipFor(plan, "pr/9"); !ok || !strings.HasSuffix(s.Reason, "; to remove its worktree, run: sheaf wt rm --dir pr-9 --yes -- a") {
+	if s, ok := skipFor(plan, "pr/9"); !ok || !strings.HasSuffix(s.Reason, "; to remove its worktree, run: sheaf wt rm --dir pr-9 -- a") {
 		t.Fatalf("skip with --yes = %+v, %v", s, ok)
 	}
 }

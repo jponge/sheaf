@@ -204,7 +204,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 				Remove:           ops.RemoveOptions{Force: fl.force, WorkingDir: wd, Confirm: func(ops.RemovePlan) bool { return true }, Interactive: interactive},
 				AllowMassRemoval: fl.allowMass,
 			}
-			errs = append(errs, printSummary(out, ops.SyncRemoveGone(plainHintContext(c, true), w, gone, opts, OptionsFrom(c).Jobs, r)))
+			errs = append(errs, printSummary(out, ops.SyncRemoveGone(ctx, w, gone, opts, OptionsFrom(c).Jobs, r)))
 		}
 	}
 	return errors.Join(errs...)

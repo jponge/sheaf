@@ -792,6 +792,7 @@ type WorktreeRefusedError struct {
 	DeleteBranch, Offline bool
 	bundle                string // of hints (see WithHintBundle)
 	yes                   bool   // --yes in the commands of hints (see WithHintYes)
+	root                  string // the resolved bundle root, named by the hints with --yes
 }
 
 func (e *WorktreeRefusedError) Error() string {
@@ -910,11 +911,8 @@ func (e *WorktreeRefusedError) command(force, forceDelete, offline bool) string 
 	if offline || e.Offline {
 		args = append(args, "--offline")
 	}
-	args = append(args, "--dir", e.Plan.Worktree.Dir)
-	if e.yes {
-		args = append(args, "--yes")
-	}
-	return commandLineIn(e.bundle, append(args, "--", e.Plan.Repo)...)
+	// Never --yes in the --offline hint: see WithHintYes.
+	return hintCommand(e.yes && !offline, e.bundle, e.root, append(args, "--dir", e.Plan.Worktree.Dir, "--", e.Plan.Repo)...)
 }
 
 // RemoveWorktree removes the linked worktree of repo named by target (its
@@ -963,7 +961,7 @@ func RemoveWorktree(ctx context.Context, w *Workspace, repo string, tgt Worktree
 		return "", err
 	}
 	if x.plan.Refused(opts) {
-		return "", x.refusal(ctx, opts)
+		return "", x.refusal(ctx, w.Root, opts)
 	}
 	if opts.Confirm == nil || !opts.Confirm(x.plan) {
 		return "", fmt.Errorf("%w: worktree %s", ErrNotConfirmed, x.wt.Path)
@@ -1130,10 +1128,11 @@ func (x *worktreeRemoval) planFirst(ctx context.Context) error {
 	return nil
 }
 
-// refusal is the error of a plan refused with opts.
-func (x *worktreeRemoval) refusal(ctx context.Context, opts WorktreeRemoveOptions) *WorktreeRefusedError {
+// refusal is the error of a plan refused with opts, in the bundle of
+// resolved root root.
+func (x *worktreeRemoval) refusal(ctx context.Context, root string, opts WorktreeRemoveOptions) *WorktreeRefusedError {
 	return &WorktreeRefusedError{Plan: x.plan, Force: opts.Force, ForceDeleteBranch: opts.ForceDeleteBranch,
-		DeleteBranch: opts.DeleteBranch, Offline: opts.Offline, bundle: hintBundle(ctx), yes: hintYes(ctx)}
+		DeleteBranch: opts.DeleteBranch, Offline: opts.Offline, bundle: hintBundle(ctx), yes: hintYes(ctx), root: root}
 }
 
 // apply removes the confirmed worktree (see RemoveWorktree): under the

@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"slices"
 	"strings"
 )
 
@@ -29,11 +30,16 @@ func hintBundle(ctx context.Context) string {
 type hintYesKey struct{}
 
 // WithHintYes returns ctx with --yes repeated in the commands of the hints
-// that run the refused removal again (with --force, --offline, -D) or
-// another removal (see CommandLine): set by a command confirmed with --yes
-// in plain mode, so that a pasted hint runs as stated instead of asking
-// for --yes. TUI mode does not set it: the pasted command then shows its
-// confirmation dialog.
+// that run the refused removal again with --force or -D, or that run prune
+// again (see hintCommand): set by a command confirmed with --yes in plain
+// mode, so that a pasted hint runs as stated instead of asking for --yes.
+// TUI mode does not set it: the pasted command then shows its confirmation
+// dialog. Never repeated: in --offline hints (offline, the stale refs that
+// a failed fetch could not refresh count, so the plan must be confirmed
+// again), in hints about worktrees the refused command did not cover (pull
+// request and tag worktrees of prune), in the remove hints of sync
+// --remove-gone (its --yes confirmed removing gone repositories, not
+// forcing past their risks), and in the remove hint for a primary checkout.
 func WithHintYes(ctx context.Context) context.Context {
 	return context.WithValue(ctx, hintYesKey{}, true)
 }
@@ -45,13 +51,31 @@ func hintYes(ctx context.Context) bool {
 	return yes
 }
 
-// withYes returns args with --yes appended when ctx has it (see
-// WithHintYes).
-func withYes(ctx context.Context, args ...string) []string {
-	if hintYes(ctx) {
-		return append(args, "--yes")
+// hintCommand returns the command line of args (see commandLineIn) with
+// bundle as the bundle of hints. With yes, --yes is added before the "--"
+// of args (at the end without one), and the bundle is named even when the
+// user did not give --bundle (root, the resolved bundle root, when bundle
+// is ""): pasted in another bundle with a repository of the same name, a
+// command that needs no confirmation must still act on this bundle.
+func hintCommand(yes bool, bundle, root string, args ...string) string {
+	if !yes {
+		return commandLineIn(bundle, args...)
 	}
-	return args
+	i := slices.Index(args, "--")
+	if i < 0 {
+		i = len(args)
+	}
+	args = slices.Concat(args[:i], []string{"--yes"}, args[i:])
+	if bundle == "" {
+		bundle = root
+	}
+	return commandLineIn(bundle, args...)
+}
+
+// confirmedCommandLine is CommandLine of args with --yes and the bundle
+// root when ctx has --yes (see WithHintYes, hintCommand).
+func confirmedCommandLine(ctx context.Context, root string, args ...string) string {
+	return hintCommand(hintYes(ctx), hintBundle(ctx), root, args...)
 }
 
 // CommandLine returns the sheaf command line of args, each one quoted for

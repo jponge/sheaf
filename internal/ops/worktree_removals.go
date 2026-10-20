@@ -135,7 +135,7 @@ func RemoveWorktrees(ctx context.Context, w *Workspace, items []WorktreeRemoval,
 			p := x.plan
 			out[i].Plan = &p
 			if x.plan.Refused(opts) {
-				out[i].Err = x.refusal(ctx, opts)
+				out[i].Err = x.refusal(ctx, w.Root, opts)
 				wait(i, "refused; waiting for the confirmation of the others")
 			} else {
 				wait(i, "waiting for the confirmation")

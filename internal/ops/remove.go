@@ -92,6 +92,7 @@ type RisksError struct {
 	Offline bool
 	bundle  string // of hints (see WithHintBundle)
 	yes     bool   // --yes in the commands of hints (see WithHintYes)
+	root    string // the resolved bundle root, named by the hints with --yes
 }
 
 func (e *RisksError) Error() string {
@@ -165,10 +166,8 @@ func (e *RisksError) command(flag string) string {
 	if flag == "--offline" || e.Offline {
 		args = append(args, "--offline")
 	}
-	if e.yes {
-		args = append(args, "--yes")
-	}
-	return commandLineIn(e.bundle, append(args, "--", e.Plan.Repo)...)
+	// Never --yes in the --offline hint: see WithHintYes.
+	return hintCommand(e.yes && flag != "--offline", e.bundle, e.root, append(args, "--", e.Plan.Repo)...)
 }
 
 // Remove deletes the repository name from the bundle: its linked worktrees
@@ -303,7 +302,7 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 		if err := nameUnpushedBranches(ctx, &plan, rs, distrust, published); err != nil {
 			return "", err
 		}
-		return "", &RisksError{Plan: plan, Force: opts.Force, Offline: opts.Offline, bundle: hintBundle(ctx), yes: hintYes(ctx)}
+		return "", &RisksError{Plan: plan, Force: opts.Force, Offline: opts.Offline, bundle: hintBundle(ctx), yes: hintYes(ctx), root: w.Root}
 	}
 	if opts.Confirm == nil || !opts.Confirm(plan) {
 		return "", fmt.Errorf("%w: %s", ErrNotConfirmed, name)

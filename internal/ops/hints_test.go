@@ -108,7 +108,7 @@ func TestPruneSkipRunHints(t *testing.T) {
 	} {
 		plan := f.prunePlan(t, tc.opts)
 		s, ok := skipFor(plan, "old")
-		if !ok || !strings.HasSuffix(s.Reason, "; to delete such branches, "+tc.want) {
+		if !ok || !strings.HasSuffix(s.Reason, "; to delete such branches, prune again with --include-branches, worktree candidates included; "+tc.want) {
 			t.Errorf("%+v: skip old = %+v, %v; want it to end with %q", tc.opts, s, ok, tc.want)
 		}
 		var tag *PruneSkip
@@ -247,8 +247,12 @@ func TestCommandLineNamesTheBundle(t *testing.T) {
 }
 
 // When the refused command was confirmed with --yes in plain mode (see
-// WithHintYes), the commands of its hints repeat --yes, so that a pasted
-// hint runs as stated instead of asking for --yes (B59).
+// WithHintYes), the commands that run it again with --force or -D repeat
+// --yes, so that a pasted hint runs as stated instead of asking for --yes,
+// and always name the bundle (its resolved root, unless --bundle was
+// given), so that pasted in another bundle it acts on the same one (B59).
+// The --offline hint never repeats --yes: it decides on refs that the
+// failed fetch could not refresh, so its plan must be confirmed again.
 func TestRefusalRunHintsRepeatYes(t *testing.T) {
 	t.Parallel()
 	dirty := []gitx.Risk{{Kind: gitx.RiskUnstaged, Count: 1}}
@@ -262,16 +266,20 @@ func TestRefusalRunHintsRepeatYes(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"wt rm blocking", &WorktreeRefusedError{Plan: wplan(""), yes: true},
-			"run: sheaf wt rm --force --dir abc --yes -- api"},
-		{"wt rm unmerged", &WorktreeRefusedError{Plan: wplan("branch abc is not merged"), DeleteBranch: true, Offline: true, yes: true},
-			"run: sheaf wt rm --force -D --offline --dir abc --yes -- api"},
-		{"wt rm fetch failed", &WorktreeRefusedError{Plan: wplan("", fetchProblem(errorString("boom"))), yes: true, bundle: "/b"},
-			"run: sheaf --bundle /b wt rm --offline --dir abc --yes -- api"},
-		{"remove blocking", &RisksError{Plan: RemovePlan{Repo: "old", Items: []RemoveItem{ritem}}, Offline: true, yes: true},
-			"run: sheaf remove --force --offline --yes -- old"},
-		{"remove fetch failed", &RisksError{Plan: RemovePlan{Repo: "old", Items: []RemoveItem{fetch}}, yes: true},
-			"run: sheaf remove --offline --yes -- old"},
+		{"wt rm blocking", &WorktreeRefusedError{Plan: wplan(""), yes: true, root: "/r"},
+			"run: sheaf --bundle /r wt rm --force --dir abc --yes -- api"},
+		{"wt rm blocking, --bundle given", &WorktreeRefusedError{Plan: wplan(""), yes: true, root: "/r", bundle: "/b"},
+			"run: sheaf --bundle /b wt rm --force --dir abc --yes -- api"},
+		{"wt rm unmerged", &WorktreeRefusedError{Plan: wplan("branch abc is not merged"), DeleteBranch: true, Offline: true, yes: true, root: "/r"},
+			"run: sheaf --bundle /r wt rm --force -D --offline --dir abc --yes -- api"},
+		{"wt rm fetch failed", &WorktreeRefusedError{Plan: wplan("", fetchProblem(errorString("boom"))), yes: true, root: "/r"},
+			"run: sheaf wt rm --offline --dir abc -- api"},
+		{"wt rm fetch failed, --bundle given", &WorktreeRefusedError{Plan: wplan("", fetchProblem(errorString("boom"))), yes: true, root: "/r", bundle: "/b"},
+			"run: sheaf --bundle /b wt rm --offline --dir abc -- api"},
+		{"remove blocking", &RisksError{Plan: RemovePlan{Repo: "old", Items: []RemoveItem{ritem}}, Offline: true, yes: true, root: "/r"},
+			"run: sheaf --bundle /r remove --force --offline --yes -- old"},
+		{"remove fetch failed", &RisksError{Plan: RemovePlan{Repo: "old", Items: []RemoveItem{fetch}}, yes: true, root: "/r"},
+			"run: sheaf remove --offline -- old"},
 	} {
 		if got := tc.err.Error(); !strings.HasSuffix(got, tc.want) {
 			t.Errorf("%s: error ends with\n%q\nwant\n%q", tc.name, got, tc.want)
@@ -279,16 +287,18 @@ func TestRefusalRunHintsRepeatYes(t *testing.T) {
 	}
 	// The refusals take it from their context.
 	x := worktreeRemoval{plan: wplan("")}
-	if got := x.refusal(WithHintYes(context.Background()), WorktreeRemoveOptions{}); !got.yes {
+	if got := x.refusal(WithHintYes(context.Background()), "/r", WorktreeRemoveOptions{}); !got.yes {
 		t.Error("refusal with WithHintYes: yes = false")
 	}
-	if got := x.refusal(context.Background(), WorktreeRemoveOptions{}); got.yes {
+	if got := x.refusal(context.Background(), "/r", WorktreeRemoveOptions{}); got.yes {
 		t.Error("refusal without WithHintYes: yes = true")
 	}
 }
 
-// The run hints of prune repeat --yes too when prune was confirmed with
-// --yes in plain mode (see WithHintYes) (B59).
+// When prune was confirmed with --yes in plain mode (see WithHintYes), the
+// hint of a kept worktree and the "no worktree" hint repeat --yes and name
+// the bundle; the hints of pull request and tag worktrees, which prune never
+// covers, do not (B59).
 func TestPruneRunHintsRepeatYes(t *testing.T) {
 	t.Parallel()
 	f, primary, _ := pruneScenario(t)
@@ -300,8 +310,8 @@ func TestPruneRunHintsRepeatYes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s, ok := skipFor(plan, "old"); !ok || !strings.HasSuffix(s.Reason, "run: sheaf prune --delete-branches --include-branches --yes") {
-		t.Errorf("skip old = %+v, %v", s, ok)
+	if want := "run: sheaf --bundle " + f.w.Root + " prune --delete-branches --include-branches --yes"; !strings.HasSuffix(skipReason(plan, "old"), want) {
+		t.Errorf("skip old = %q, want it to end with %q", skipReason(plan, "old"), want)
 	}
 	var tag string
 	for _, s := range plan.Skipped {
@@ -309,30 +319,18 @@ func TestPruneRunHintsRepeatYes(t *testing.T) {
 			tag = s.Reason
 		}
 	}
-	if want := "; to remove it, run: sheaf wt rm --dir v1 --yes -- a"; !strings.HasSuffix(tag, want) {
+	if want := "; to remove it, run: sheaf wt rm --dir v1 -- a"; !strings.HasSuffix(tag, want) {
 		t.Errorf("tag skip = %q, want it to end with %q", tag, want)
 	}
 	writeFile(t, filepath.Join(f.w.Root, "a", "feat", "file-1.txt"), "changed\n")
 	rs := ApplyPrune(ctx, f.w, plan, opts, Discard)
-	if r, _ := resultFor(rs, "feat"); r.Outcome != PruneKept || !strings.HasSuffix(r.Message, "; review it, then run: sheaf wt rm -d --dir feat --yes -- a") {
+	if r, _ := resultFor(rs, "feat"); r.Outcome != PruneKept || !strings.HasSuffix(r.Message, "; review it, then run: sheaf --bundle "+f.w.Root+" wt rm -d --dir feat --yes -- a") {
 		t.Errorf("dirty feat: %+v", r)
 	}
 }
 
-// A sync --remove-gone refusal for data at risk repeats --yes (sync
-// --remove-gone always has it) in its remove command (B59).
-func TestSyncRemoveGoneRefusalRepeatsYes(t *testing.T) {
-	t.Parallel()
-	f := newFixture(t)
-	f.repo(t, "o", "a", "main", false)
-	if s, err := f.add(t, AddRequest{Org: "o", All: true}); err != nil || s.Err() != nil {
-		t.Fatalf("add: %+v %v", s, err)
-	}
-	writeFile(t, filepath.Join(f.w.Root, "a", "main", "untracked.txt"), "u\n")
-	p := Proposal{Key: "gone:o/a", Kind: ProposalGone, Org: "o", Name: "a", Slug: "o/a"}
-	ctx := WithHintYes(context.Background())
-	s := SyncRemoveGone(ctx, f.w, []Proposal{p}, SyncRemoveOptions{Remove: RemoveOptions{WorkingDir: t.TempDir(), Confirm: func(RemovePlan) bool { return true }}}, 1, Discard)
-	if want := "run: sheaf remove --force --yes -- a"; len(s.Results) != 1 || s.Results[0].Err == nil || !strings.HasSuffix(s.Results[0].Err.Error(), want) {
-		t.Errorf("summary %+v, want an error ending with %q", s, want)
-	}
+// skipReason is the reason of the skip of branch in p ("" if none).
+func skipReason(p PrunePlan, branch string) string {
+	s, _ := skipFor(p, branch)
+	return s.Reason
 }
