@@ -1076,3 +1076,30 @@ func TestTable(t *testing.T) {
 		t.Errorf("unpainted:\n%q", got)
 	}
 }
+
+// An overview without rows shows its empty text (WithEmpty), one line per
+// line of the text, instead of "No rows." (B62 H3), and keeps it within
+// the height of the window; the filter still says "No matches.".
+func TestOverviewEmptyText(t *testing.T) {
+	t.Parallel()
+	const text = "Nothing here: run x\nor run y"
+	if v := view(NewOverview("t", []string{"REPO"}, nil, ovActions())); !strings.Contains(v, "No rows.") {
+		t.Fatalf("default empty text:\n%s", v)
+	}
+	var m tea.Model = NewOverview("t", []string{"REPO"}, nil, ovActions()).WithEmpty(text)
+	v := view(m)
+	if !strings.Contains(v, "\nNothing here: run x\nor run y\n") || strings.Contains(v, "No rows.") {
+		t.Fatalf("empty text:\n%s", v)
+	}
+	full := lineCount(v)
+	for h := 4; h <= full+3; h++ {
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
+		if v := view(m); lineCount(v) > h || !strings.Contains(v, "Nothing here: run x\n") {
+			t.Errorf("height %d: %d lines\n%s", h, lineCount(v), v)
+		}
+	}
+	m = NewOverview("t", []string{"REPO"}, ovRows(), ovActions()).WithEmpty(text).WithFilter("zzz")
+	if v := view(m); !strings.Contains(v, "No matches.") || strings.Contains(v, "Nothing here") {
+		t.Fatalf("filtered:\n%s", v)
+	}
+}

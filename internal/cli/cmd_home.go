@@ -264,6 +264,12 @@ func (h *home) overview() (tui.Overview, error) {
 	slices.SortStableFunc(rows, func(a, b tui.Row) int { return strings.Compare(a.Cells[0], b.Cells[0]) })
 	ov := tui.NewOverview("sheaf: "+h.displayRoot(), []string{"REPO", "DIR", "BRANCH", "AGE", "STATE"}, rows, h.actions())
 	ov = ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithFullHelp(h.fullHelp).WithAltScreen().WithGrouping().WithShrinkable(2, 1)
+	if len(h.bundle.Repositories) == 0 {
+		// What to run in a bundle without repositories (not init: it
+		// refuses a directory that has a sheaf.yaml).
+		ov = ov.WithEmpty("No repositories yet: " + ops.CommandLine(h.s.ctx, "add") + " owner/repo, or " + ops.CommandLine(h.s.ctx, "add", "--org") + " <org>\n" +
+			"Clones already in the bundle: " + ops.CommandLine(h.s.ctx, "adopt") + " <dir>")
+	}
 	if h.s.controls {
 		// Mouse wheel scrolling and hyperlinks, on a terminal that takes
 		// controls (see terminalControls).

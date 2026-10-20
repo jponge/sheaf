@@ -181,6 +181,28 @@ func TestHomeShowsLocalStateAndQuits(t *testing.T) {
 	}
 }
 
+// A bundle without repositories says what to run to add some (B62 H3),
+// with --bundle when it was given; init is not suggested: it refuses a
+// directory that already has a sheaf.yaml.
+func TestHomeEmptyBundleSaysWhatToRun(t *testing.T) {
+	t.Parallel()
+	e := newBundleEnv(t)
+	for _, args := range [][]string{nil, {"--bundle", e.cwd}} {
+		var out syncBuffer
+		errs, code := runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "q")), &out, args...)
+		cmd := "sheaf "
+		if args != nil {
+			cmd += "--bundle " + e.cwd + " "
+		}
+		o := ansi.Strip(out.String())
+		want := []string{"No repositories yet: " + cmd + "add owner/repo, or " + cmd + "add --org <org>",
+			"Clones already in the bundle: " + cmd + "adopt <dir>"}
+		if code != 0 || !strings.Contains(o, want[0]) || !strings.Contains(o, want[1]) || strings.Contains(o, "No rows.") {
+			t.Fatalf("%q: exit %d, want %q\nstdout:\n%s\nstderr:\n%s", args, code, want, o, errs)
+		}
+	}
+}
+
 func TestHomeShowsProblems(t *testing.T) {
 	t.Parallel()
 	e, _, feat, _, _ := homeBundle(t)

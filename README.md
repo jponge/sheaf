@@ -238,6 +238,9 @@ when it opens. Checkouts that cannot be inspected are shown as problem rows.
 Rows are grouped by repository (primary first, problem rows last): REPO is
 only shown on the first row of each group, and on the first row on screen
 when the list is scrolled or filtered (the filter still matches it).
+In a bundle without repositories, it says what to run instead: `sheaf add
+owner/repo` or `sheaf add --org <org>`, or `sheaf adopt <dir>` for clones
+already in the bundle directory.
 
 AGE is the age of the last commit of the checkout (the author date of
 HEAD, as `git log` shows it; a rebase keeps it), rounded down: `now` under

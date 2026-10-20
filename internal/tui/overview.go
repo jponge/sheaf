@@ -92,6 +92,7 @@ type Overview struct {
 	rows    []Row
 	actions []OverviewAction
 	message string
+	empty   string // see WithEmpty
 
 	selected map[string]bool
 	visible  []int // indices into rows matching the filter
@@ -145,6 +146,14 @@ func NewOverview(title string, header []string, rows []Row, actions []OverviewAc
 // status line.
 func (m Overview) WithMessage(msg string) Overview {
 	m.message = msg
+	return m
+}
+
+// WithEmpty returns a copy of m showing text, one line per line of text,
+// instead of "No rows." when it has no rows (e.g. what to run to add
+// some).
+func (m Overview) WithEmpty(text string) Overview {
+	m.empty = text
 	return m
 }
 
@@ -513,8 +522,12 @@ type ovLayout struct {
 // height every visible row is shown.
 func (m Overview) layout() ovLayout {
 	l := ovLayout{title: true, filter: m.filtering || m.filter != "", header: true, status: true, help: true, gaps: 3}
+	body := max(1, len(m.visible))
+	if len(m.rows) == 0 {
+		body = len(m.emptyLines())
+	}
 	if m.height <= 0 {
-		l.rows = max(1, len(m.visible))
+		l.rows = body
 		return l
 	}
 	chrome := func() int {
@@ -529,7 +542,7 @@ func (m Overview) layout() ovLayout {
 		}
 		return n
 	}
-	l.gaps = fitGaps(l.gaps, m.height, chrome()-l.gaps, max(1, len(m.visible)))
+	l.gaps = fitGaps(l.gaps, m.height, chrome()-l.gaps, body)
 	for _, line := range []*bool{&l.help, &l.title, &l.status, &l.filter, &l.header} {
 		if m.height-chrome() >= 1 {
 			break
@@ -538,6 +551,14 @@ func (m Overview) layout() ovLayout {
 	}
 	l.rows = max(1, m.height-chrome())
 	return l
+}
+
+// emptyLines returns the lines shown without rows (see WithEmpty).
+func (m Overview) emptyLines() []string {
+	if m.empty == "" {
+		return []string{"No rows."}
+	}
+	return strings.Split(m.empty, "\n")
 }
 
 // scrollToCursor clamps the cursor and adjusts the offset so it is rendered.
@@ -728,7 +749,10 @@ func (m Overview) View() tea.View {
 	}
 	switch {
 	case len(m.rows) == 0:
-		lines = append(lines, st.Empty.Render("No rows."))
+		empty := m.emptyLines()
+		for _, e := range empty[:min(l.rows, len(empty))] {
+			lines = append(lines, st.Empty.Render(sanitize(e)))
+		}
 	case len(m.visible) == 0:
 		lines = append(lines, st.Empty.Render("No matches."))
 	default:
