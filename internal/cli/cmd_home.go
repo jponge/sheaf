@@ -265,10 +265,7 @@ func (h *home) overview() (tui.Overview, error) {
 	ov := tui.NewOverview("sheaf: "+h.displayRoot(), []string{"REPO", "DIR", "BRANCH", "AGE", "STATE"}, rows, h.actions())
 	ov = ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithFullHelp(h.fullHelp).WithAltScreen().WithGrouping().WithShrinkable(2, 1)
 	if len(h.bundle.Repositories) == 0 {
-		// What to run in a bundle without repositories (not init: it
-		// refuses a directory that has a sheaf.yaml).
-		ov = ov.WithEmpty("No repositories yet: " + ops.CommandLine(h.s.ctx, "add") + " owner/repo, or " + ops.CommandLine(h.s.ctx, "add", "--org") + " <org>\n" +
-			"Clones already in the bundle: " + ops.CommandLine(h.s.ctx, "adopt") + " <dir>")
+		ov = ov.WithEmpty(h.emptyHint())
 	}
 	if h.s.controls {
 		// Mouse wheel scrolling and hyperlinks, on a terminal that takes
@@ -276,6 +273,31 @@ func (h *home) overview() (tui.Overview, error) {
 		ov = ov.WithMouse().WithHyperlinks()
 	}
 	return ov, nil
+}
+
+// emptyHint returns what to run in a bundle without repositories, one
+// command per line (not init: it refuses a directory that has a
+// sheaf.yaml). adopt takes a path from the current directory: outside the
+// bundle root, the hint gives it from the root.
+func (h *home) emptyHint() string {
+	adopt := ops.CommandLine(h.s.ctx, "adopt") + " <dir>"
+	if wd, err := h.d.getwd(); err != nil || !sameDir(wd, h.root) {
+		adopt = ops.CommandLine(h.s.ctx, "adopt", h.root+string(filepath.Separator)) + "<dir>"
+	}
+	return "No repositories yet. Add some with:\n" +
+		"  " + ops.CommandLine(h.s.ctx, "add") + " owner/repo\n" +
+		"  " + ops.CommandLine(h.s.ctx, "add", "--org") + " <org>\n" +
+		"  " + adopt + "  (clones already in the bundle)"
+}
+
+// sameDir reports whether the directories a and b are the same one.
+func sameDir(a, b string) bool {
+	fa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	fb, err := os.Stat(b)
+	return err == nil && os.SameFile(fa, fb)
 }
 
 // repoOf returns the repository of b named name, nil if there is none.

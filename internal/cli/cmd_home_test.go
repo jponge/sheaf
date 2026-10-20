@@ -182,23 +182,34 @@ func TestHomeShowsLocalStateAndQuits(t *testing.T) {
 }
 
 // A bundle without repositories says what to run to add some (B62 H3),
-// with --bundle when it was given; init is not suggested: it refuses a
-// directory that already has a sheaf.yaml.
+// one command per line, with --bundle when it was given; init is not
+// suggested: it refuses a directory that already has a sheaf.yaml. adopt
+// takes a path from the current directory: outside the bundle root, the
+// hint gives it from the root.
 func TestHomeEmptyBundleSaysWhatToRun(t *testing.T) {
 	t.Parallel()
 	e := newBundleEnv(t)
-	for _, args := range [][]string{nil, {"--bundle", e.cwd}} {
+	root, elsewhere := e.cwd, t.TempDir()
+	for _, c := range []struct {
+		cwd        string
+		args       []string
+		cmd, adopt string
+	}{
+		{root, nil, "sheaf ", "<dir>"},
+		{root, []string{"--bundle", root}, "sheaf --bundle " + root + " ", "<dir>"},
+		{elsewhere, []string{"--bundle", root}, "sheaf --bundle " + root + " ", root + "/<dir>"},
+	} {
 		var out syncBuffer
-		errs, code := runHomeWith(t, e.deps(), newScript(t, false, ovKeys(t, &out, "STATE", 1, "q")), &out, args...)
-		cmd := "sheaf "
-		if args != nil {
-			cmd += "--bundle " + e.cwd + " "
-		}
+		d := e.deps()
+		d.Getwd = func() (string, error) { return c.cwd, nil }
+		errs, code := runHomeWith(t, d, newScript(t, false, ovKeys(t, &out, "STATE", 1, "q")), &out, c.args...)
 		o := ansi.Strip(out.String())
-		want := []string{"No repositories yet: " + cmd + "add owner/repo, or " + cmd + "add --org <org>",
-			"Clones already in the bundle: " + cmd + "adopt <dir>"}
-		if code != 0 || !strings.Contains(o, want[0]) || !strings.Contains(o, want[1]) || strings.Contains(o, "No rows.") {
-			t.Fatalf("%q: exit %d, want %q\nstdout:\n%s\nstderr:\n%s", args, code, want, o, errs)
+		want := []string{"No repositories yet. Add some with:", "  " + c.cmd + "add owner/repo", "  " + c.cmd + "add --org <org>",
+			"  " + c.cmd + "adopt " + c.adopt + "  (clones already in the bundle)"}
+		for _, w := range want {
+			if code != 0 || !strings.Contains(o, w) || strings.Contains(o, "No rows.") {
+				t.Fatalf("%q from %s: exit %d, want %q\nstdout:\n%s\nstderr:\n%s", c.args, c.cwd, code, w, o, errs)
+			}
 		}
 	}
 }
