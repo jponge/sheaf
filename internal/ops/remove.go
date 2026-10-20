@@ -174,7 +174,9 @@ func (e *RisksError) command(flag string) string {
 // For a repository with a fork (see RemotesOf), upstream is fetched like
 // origin below, then the fork: a fork that appears to be gone is a data
 // risk only when commits of local branches exist on it alone (see
-// fetchFork); commits on any remote-tracking ref count as pushed.
+// fetchFork); commits on the remote-tracking refs of either remote count as
+// pushed. The refs of other remotes do not count (with Offline too): sheaf
+// does not fetch them, so they may be stale (see forkDistrust.trusted).
 //
 // Before deleting anything it fetches origin (so that commits whose remote
 // branch was deleted count as unpushed), then gathers gitx.DeletionRisks for
@@ -242,7 +244,7 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 		if !rs.Forked() {
 			return fetchMsg, nil
 		}
-		msg, forceable, err := fetchFork(ctx, net, primary, rs.Fork, emit)
+		msg, forceable, err := fetchFork(ctx, net, primary, rs, emit)
 		if err != nil {
 			return "", err
 		}
@@ -275,14 +277,14 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 		}
 	}
 	risksOf := func(ctx context.Context, dir, deletedRoot string) ([]gitx.Risk, error) {
-		return gitx.DeletionRisksWithOptions(ctx, dir, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: deletedRoot, PublishedRefs: published, ForeignWorktrees: true})
+		return gitx.DeletionRisksWithOptions(ctx, dir, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: deletedRoot, TrustedRemotes: rs.All(), PublishedRefs: published, ForeignWorktrees: true})
 	}
 	plan, err := planRemoval(ctx, w, name, wd, fetch, func() bool { return fetchForceable }, risksOf, emit)
 	if err != nil {
 		return "", err
 	}
 	if plan.Refused(opts.Force) {
-		if err := nameUnpushedBranches(ctx, &plan, published); err != nil {
+		if err := nameUnpushedBranches(ctx, &plan, rs, published); err != nil {
 			return "", err
 		}
 		return "", &RisksError{Plan: plan, Force: opts.Force, Offline: opts.Offline, bundle: hintBundle(ctx)}
@@ -551,21 +553,27 @@ func failureLine(err error) string {
 
 // nameUnpushedBranches sets the Detail of the unpushed-commits risk of the
 // primary checkout's item to the branches carrying them (gitx.UnpushedBranches
-// with the published refs Remove used), for the refusal message.
-func nameUnpushedBranches(ctx context.Context, plan *RemovePlan, published []string) error {
+// with the remotes rs and the published refs Remove used), for the refusal
+// message, followed by the remote-tracking refs of other remotes that have
+// their tips (see unfetchedRefsNote).
+func nameUnpushedBranches(ctx context.Context, plan *RemovePlan, rs gitx.Remotes, published []string) error {
 	for i, it := range plan.Items {
 		for j, r := range it.Risks {
 			if r.Kind != gitx.RiskUnpushedBranchCommits || it.Path != plan.Primary {
 				continue
 			}
-			names, err := gitx.UnpushedBranches(ctx, plan.Primary, gitx.DeletionRisksOptions{PublishedRefs: published})
+			names, err := gitx.UnpushedBranches(ctx, plan.Primary, gitx.DeletionRisksOptions{TrustedRemotes: rs.All(), PublishedRefs: published})
 			if err != nil {
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
 				continue // the count alone
 			}
-			plan.Items[i].Risks[j].Detail = branchList(names)
+			tips := make([]string, len(names))
+			for k, n := range names {
+				tips[k] = "refs/heads/" + n
+			}
+			plan.Items[i].Risks[j].Detail = branchList(names) + unfetchedRefsNote(ctx, plan.Primary, rs, tips)
 		}
 	}
 	return nil
@@ -627,18 +635,20 @@ func remoteRepoGoneFor(stderr, remote string) bool {
 		!strings.Contains(stderr, "'"+remote+"' does not appear to be a git repository")
 }
 
-// fetchFork fetches the fork remote of a forked repository for Remove and
-// returns a problem (empty if none) and whether Force overrides it:
+// fetchFork fetches the fork remote of the forked repository with remotes
+// rs for Remove and returns a problem (empty if none) and whether Force
+// overrides it:
 //
 //   - fetch succeeds: no problem;
 //   - the fork appears to be gone: a data risk (forceable) when commits are
-//     reachable from the fork's (now stale) remote-tracking refs but from
-//     no other remote's (see forkOnlyCommits); otherwise only a progress
+//     reachable from the fork's (now stale) remote-tracking refs but not
+//     from the reference remote's (see forkOnlyCommits); otherwise only a progress
 //     note, since everything the clone holds is also on the reference
 //     repository or reported as unpushed;
 //   - any other failure: the remote state is unknown (not forceable), as
 //     for the reference repository.
-func fetchFork(ctx context.Context, net gitx.Net, primary, fork string, emit func(Event)) (string, bool, error) {
+func fetchFork(ctx context.Context, net gitx.Net, primary string, rs gitx.Remotes, emit func(Event)) (string, bool, error) {
+	fork := rs.Fork
 	emit(Event{Phase: PhaseFetch, Message: "fetching " + fork + " (your fork)"})
 	gone, err := fetchForkRemote(ctx, net, primary, fork)
 	switch {
@@ -649,7 +659,7 @@ func fetchFork(ctx context.Context, net gitx.Net, primary, fork string, emit fun
 	case !gone:
 		return "fetch of your fork (" + fork + ") failed: " + fetchProblem(err), false, nil
 	}
-	n, cerr := forkOnlyCommits(ctx, primary, fork)
+	n, cerr := forkOnlyCommits(ctx, primary, rs)
 	if cerr != nil {
 		if ctx.Err() != nil {
 			return "", false, ctx.Err()
@@ -669,13 +679,14 @@ func fetchFork(ctx context.Context, net gitx.Net, primary, fork string, emit fun
 }
 
 // forkOnlyCommits counts the commits reachable from the remote-tracking
-// refs of fork (stale once the fork is gone) and from no other remote's
-// remote-tracking ref: once the fork is gone, the clone holds their only
-// copy, whether a local branch still points at them or not. Commits on no
-// remote-tracking ref at all are not included: the risk checks report them
-// as unpushed.
-func forkOnlyCommits(ctx context.Context, primary, fork string) (int, error) {
-	return revCount(ctx, primary, "--remotes="+fork+"/*", "--not", "--exclude="+fork+"/*", "--remotes")
+// refs of the fork of rs (stale once the fork is gone) and not from the
+// reference remote's: once the fork is gone, the clone holds their only
+// copy, whether a local branch still points at them or not (the refs of
+// other remotes, which sheaf does not fetch, prove nothing; see
+// forkDistrust.trusted). Commits on neither remote's refs are not
+// included: the risk checks report them as unpushed.
+func forkOnlyCommits(ctx context.Context, primary string, rs gitx.Remotes) (int, error) {
+	return revCount(ctx, primary, "--remotes="+rs.Fork+"/*", "--not", "--remotes="+rs.Reference+"/*")
 }
 
 func joinProblem(a, b string) string {

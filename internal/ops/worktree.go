@@ -1111,7 +1111,7 @@ func (x *worktreeRemoval) planFirst(ctx context.Context) error {
 			if r.Kind != gitx.RiskUnpushedBranchCommits {
 				continue
 			}
-			names, err := gitx.UnpushedBranches(ctx, x.primary, gitx.DeletionRisksOptions{UntrustedRemotes: x.distrust.untrusted()})
+			names, err := gitx.UnpushedBranches(ctx, x.primary, gitx.DeletionRisksOptions{TrustedRemotes: x.distrust.trusted(RemotesOf(x.r))})
 			if err != nil {
 				if ctx.Err() != nil {
 					return ctx.Err()
@@ -1328,7 +1328,7 @@ func planWorktreeRemoval(ctx context.Context, r bundle.Repository, repoDir, prim
 		plan.Hard = append(plan.Hard, "detached HEAD: there is no branch to delete")
 	}
 	if inspectable {
-		risks, err := gitx.DeletionRisksWithOptions(ctx, wt.Path, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: wt.Path, UntrustedRemotes: distrust.untrusted()})
+		risks, err := gitx.DeletionRisksWithOptions(ctx, wt.Path, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: wt.Path, TrustedRemotes: distrust.trusted(RemotesOf(r))})
 		if err != nil {
 			return plan, err
 		}
@@ -1360,10 +1360,12 @@ func planWorktreeRemoval(ctx context.Context, r bundle.Repository, repoDir, prim
 // branch> (origin, or upstream for a repository with a fork).
 // An upstream counts only when it is a remote-tracking ref or another local
 // branch: a branch configured as its own upstream (remote ".") does not.
-// Refs of a distrusted fork (see forkDistrust) are neither merge targets
-// nor count as containing the branch's commits; targets that do not exist
-// are not named in the message.
+// Refs of a distrusted fork (see forkDistrust) and of remotes sheaf does
+// not fetch (see forkDistrust.trusted) are neither merge targets nor count
+// as containing the branch's commits; targets that do not exist are not
+// named in the message.
 func checkMerged(ctx context.Context, primary string, r bundle.Repository, branch string, plan *WorktreeRemovePlan, distrust forkDistrust) error {
+	rs := RemotesOf(r)
 	own := "refs/heads/" + branch
 	oid, err := gitx.Run(ctx, primary, "rev-parse", "--verify", "--end-of-options", own)
 	if err != nil {
@@ -1375,10 +1377,10 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 		return err
 	}
 	var targets []string
-	if u := strings.TrimSpace(up); (strings.HasPrefix(u, "refs/remotes/") || strings.HasPrefix(u, "refs/heads/") && u != own) && !distrust.covers(u) {
+	if u := strings.TrimSpace(up); (strings.HasPrefix(u, "refs/remotes/") || strings.HasPrefix(u, "refs/heads/") && u != own) && distrust.trustsRef(rs, u) {
 		targets = append(targets, u)
 	}
-	if d := "refs/remotes/" + RemotesOf(r).Reference + "/" + r.DefaultBranch; !slices.Contains(targets, d) {
+	if d := "refs/remotes/" + rs.Reference + "/" + r.DefaultBranch; !slices.Contains(targets, d) {
 		targets = append(targets, d)
 	}
 	var names, missing []string
@@ -1400,11 +1402,10 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 		}
 	}
 	// Commits lost with the branch: those on no other branch, no
-	// remote-tracking ref and no tag. (Branch names cannot contain glob
-	// characters, so --exclude matches this branch only.)
+	// trusted remote-tracking ref and no tag. (Branch names cannot contain
+	// glob characters, so --exclude matches this branch only.)
 	others := func(withTags bool) []string {
-		a := append([]string{plan.branchOID, "--not", "--exclude=" + branch, "--branches"}, distrust.excludes()...)
-		a = append(a, "--remotes")
+		a := append([]string{plan.branchOID, "--not", "--exclude=" + branch, "--branches"}, distrust.remoteArgs(rs)...)
 		if withTags {
 			a = append(a, "--tags")
 		}
@@ -1423,7 +1424,7 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 			return err
 		}
 		for ref := range strings.FieldsSeq(out) {
-			if ref != own && !distrust.covers(ref) {
+			if ref != own && distrust.trustsRef(rs, ref) {
 				plan.ContainedIn = strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "refs/remotes/"), "refs/tags/")
 				return nil
 			}
@@ -1440,7 +1441,7 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 	} else {
 		plan.Unmerged = fmt.Sprintf("branch %s has no merge target (%s does not exist); its %s would be lost", branch, strings.Join(missing, ", "), commits(lost))
 	}
-	plan.Unmerged += distrust.note()
+	plan.Unmerged += distrust.note() + unfetchedRefsNote(ctx, primary, rs, []string{plan.branchOID})
 	if plan.TagOnlyCommits > 0 {
 		plan.Unmerged += fmt.Sprintf(" (%d more reachable only from tags)", plan.TagOnlyCommits)
 	}

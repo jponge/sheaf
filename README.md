@@ -614,7 +614,12 @@ that commits whose remote branch was deleted count as unpushed. `--offline`
 skips the fetch and decides on the remote-tracking refs of the last fetch
 (possibly stale). For a fork, when your fork is gone or with `--offline`,
 its remote-tracking refs are not trusted (not pushed, not a merge target).
-`sync` does not accept `--offline`.
+Only the remotes sheaf fetches count: `origin` (`upstream` and your fork for
+a fork). sheaf never fetches other remotes, so their remote-tracking refs
+may be stale (a branch deleted there, a remote that no longer exists) and
+are never trusted, with or without `--offline`: commits only on them count
+as unpushed (the refusal names those refs; push to `origin`, or use
+`--force` or `-D`). `sync` does not accept `--offline`.
 
 **Data at risk** (refused unless `--force`):
 
@@ -650,7 +655,8 @@ It checks the plan again under `.sheaf.lock` after confirmation.
 
 **Branch deletion** mirrors `git branch -d/-D`. `wt rm -d` deletes the
 branch only if it is merged into its own upstream or into `origin/<default>`
-(`upstream/<default>` for a fork), or contained in another ref; `-D`
+(`upstream/<default>` for a fork), or contained in another ref (an upstream
+or ref of a remote sheaf does not fetch does not count, see above); `-D`
 deletes it even if unmerged (its commits are lost). `--force` only concerns
 the worktree's own data, never the branch. Tags of tag worktrees are always
 kept.

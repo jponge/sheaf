@@ -34,7 +34,7 @@ const (
 	// tree, is deleted; irrelevant to removing a linked worktree).
 
 	RiskStash                 // stash entries
-	RiskUnpushedBranchCommits // commits on local branches not on any remote-tracking ref (nor DeletionRisksOptions.PublishedRefs)
+	RiskUnpushedBranchCommits // commits on local branches not on any trusted remote-tracking ref (see DeletionRisksOptions) nor DeletionRisksOptions.PublishedRefs
 	// RiskDetachedCommits covers commits reachable from this work tree's detached
 	// HEAD but from no branch, tag or remote-tracking ref (work-tree-local).
 	RiskDetachedCommits
@@ -278,6 +278,13 @@ type DeletionRisksOptions struct {
 	// a fork that appears to be gone: commits reachable only from them are
 	// reported as unpushed or detached.
 	UntrustedRemotes []string
+	// TrustedRemotes, when not empty, restricts the remote-tracking refs
+	// that count as pushed for dir's own repository (not for nested
+	// repositories) to those of these remotes (refs/remotes/<remote>/*),
+	// except UntrustedRemotes: e.g. the remotes the caller fetched, since
+	// the refs of a remote that was not fetched may be stale (a branch
+	// deleted there, a remote that no longer exists). Empty: every remote.
+	TrustedRemotes []string
 	// PublishedRefs are refs (full names) whose commits count as pushed for
 	// dir's own repository, like remote-tracking refs (not for nested
 	// repositories), e.g. recorded pull request heads (see PullHeadRef).
@@ -390,13 +397,22 @@ func deletionRisks(ctx context.Context, dir, top string, depth int, no *nestOpts
 // pushedArgs returns the rev-list arguments for the commits that count as
 // pushed in the repository itself under opts: the options to put before the
 // revisions (--ignore-missing, for PublishedRefs that do not exist), and the
-// refs to put after --not (remote-tracking refs except those of
-// UntrustedRemotes, then PublishedRefs).
+// refs to put after --not (remote-tracking refs of TrustedRemotes, or of
+// every remote, except those of UntrustedRemotes, then PublishedRefs).
 func pushedArgs(opts DeletionRisksOptions) (lead, refs []string) {
-	for _, r := range opts.UntrustedRemotes {
-		refs = append(refs, "--exclude="+r+"/*")
+	if len(opts.TrustedRemotes) > 0 {
+		for _, r := range opts.TrustedRemotes {
+			if !slices.Contains(opts.UntrustedRemotes, r) {
+				refs = append(refs, "--remotes="+r) // refs/remotes/<r>/* (/* is implied)
+			}
+		}
+	} else {
+		for _, r := range opts.UntrustedRemotes {
+			refs = append(refs, "--exclude="+r+"/*")
+		}
+		refs = append(refs, "--remotes")
 	}
-	refs = append(append(refs, "--remotes"), opts.PublishedRefs...)
+	refs = append(refs, opts.PublishedRefs...)
 	if len(opts.PublishedRefs) > 0 {
 		lead = []string{"--ignore-missing"}
 	}
@@ -405,8 +421,8 @@ func pushedArgs(opts DeletionRisksOptions) (lead, refs []string) {
 
 // UnpushedBranches returns, sorted, the local branches of the repository
 // containing dir that carry the commits DeletionRisksWithOptions counts as
-// RiskUnpushedBranchCommits with the same opts (UntrustedRemotes and
-// PublishedRefs; the other options do not matter). A branch carries
+// RiskUnpushedBranchCommits with the same opts (UntrustedRemotes,
+// TrustedRemotes and PublishedRefs; the other options do not matter). A branch carries
 // unpushed commits exactly when its tip is unpushed: a pushed tip makes all
 // its ancestors pushed.
 func UnpushedBranches(ctx context.Context, dir string, opts DeletionRisksOptions) ([]string, error) {

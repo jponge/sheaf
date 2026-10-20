@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/jponge/sheaf/internal/testutil"
@@ -179,5 +180,47 @@ func TestDeletionRisksUntrustedRemotes(t *testing.T) {
 	untrusted, err = DeletionRisksWithOptions(ctx, dir, DeletionRisksOptions{UntrustedRemotes: []string{"origin"}})
 	if err != nil || count(untrusted, RiskUnpushedBranchCommits) != 1 {
 		t.Fatalf("untrusted branch: %v, %v", untrusted, err)
+	}
+}
+
+func TestDeletionRisksTrustedRemotes(t *testing.T) {
+	t.Parallel()
+	_, dir := forkedClone(t, testutil.OriginOpts{})
+	ctx := context.Background()
+	testutil.Git(t, dir, "switch", "-q", "-c", "topic")
+	testutil.CommitFile(t, dir, "t.txt", "t\n", "on the fork only")
+	testutil.Git(t, dir, "push", "-q", "origin", "topic")
+	unpushed := func(opts DeletionRisksOptions) (int, []string) {
+		t.Helper()
+		rs, err := DeletionRisksWithOptions(ctx, dir, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names, err := UnpushedBranches(ctx, dir, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range rs {
+			if r.Kind == RiskUnpushedBranchCommits {
+				return r.Count, names
+			}
+		}
+		return 0, names
+	}
+	for _, c := range []struct {
+		opts DeletionRisksOptions
+		want int
+	}{
+		{DeletionRisksOptions{TrustedRemotes: []string{"upstream"}}, 1},
+		{DeletionRisksOptions{TrustedRemotes: []string{"upstream", "origin"}}, 0},
+		{DeletionRisksOptions{TrustedRemotes: []string{"origin"}}, 0},
+		{DeletionRisksOptions{TrustedRemotes: []string{"upstream", "origin"}, UntrustedRemotes: []string{"origin"}}, 1},
+		// A remote whose name is a prefix of another's trusts only its own refs.
+		{DeletionRisksOptions{TrustedRemotes: []string{"upstream", "orig"}}, 1},
+	} {
+		n, names := unpushed(c.opts)
+		if n != c.want || (n > 0) != slices.Equal(names, []string{"topic"}) {
+			t.Errorf("%+v: %d unpushed commits on %v, want %d", c.opts, n, names, c.want)
+		}
 	}
 }
