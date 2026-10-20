@@ -615,13 +615,22 @@ These commands share one set of rules.
 run. sheaf never prompts in plain mode: missing input is an error. In TUI
 mode, a dialog shows what will be deleted and asks for confirmation unless
 `--yes` is given. The hints of refusals and of `prune` give the complete
-command to run (e.g. with `--force`, `-D` or `--offline`). It includes
-`--yes` when the command that printed it was run with `--yes` in plain mode
-(`sync --remove-gone` always is), so that it runs as printed; otherwise it
-leaves `--yes` out, so that the pasted command asks for confirmation (a
-dialog in TUI mode, a hint with `--yes` in plain mode). The `sheaf remove`
-that `wt rm` suggests for a primary checkout never includes `--yes`: it
-deletes the whole repository.
+command to run (e.g. with `--force`, `-D` or `--offline`). When `remove`,
+`wt rm` or `prune` was run with `--yes` in plain mode, the hints that run
+the refused removal again with `--force` or `-D`, the `wt rm` hint of a
+worktree that `prune` kept, and the `prune --include-branches` hint include
+`--yes`, so that they run as printed; such a hint always names the bundle
+with `--bundle <root>`, so that pasted in another bundle it still acts on
+this one. Every other hint leaves `--yes` out, so that the pasted command
+asks for confirmation (a dialog in TUI mode, a hint with `--yes` in plain
+mode), and names the bundle only when `--bundle` was given. That is the
+case in TUI mode, without `--yes`, and always for the `--offline` hints
+(offline, the stale remote-tracking refs that the failed fetch could not
+refresh count, so the plan must be confirmed again), the hints about pull
+request and tag worktrees that `prune` skips, the `sheaf remove` hints of
+`sync --remove-gone` (its `--yes` confirms removing gone repositories, not
+forcing past their risks) and the `sheaf remove` that `wt rm` suggests for
+a primary checkout.
 
 **Fetch first.** `remove`, `wt rm` and `prune` fetch before deciding, so
 that commits whose remote branch was deleted count as unpushed. `--offline`
