@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -476,5 +477,60 @@ func TestRemoveWorktreeDeleteBranchUntrustedTargetIsNamedAsSuch(t *testing.T) {
 	}
 	if u := refused.Plan.Unmerged; !strings.Contains(u, "branch work has no merge target (origin/main is not trusted:") || strings.Contains(u, "does not exist") {
 		t.Fatalf("unmerged = %q", u)
+	}
+}
+
+// worktreeStaleRefspec gives the worktree w its own fetch refspec
+// (config.worktree) writing refs/remotes/stale/*, which sheaf's fetch in
+// the primary checkout never writes nor prunes.
+func worktreeStaleRefspec(t *testing.T, primary, w string) {
+	t.Helper()
+	testutil.Git(t, primary, "config", "core.repositoryFormatVersion", "1")
+	testutil.Git(t, primary, "config", "extensions.worktreeConfig", "true")
+	testutil.Git(t, w, "config", "--worktree", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/stale/*")
+}
+
+// wt rm judges the worktree with the primary's configuration: a detached
+// commit only on refs/remotes/stale/x is at risk.
+func TestRemoveWorktreeWorktreeConfigRefspecIsNotTrusted(t *testing.T) {
+	t.Parallel()
+	f, primary, _, _ := workWorktree(t)
+	w := filepath.Join(f.w.Root, "a", "work")
+	worktreeStaleRefspec(t, primary, w)
+	testutil.Git(t, w, "switch", "-q", "--detach")
+	testutil.Git(t, primary, "branch", "-q", "-D", "work")
+	testutil.Git(t, w, "update-ref", "refs/remotes/stale/x", "HEAD")
+	_, err := f.rmWTT(t, "a", WorktreeTarget{Name: "work", Kind: TargetDir}, WorktreeRemoveOptions{})
+	var refused *WorktreeRefusedError
+	if !errors.As(err, &refused) || !hasKind(refused.Plan.Blocking(), gitx.RiskDetachedCommits) {
+		t.Fatalf("err = %v, want a refusal for the detached commit", err)
+	}
+	if !exists(w) {
+		t.Fatal("worktree removed")
+	}
+}
+
+// prune lists the risks of a candidate worktree with the primary's
+// configuration, and keeps its branch: work's commit is only on
+// refs/remotes/stale/work once work is deleted on origin.
+func TestPruneDeleteBranchesWorktreeConfigRefspecIsNotTrusted(t *testing.T) {
+	t.Parallel()
+	f, primary, _, o := workWorktree(t)
+	w := filepath.Join(f.w.Root, "a", "work")
+	testutil.Git(t, primary, "push", "-q", "-u", "origin", "work")
+	testutil.Git(t, o.Path, "branch", "-q", "-D", "work")
+	worktreeStaleRefspec(t, primary, w)
+	testutil.Git(t, w, "update-ref", "refs/remotes/stale/work", "HEAD")
+	opts := PruneOptions{DeleteBranches: true, WorkingDir: f.w.Root}
+	plan := f.prunePlan(t, opts)
+	if len(plan.Candidates) != 1 || !slices.Contains(plan.Candidates[0].Notes, "1 unpushed commit on local branches (not affected: they belong to the repository)") {
+		t.Fatalf("candidates = %+v", plan.Candidates)
+	}
+	rs := ApplyPrune(context.Background(), f.w, plan, opts, Discard)
+	if r, ok := resultFor(rs, "work"); !ok || !strings.Contains(r.Message, "kept branch work") {
+		t.Fatalf("result = %+v", r)
+	}
+	if !branchExists(t, primary, "work") {
+		t.Fatal("branch deleted")
 	}
 }
