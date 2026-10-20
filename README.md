@@ -618,8 +618,18 @@ Only the remotes sheaf fetches count: `origin` (`upstream` and your fork for
 a fork). sheaf never fetches other remotes, so their remote-tracking refs
 may be stale (a branch deleted there, a remote that no longer exists) and
 are never trusted, with or without `--offline`: commits only on them count
-as unpushed (the refusal names those refs; push to `origin`, or use
-`--force` or `-D`). `sync` does not accept `--offline`.
+as unpushed (push to `origin`, or use `--force` or `-D`). Of a trusted
+remote, only the refs its fetch writes and prunes count: the destinations
+of its fetch refspecs (`remote.<name>.fetch`, by default
+`refs/remotes/<name>/*`), not the refs of other remotes inside them (e.g.
+of a remote named `origin/x`); a remote with a negative refspec (`^...`) is
+not trusted at all. In a nested repository, which is fetched with `git
+fetch --all`, the same applies to the remotes that command fetches (not
+those with `remote.<name>.skipFetchAll`, nor those inside the deleted
+tree), also with `--offline`. The refusals about unpushed branches
+(`remove`) and unmerged branches (`wt rm -d`, `prune --delete-branches`)
+name the untrusted refs that hold the commits; the others (detached HEAD,
+nested repositories) do not. `sync` does not accept `--offline`.
 
 **Data at risk** (refused unless `--force`):
 

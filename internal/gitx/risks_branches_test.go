@@ -25,6 +25,7 @@ func TestUnpushedBranches(t *testing.T) {
 	testutil.Git(t, dir, "tag", "local-tag", "topic") // tags do not carry
 	got := func(opts DeletionRisksOptions) []string {
 		t.Helper()
+		opts.TrustFetchAllRemotes = true // every remote is fetched in this test
 		names, err := UnpushedBranches(context.Background(), dir, opts)
 		if err != nil {
 			t.Fatal(err)
@@ -88,7 +89,7 @@ func TestDeletionRisksPublishedRefs(t *testing.T) {
 	testutil.Git(t, dir, "switch", "-q", "main")
 	risks := func(refs ...string) []Risk {
 		t.Helper()
-		r, err := DeletionRisksWithOptions(context.Background(), dir, DeletionRisksOptions{PublishedRefs: refs})
+		r, err := DeletionRisksWithOptions(context.Background(), dir, DeletionRisksOptions{TrustFetchAllRemotes: true, PublishedRefs: refs})
 		if err != nil {
 			t.Fatal(err)
 		}

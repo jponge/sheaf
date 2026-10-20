@@ -166,14 +166,14 @@ var gitCallCommands = []struct {
 		_, err := Update(ctx, f.w, UpdateOptions{Jobs: 4}, Discard)
 		return err
 	}},
-	{"prune (dry-run)", 90 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"prune (dry-run)", 95 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		p, err := PlanPrune(ctx, f.w, PruneOptions{Jobs: 4, WorkingDir: f.w.Root}, Discard)
 		if err == nil && len(p.Candidates) != 5 {
 			err = fmt.Errorf("prune candidates = %v, want feat/a of each repository", candidateNames(p))
 		}
 		return err
 	}},
-	{"remove plan", 26 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"remove plan", 30 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		_, err := Remove(ctx, f.w, "r2", RemoveOptions{WorkingDir: f.w.Root, Force: true}, noEmit)
 		if errors.Is(err, ErrNotConfirmed) {
 			return nil
@@ -184,13 +184,13 @@ var gitCallCommands = []struct {
 		_, err := AddWorktree(ctx, f.w, "r1", "feat/new", WorktreeAddOptions{}, noEmit)
 		return err
 	}},
-	{"wt rm", 25 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"wt rm", 27 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		_, err := RemoveWorktree(ctx, f.w, "r1", WorktreeTarget{Name: "feat/b"}, WorktreeRemoveOptions{WorkingDir: f.w.Root, Confirm: func(WorktreeRemovePlan) bool { return true }}, noEmit)
 		return err
 	}},
 	// The home screen's r on two worktrees of a repository (47 calls
 	// when they were removed one after the other).
-	{"wt rm (2)", 43 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"wt rm (2)", 47 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		items := []WorktreeRemoval{{Repo: "r2", Target: WorktreeTarget{Name: "feat-a", Kind: TargetDir}}, {Repo: "r2", Target: WorktreeTarget{Name: "feat-b", Kind: TargetDir}}}
 		for _, r := range RemoveWorktrees(ctx, f.w, items, WorktreeRemoveOptions{WorkingDir: f.w.Root}, func([]WorktreeRemovalResult) bool { return true }, Discard) {
 			if r.Err != nil {
@@ -199,7 +199,7 @@ var gitCallCommands = []struct {
 		}
 		return nil
 	}},
-	{"remove", 54 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"remove", 61 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		_, err := Remove(ctx, f.w, "r5", RemoveOptions{WorkingDir: f.w.Root, Force: true, Confirm: yes}, noEmit)
 		return err
 	}},

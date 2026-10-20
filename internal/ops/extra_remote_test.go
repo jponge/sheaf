@@ -46,7 +46,7 @@ func staleOtherRef(t *testing.T, dir, branch string) {
 	}
 }
 
-const unfetchedNote = "also on other/work, which does not count: sheaf only fetches origin, and the refs of other remotes may be stale"
+const unfetchedNote = "also on other/work, which does not count: only the remote-tracking refs that sheaf's fetch of origin updates count, others may be stale"
 
 func wantRemoveRefusedUnpushedWork(t *testing.T, f *fixture, primary string, err error) {
 	t.Helper()
@@ -254,5 +254,118 @@ func TestPruneDeleteBranchesStaleRefOfExtraRemoteKeepsBranch(t *testing.T) {
 		if !branchExists(t, primary, "work") {
 			t.Fatalf("worktree %v: branch deleted", worktree)
 		}
+	}
+}
+
+// With --offline, remove does not trust the fork's refs (as wt rm and
+// prune): topic was pushed to the fork, then deleted there.
+func TestRemoveOfflineDoesNotTrustForkRefs(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	fo, primary := f.addForked(t, "x", testutil.OriginOpts{})
+	f.forkOnlyBranch(t)
+	testutil.Git(t, fo.Fork.Path, "branch", "-q", "-D", "topic")
+	_, err := f.removeOpts(t, "x", RemoveOptions{Offline: true, WorkingDir: f.w.Root, Confirm: yes})
+	want := primary + " [main]: 1 unpushed commit on local branches: topic (--offline: the state of your fork (origin) is unknown: its remote-tracking refs origin/* are not trusted)\n"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+	if !exists(filepath.Join(f.w.Root, "x")) {
+		t.Fatal("repository deleted")
+	}
+}
+
+// A fetch refspec that does not write refs/remotes/origin/* (a mirror
+// namespace, or a single branch): origin/work is never updated nor pruned
+// by sheaf's fetch, so it proves nothing.
+func TestRemoveStaleRefOutsideTheFetchRefspecIsNotPushed(t *testing.T) {
+	t.Parallel()
+	for _, spec := range []string{"+refs/heads/*:refs/remotes/mirror/*", "+refs/heads/main:refs/remotes/origin/main"} {
+		f := newFixture(t)
+		primary, _ := f.clonedRepo(t, "a")
+		testutil.Git(t, primary, "config", "remote.origin.fetch", spec)
+		testutil.Git(t, primary, "update-ref", "refs/heads/work", localCommit(t, primary))
+		testutil.Git(t, primary, "update-ref", "refs/remotes/origin/work", "refs/heads/work")
+		_, err := f.removeOpts(t, "a", RemoveOptions{WorkingDir: f.w.Root, Confirm: yes})
+		want := primary + " [main]: 1 unpushed commit on local branches: work (also on origin/work, which does not count"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: err = %v, want %q", spec, err, want)
+		}
+		if !exists(filepath.Join(f.w.Root, "a")) {
+			t.Fatalf("%s: repository deleted", spec)
+		}
+	}
+}
+
+// The refs a custom refspec writes do count.
+func TestRemoveRefsWrittenByACustomRefspecArePushed(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	primary, _ := f.clonedRepo(t, "a")
+	testutil.Git(t, primary, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/mirror/*")
+	testutil.Git(t, primary, "update-ref", "refs/heads/work", localCommit(t, primary))
+	testutil.Git(t, primary, "push", "-q", "origin", "work")
+	if _, err := f.removeOpts(t, "a", RemoveOptions{WorkingDir: f.w.Root, Confirm: yes}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A remote named origin/x has its refs under refs/remotes/origin/x/: they
+// are not origin's.
+func TestRemoveOfflineRefsOfRemoteNamedLikeOriginSubdirAreNotPushed(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	primary, _ := f.clonedRepo(t, "a")
+	bare := filepath.Join(t.TempDir(), "x.git")
+	testutil.Git(t, primary, "init", "-q", "--bare", bare)
+	testutil.Git(t, primary, "remote", "add", "origin/x", "file://"+bare)
+	testutil.Git(t, primary, "update-ref", "refs/heads/work", localCommit(t, primary))
+	testutil.Git(t, primary, "update-ref", "refs/remotes/origin/x/work", "refs/heads/work")
+	_, err := f.removeOpts(t, "a", RemoveOptions{Offline: true, WorkingDir: f.w.Root, Confirm: yes})
+	want := primary + " [main]: 1 unpushed commit on local branches: work (also on origin/x/work, which does not count"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
+
+// The refs of a nested repository's remote inside the deleted tree prove
+// nothing: that remote is deleted too.
+func TestRemoveNestedRefsOfRemoteInsideTheTreeAreNotPushed(t *testing.T) {
+	t.Parallel()
+	f, primary := nestedSetup(t)
+	n := filepath.Join(primary, "vendor", "n")
+	plainClone(t, testutil.NewOrigin(t, testutil.OriginOpts{}), n)
+	inner := filepath.Join(primary, "vendor", "inner.git")
+	testutil.Git(t, n, "init", "-q", "--bare", inner)
+	testutil.Git(t, n, "remote", "add", "inner", "file://"+inner)
+	testutil.Git(t, n, "update-ref", "refs/heads/work", localCommit(t, n))
+	testutil.Git(t, n, "push", "-q", "inner", "work")
+	testutil.Git(t, n, "fetch", "-q", "inner")
+	_, err := f.removeOpts(t, "a", RemoveOptions{WorkingDir: f.w.Root, Confirm: yes})
+	if err == nil || !strings.Contains(err.Error(), "vendor/n (1 unpushed commit on local branches)") {
+		t.Fatalf("err = %v", err)
+	}
+	if !exists(n) {
+		t.Fatal("nested repository deleted")
+	}
+}
+
+// A nested repository is fetched with `git fetch --all`, which skips
+// remotes with skipFetchAll: their refs prove nothing.
+func TestRemoveNestedStaleRefOfSkippedRemoteIsNotPushed(t *testing.T) {
+	t.Parallel()
+	f, primary := nestedSetup(t)
+	n := filepath.Join(primary, "vendor", "n")
+	plainClone(t, testutil.NewOrigin(t, testutil.OriginOpts{}), n)
+	addExtraRemote(t, n)
+	testutil.Git(t, n, "config", "remote.other.skipFetchAll", "true")
+	testutil.Git(t, n, "update-ref", "refs/heads/work", localCommit(t, n))
+	staleOtherRef(t, n, "work")
+	_, err := f.removeOpts(t, "a", RemoveOptions{WorkingDir: f.w.Root, Confirm: yes})
+	if err == nil || !strings.Contains(err.Error(), "1 nested repository: vendor/n (1 unpushed commit on local branches)") {
+		t.Fatalf("err = %v", err)
+	}
+	if !exists(n) {
+		t.Fatal("nested repository deleted")
 	}
 }

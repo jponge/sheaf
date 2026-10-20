@@ -1360,12 +1360,19 @@ func planWorktreeRemoval(ctx context.Context, r bundle.Repository, repoDir, prim
 // branch> (origin, or upstream for a repository with a fork).
 // An upstream counts only when it is a remote-tracking ref or another local
 // branch: a branch configured as its own upstream (remote ".") does not.
-// Refs of a distrusted fork (see forkDistrust) and of remotes sheaf does
-// not fetch (see forkDistrust.trusted) are neither merge targets nor count
-// as containing the branch's commits; targets that do not exist are not
+// Refs of a distrusted fork (see forkDistrust), of remotes sheaf does not
+// fetch (see forkDistrust.trusted), and refs its fetches do not write (see
+// gitx.TrustedRemoteRefs) are neither merge targets nor count as containing
+// the branch's commits; targets that do not exist are not
 // named in the message.
 func checkMerged(ctx context.Context, primary string, r bundle.Repository, branch string, plan *WorktreeRemovePlan, distrust forkDistrust) error {
 	rs := RemotesOf(r)
+	fetched := distrust.trusted(rs)
+	trusted, err := gitx.TrustedRemoteRefs(ctx, primary, fetched)
+	if err != nil {
+		return err
+	}
+	trustsRef := func(ref string) bool { return !strings.HasPrefix(ref, "refs/remotes/") || trusted.Contains(ref) }
 	own := "refs/heads/" + branch
 	oid, err := gitx.Run(ctx, primary, "rev-parse", "--verify", "--end-of-options", own)
 	if err != nil {
@@ -1377,7 +1384,7 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 		return err
 	}
 	var targets []string
-	if u := strings.TrimSpace(up); (strings.HasPrefix(u, "refs/remotes/") || strings.HasPrefix(u, "refs/heads/") && u != own) && distrust.trustsRef(rs, u) {
+	if u := strings.TrimSpace(up); (strings.HasPrefix(u, "refs/remotes/") || strings.HasPrefix(u, "refs/heads/") && u != own) && trustsRef(u) {
 		targets = append(targets, u)
 	}
 	if d := "refs/remotes/" + rs.Reference + "/" + r.DefaultBranch; !slices.Contains(targets, d) {
@@ -1386,7 +1393,7 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 	var names, missing []string
 	for _, t := range targets {
 		short := strings.TrimPrefix(strings.TrimPrefix(t, "refs/remotes/"), "refs/heads/")
-		if ok, err := refExists(ctx, primary, t); err != nil || !ok {
+		if ok, err := refExists(ctx, primary, t); err != nil || !ok || !trustsRef(t) {
 			missing = append(missing, short)
 			continue
 		}
@@ -1404,8 +1411,9 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 	// Commits lost with the branch: those on no other branch, no
 	// trusted remote-tracking ref and no tag. (Branch names cannot contain
 	// glob characters, so --exclude matches this branch only.)
+	lead, remoteRevs := trusted.RevListArgs()
 	others := func(withTags bool) []string {
-		a := append([]string{plan.branchOID, "--not", "--exclude=" + branch, "--branches"}, distrust.remoteArgs(rs)...)
+		a := append(append(slices.Clone(lead), plan.branchOID, "--not", "--exclude="+branch, "--branches"), remoteRevs...)
 		if withTags {
 			a = append(a, "--tags")
 		}
@@ -1424,7 +1432,7 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 			return err
 		}
 		for ref := range strings.FieldsSeq(out) {
-			if ref != own && distrust.trustsRef(rs, ref) {
+			if ref != own && trustsRef(ref) {
 				plan.ContainedIn = strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "refs/remotes/"), "refs/tags/")
 				return nil
 			}
@@ -1441,7 +1449,7 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 	} else {
 		plan.Unmerged = fmt.Sprintf("branch %s has no merge target (%s does not exist); its %s would be lost", branch, strings.Join(missing, ", "), commits(lost))
 	}
-	plan.Unmerged += distrust.note() + unfetchedRefsNote(ctx, primary, rs, []string{plan.branchOID})
+	plan.Unmerged += distrust.note() + untrustedRefsNote(ctx, primary, trusted, fetched, distrust, []string{plan.branchOID})
 	if plan.TagOnlyCommits > 0 {
 		plan.Unmerged += fmt.Sprintf(" (%d more reachable only from tags)", plan.TagOnlyCommits)
 	}

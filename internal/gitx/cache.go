@@ -270,6 +270,7 @@ var cacheableCalls = [][]string{
 	commonDirArgs,
 	inspectArgs,
 	{"worktree", "list", "--porcelain", "-z"},
+	remoteConfigArgs,
 }
 
 var (

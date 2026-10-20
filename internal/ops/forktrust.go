@@ -3,7 +3,6 @@ package ops
 import (
 	"context"
 	"errors"
-	"slices"
 	"strings"
 
 	"github.com/jponge/sheaf/internal/gitx"
@@ -47,35 +46,17 @@ func (d forkDistrust) trusted(rs gitx.Remotes) []string {
 	return out
 }
 
-// remoteArgs returns the rev-list arguments selecting the trusted
-// remote-tracking refs of rs (see trusted).
-func (d forkDistrust) remoteArgs(rs gitx.Remotes) []string {
-	var out []string
-	for _, r := range d.trusted(rs) {
-		out = append(out, "--remotes="+r) // refs/remotes/<r>/* (/* is implied)
-	}
-	return out
-}
-
-// trustsRef reports whether the full ref name is not a remote-tracking ref,
-// or one of a trusted remote of rs (see trusted).
-func (d forkDistrust) trustsRef(rs gitx.Remotes, ref string) bool {
-	if !strings.HasPrefix(ref, "refs/remotes/") {
-		return true
-	}
-	return slices.ContainsFunc(d.trusted(rs), func(r string) bool { return strings.HasPrefix(ref, "refs/remotes/"+r+"/") })
-}
-
 // covers reports whether the full ref name is an untrusted remote-tracking ref.
 func (d forkDistrust) covers(ref string) bool {
 	return d.set() && strings.HasPrefix(ref, "refs/remotes/"+d.remote+"/")
 }
 
-// unfetchedRefsNote explains, for messages, that the remote-tracking refs
-// of remotes sheaf does not fetch (other than rs.All()) containing one of
-// commits did not count (see trusted): "" when there is none, or when they
-// cannot be listed.
-func unfetchedRefsNote(ctx context.Context, dir string, rs gitx.Remotes, commits []string) string {
+// untrustedRefsNote explains, for messages, that the remote-tracking refs
+// containing one of commits that are not in trusted (the refs written by
+// sheaf's fetches of the remotes named fetched, see
+// gitx.TrustedRemoteRefs) did not count: "" when there is none, or when
+// they cannot be listed. Refs covered by d are left to d.note().
+func untrustedRefsNote(ctx context.Context, dir string, trusted gitx.RemoteRefSet, fetched []string, d forkDistrust, commits []string) string {
 	if len(commits) == 0 {
 		return "" // without --contains, every ref would be listed
 	}
@@ -89,7 +70,7 @@ func unfetchedRefsNote(ctx context.Context, dir string, rs gitx.Remotes, commits
 	}
 	var names []string
 	for ref := range strings.FieldsSeq(out) {
-		if !strings.HasSuffix(ref, "/HEAD") && !(forkDistrust{}).trustsRef(rs, ref) {
+		if !strings.HasSuffix(ref, "/HEAD") && !trusted.Contains(ref) && !d.covers(ref) {
 			names = append(names, strings.TrimPrefix(ref, "refs/remotes/"))
 		}
 	}
@@ -100,8 +81,8 @@ func unfetchedRefsNote(ctx context.Context, dir string, rs gitx.Remotes, commits
 	if len(names) > 1 {
 		verb = "do"
 	}
-	return " (also on " + branchList(names) + ", which " + verb + " not count: sheaf only fetches " + rs.String() +
-		", and the refs of other remotes may be stale)"
+	return " (also on " + branchList(names) + ", which " + verb + " not count: only the remote-tracking refs that sheaf's fetch of " +
+		strings.Join(fetched, " and ") + " updates count, others may be stale)"
 }
 
 // note explains the distrust for messages ("" when trusted).

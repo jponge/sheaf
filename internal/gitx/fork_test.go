@@ -168,19 +168,41 @@ func TestDeletionRisksUntrustedRemotes(t *testing.T) {
 		}
 		return 0
 	}
-	trusted, err := DeletionRisksWithOptions(ctx, dir, DeletionRisksOptions{})
+	trusted, err := DeletionRisksWithOptions(ctx, dir, DeletionRisksOptions{TrustFetchAllRemotes: true})
 	if err != nil || count(trusted, RiskDetachedCommits) != 0 {
 		t.Fatalf("trusted: %v, %v", trusted, err)
 	}
-	untrusted, err := DeletionRisksWithOptions(ctx, dir, DeletionRisksOptions{UntrustedRemotes: []string{"origin"}})
+	untrusted, err := DeletionRisksWithOptions(ctx, dir, DeletionRisksOptions{TrustFetchAllRemotes: true, UntrustedRemotes: []string{"origin"}})
 	if err != nil || count(untrusted, RiskDetachedCommits) != 1 {
 		t.Fatalf("untrusted: %v, %v", untrusted, err)
 	}
 	testutil.Git(t, dir, "switch", "-q", "-c", "again")
-	untrusted, err = DeletionRisksWithOptions(ctx, dir, DeletionRisksOptions{UntrustedRemotes: []string{"origin"}})
+	untrusted, err = DeletionRisksWithOptions(ctx, dir, DeletionRisksOptions{TrustFetchAllRemotes: true, UntrustedRemotes: []string{"origin"}})
 	if err != nil || count(untrusted, RiskUnpushedBranchCommits) != 1 {
 		t.Fatalf("untrusted branch: %v, %v", untrusted, err)
 	}
+}
+
+// Fail safe: options trusting no remote count every branch as unpushed.
+func TestDeletionRisksWithoutTrustedRemotesTrustsNone(t *testing.T) {
+	t.Parallel()
+	_, dir := forkedClone(t, testutil.OriginOpts{})
+	ctx := context.Background()
+	rs, err := DeletionRisksWithOptions(ctx, dir, DeletionRisksOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, err := UnpushedBranches(ctx, dir, DeletionRisksOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRisk(rs, RiskUnpushedBranchCommits) || !slices.Equal(names, []string{"main"}) {
+		t.Fatalf("risks %v, unpushed branches %v; want main unpushed", rs, names)
+	}
+}
+
+func hasRisk(rs []Risk, k RiskKind) bool {
+	return slices.ContainsFunc(rs, func(r Risk) bool { return r.Kind == k && r.Count > 0 })
 }
 
 func TestDeletionRisksTrustedRemotes(t *testing.T) {

@@ -226,9 +226,10 @@ func SafeToRemoveWorktree(risks []Risk) bool {
 // removing a repository needs every kind, checked in each of its work trees
 // (each may have its own detached HEAD and changes).
 //
-// Commit-based kinds compare with remote-tracking refs as of the last fetch;
-// commits on a branch that was pushed but whose remote-tracking ref was
-// pruned count as unpushed. Status configuration that hides changes is
+// Commit-based kinds compare with remote-tracking refs as of the last fetch
+// (DeletionRisks: those `git fetch --all` writes and prunes, see
+// DeletionRisksOptions.TrustFetchAllRemotes); commits on a branch that was
+// pushed but whose remote-tracking ref was pruned count as unpushed. Status configuration that hides changes is
 // overridden (see Status), and files whose changes are hidden by the
 // skip-worktree or assume-unchanged bits are checked by comparing their
 // content with the index: the id `git hash-object` computes after clean
@@ -244,7 +245,10 @@ func SafeToRemoveWorktree(risks []Risk) bool {
 // nestedRepositories) are inspected recursively, up to maxNestingDepth
 // levels: one with data at risk, without any remote, or that cannot be
 // inspected is a blocking RiskNestedRepository; a clean, fully pushed one an
-// informational RiskNestedRepositoryClean.
+// informational RiskNestedRepositoryClean. In a nested repository, only the
+// refs written and pruned by the fetches of the remotes `git fetch --all`
+// fetches (see BeforeNested) whose URL points outside the deleted tree
+// count as pushed, with or without BeforeNested.
 //
 // Known gaps (not detected): commits only reachable from reflogs, notes or
 // other refs (refs/pull/*, refs/replace/*, ...); detached HEADs of other
@@ -254,7 +258,7 @@ func SafeToRemoveWorktree(risks []Risk) bool {
 // fetched from the remote count as local tags, which is why
 // RiskTagOnlyCommits is informational.
 func DeletionRisks(ctx context.Context, dir string) ([]Risk, error) {
-	return DeletionRisksWithOptions(ctx, dir, DeletionRisksOptions{})
+	return DeletionRisksWithOptions(ctx, dir, DeletionRisksOptions{TrustFetchAllRemotes: true})
 }
 
 // DeletionRisksOptions configures DeletionRisksWithOptions.
@@ -262,7 +266,8 @@ type DeletionRisksOptions struct {
 	// BeforeNested, when set, is called with the directory of each nested
 	// repository that has at least one remote (its top level, or the
 	// repository itself when bare), before that repository is assessed, at
-	// every nesting level. Callers use it to fetch (e.g. FetchAll) so that
+	// every nesting level. Callers use it to fetch (FetchAll: the remotes
+	// whose refs count, see DeletionRisks) so that
 	// commits whose remote branch was deleted are seen as unpushed:
 	// DeletionRisks itself never accesses the network. An error makes the
 	// nested repository blocking ("fetch failed, remote state unknown"),
@@ -278,13 +283,19 @@ type DeletionRisksOptions struct {
 	// a fork that appears to be gone: commits reachable only from them are
 	// reported as unpushed or detached.
 	UntrustedRemotes []string
-	// TrustedRemotes, when not empty, restricts the remote-tracking refs
-	// that count as pushed for dir's own repository (not for nested
-	// repositories) to those of these remotes (refs/remotes/<remote>/*),
-	// except UntrustedRemotes: e.g. the remotes the caller fetched, since
-	// the refs of a remote that was not fetched may be stale (a branch
-	// deleted there, a remote that no longer exists). Empty: every remote.
+	// TrustedRemotes are the remotes whose remote-tracking refs count as
+	// pushed for dir's own repository (not for nested repositories): only
+	// the refs their fetches write and prune (see TrustedRemoteRefs),
+	// except those of UntrustedRemotes. Typically the remotes the caller
+	// fetched: the refs of a remote that was not fetched may be stale (a
+	// branch deleted there, a remote that no longer exists). Fail safe:
+	// with neither TrustedRemotes nor TrustFetchAllRemotes, no
+	// remote-tracking ref counts.
 	TrustedRemotes []string
+	// TrustFetchAllRemotes adds to TrustedRemotes the remotes `git fetch
+	// --all` fetches (with a URL, without remote.<name>.skipFetchAll), the
+	// rule for nested repositories.
+	TrustFetchAllRemotes bool
 	// PublishedRefs are refs (full names) whose commits count as pushed for
 	// dir's own repository, like remote-tracking refs (not for nested
 	// repositories), e.g. recorded pull request heads (see PullHeadRef).
@@ -300,11 +311,9 @@ type DeletionRisksOptions struct {
 
 // nestOpts carries the options and the recursion state.
 type nestOpts struct {
-	before func(ctx context.Context, dir string) error
-	// lead and remotes are pushedArgs for the top-level repository.
-	lead, remotes []string
-	root          string // resolved DeletedRoot
-	visited       map[string]bool
+	before  func(ctx context.Context, dir string) error
+	root    string // resolved DeletedRoot
+	visited map[string]bool
 	// foreign is set with ForeignWorktrees; the foreign work trees found at
 	// any level are collected in it ("path (git directory ...)", relative
 	// to top) and reported at the top level.
@@ -319,33 +328,40 @@ func DeletionRisksWithOptions(ctx context.Context, dir string, opts DeletionRisk
 		return nil, err
 	}
 	no := &nestOpts{before: opts.BeforeNested, root: resolvePath(top), visited: map[string]bool{resolvePath(top): true}}
-	no.lead, no.remotes = pushedArgs(opts)
+	pushed, err := pushedArgs(ctx, dir, opts)
+	if err != nil {
+		return nil, err
+	}
 	if opts.ForeignWorktrees {
 		no.foreign, no.top = new([]string), top
 	}
 	if opts.DeletedRoot != "" {
 		no.root = resolvePath(opts.DeletedRoot)
 	}
-	return deletionRisks(ctx, dir, top, maxNestingDepth, no)
+	return deletionRisks(ctx, dir, top, maxNestingDepth, no, pushed)
+}
+
+// pushedRevs are rev-list arguments for the commits that count as pushed:
+// lead goes before the revisions, revs after --not (see pushedArgs).
+type pushedRevs struct {
+	lead, revs []string
 }
 
 // maxNestingDepth bounds the recursion into nested repositories.
 const maxNestingDepth = 4
 
 // deletionRisks is DeletionRisks with the top level of the work tree
-// containing dir (as reported by TopLevel), the remaining nesting depth and
-// the resolved top levels already inspected (cycle safety).
-func deletionRisks(ctx context.Context, dir, top string, depth int, no *nestOpts) ([]Risk, error) {
+// containing dir (as reported by TopLevel), the remaining nesting depth,
+// the resolved top levels already inspected (cycle safety) and the commits
+// that count as pushed in it.
+func deletionRisks(ctx context.Context, dir, top string, depth int, no *nestOpts, pushed pushedRevs) ([]Risk, error) {
 	st, err := status(ctx, dir, "--ignored=traditional")
 	if err != nil {
 		return nil, err
 	}
-	var lead []string
-	remotes := []string{"--remotes"}
-	if depth == maxNestingDepth { // dir's own repository, not a nested one
-		lead, remotes = no.lead, no.remotes
+	revArgs := func(args ...string) []string {
+		return append(append(slices.Clone(pushed.lead), args...), pushed.revs...)
 	}
-	revArgs := func(args ...string) []string { return append(append(slices.Clone(lead), args...), remotes...) }
 	branchCommits, err := revCount(ctx, dir, revArgs("--branches", "--not")...)
 	if err != nil {
 		return nil, err
@@ -395,40 +411,46 @@ func deletionRisks(ctx context.Context, dir, top string, depth int, no *nestOpts
 }
 
 // pushedArgs returns the rev-list arguments for the commits that count as
-// pushed in the repository itself under opts: the options to put before the
-// revisions (--ignore-missing, for PublishedRefs that do not exist), and the
-// refs to put after --not (remote-tracking refs of TrustedRemotes, or of
-// every remote, except those of UntrustedRemotes, then PublishedRefs).
-func pushedArgs(opts DeletionRisksOptions) (lead, refs []string) {
-	if len(opts.TrustedRemotes) > 0 {
-		for _, r := range opts.TrustedRemotes {
-			if !slices.Contains(opts.UntrustedRemotes, r) {
-				refs = append(refs, "--remotes="+r) // refs/remotes/<r>/* (/* is implied)
-			}
+// pushed in the repository of dir under opts: the refs written by the
+// fetches of the trusted remotes (TrustedRemotes and, with
+// TrustFetchAllRemotes, those `git fetch --all` fetches, except
+// UntrustedRemotes; see TrustedRemoteRefs), then PublishedRefs, with
+// --ignore-missing for exact refs that do not exist. The configuration is
+// read (one git call) only when some remote may be trusted.
+func pushedArgs(ctx context.Context, dir string, opts DeletionRisksOptions) (pushedRevs, error) {
+	var p pushedRevs
+	if len(opts.TrustedRemotes) > 0 || opts.TrustFetchAllRemotes {
+		conf, err := readRemotes(ctx, dir)
+		if err != nil {
+			return p, err
 		}
-	} else {
-		for _, r := range opts.UntrustedRemotes {
-			refs = append(refs, "--exclude="+r+"/*")
+		trusted := slices.Clone(opts.TrustedRemotes)
+		if opts.TrustFetchAllRemotes {
+			trusted = append(trusted, fetchAllRemotes(conf)...)
 		}
-		refs = append(refs, "--remotes")
+		trusted = slices.DeleteFunc(trusted, func(r string) bool { return slices.Contains(opts.UntrustedRemotes, r) })
+		p.lead, p.revs = refSetOf(conf, trusted).RevListArgs()
 	}
-	refs = append(refs, opts.PublishedRefs...)
+	p.revs = append(p.revs, opts.PublishedRefs...)
 	if len(opts.PublishedRefs) > 0 {
-		lead = []string{"--ignore-missing"}
+		p.lead = []string{"--ignore-missing"}
 	}
-	return lead, refs
+	return p, nil
 }
 
 // UnpushedBranches returns, sorted, the local branches of the repository
 // containing dir that carry the commits DeletionRisksWithOptions counts as
 // RiskUnpushedBranchCommits with the same opts (UntrustedRemotes,
-// TrustedRemotes and PublishedRefs; the other options do not matter). A branch carries
-// unpushed commits exactly when its tip is unpushed: a pushed tip makes all
-// its ancestors pushed.
+// TrustedRemotes, TrustFetchAllRemotes and PublishedRefs; the other options
+// do not matter). A branch carries unpushed commits exactly when its tip is
+// unpushed: a pushed tip makes all its ancestors pushed.
 func UnpushedBranches(ctx context.Context, dir string, opts DeletionRisksOptions) ([]string, error) {
-	lead, refs := pushedArgs(opts)
+	p, err := pushedArgs(ctx, dir, opts)
+	if err != nil {
+		return nil, err
+	}
 	// --simplify-by-decoration: only the unpushed commits some ref points at.
-	args := append(append(append([]string{"rev-list"}, lead...), "--simplify-by-decoration", "--branches", "--not"), refs...)
+	args := append(append(append([]string{"rev-list"}, p.lead...), "--simplify-by-decoration", "--branches", "--not"), p.revs...)
 	out, err := Run(ctx, dir, args...)
 	if err != nil {
 		return nil, err
@@ -897,13 +919,16 @@ func nestedReasons(ctx context.Context, p, resolved string, bare bool, depth int
 		}
 	}
 	var reasons []string
-	total, outside, err := remoteLocations(ctx, p, no.root)
+	conf, err := readRemotes(ctx, p)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		return []string{"cannot inspect remotes: " + failureReason(err)}, nil
 	}
+	total, outside, trusted := remoteLocations(conf, p, no.root)
+	pushed := pushedRevs{}
+	pushed.lead, pushed.revs = refSetOf(conf, trusted).RevListArgs()
 	switch {
 	case bare && outside == 0:
 		reasons = append(reasons, "bare repository, no remote outside the deleted tree")
@@ -922,7 +947,7 @@ func nestedReasons(ctx context.Context, p, resolved string, bare bool, depth int
 	}
 	if bare {
 		if outside > 0 {
-			n, err := revCount(ctx, p, "--branches", "--not", "--remotes")
+			n, err := revCount(ctx, p, append(append(slices.Clone(pushed.lead), "--branches", "--not"), pushed.revs...)...)
 			if err != nil {
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
@@ -935,7 +960,7 @@ func nestedReasons(ctx context.Context, p, resolved string, bare bool, depth int
 		}
 		return reasons, nil
 	}
-	risks, err := deletionRisks(ctx, p, top, depth-1, no)
+	risks, err := deletionRisks(ctx, p, top, depth-1, no, pushed)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -950,36 +975,39 @@ func nestedReasons(ctx context.Context, p, resolved string, bare bool, depth int
 	return reasons, nil
 }
 
-// remoteLocations counts the remotes (URLs) of the repository at p and
-// those that do not point inside root (resolved). Local URLs (absolute or
-// relative paths, file://) are resolved against p; anything else (scp-like,
-// ssh, https, ...) is outside.
-func remoteLocations(ctx context.Context, p, root string) (total, outside int, err error) {
-	out, err := Run(ctx, p, "config", "--get-regexp", `^remote\..*\.url$`)
-	if err != nil {
-		var ge *GitError
-		if errors.As(err, &ge) && ge.ExitCode == 1 {
-			return 0, 0, nil // no remote
-		}
-		return 0, 0, err
-	}
-	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
-		_, u, ok := strings.Cut(line, " ")
-		if !ok {
-			continue
-		}
-		total++
+// remoteLocations counts the remotes (URLs) of the repository at p, with
+// configuration conf, and those that do not point inside root (resolved).
+// Local URLs (absolute or relative paths, file://) are resolved against p;
+// anything else (scp-like, ssh, https, ...) is outside. trusted names the
+// remotes whose refs count as pushed: those `git fetch --all` fetches (see
+// fetchAllRemotes) whose URL (the first one, which fetch uses) is outside
+// root.
+func remoteLocations(conf map[string]*remoteConf, p, root string) (total, outside int, trusted []string) {
+	isOutside := func(u string) bool {
 		local, isLocal := localRemotePath(p, u)
 		if !isLocal {
-			outside++
-			continue
+			return true
 		}
-		lp := resolvePath(local)
-		if rel, err := filepath.Rel(root, lp); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			outside++
+		rel, err := filepath.Rel(root, resolvePath(local))
+		return err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	}
+	for _, c := range conf {
+		for _, u := range c.urls {
+			if u == "" {
+				continue
+			}
+			total++
+			if isOutside(u) {
+				outside++
+			}
 		}
 	}
-	return total, outside, nil
+	for _, name := range fetchAllRemotes(conf) {
+		if u := conf[name].urls[0]; u != "" && isOutside(u) {
+			trusted = append(trusted, name)
+		}
+	}
+	return total, outside, trusted
 }
 
 // localRemotePath returns the filesystem path of a local remote URL.

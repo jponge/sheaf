@@ -175,8 +175,11 @@ func (e *RisksError) command(flag string) string {
 // origin below, then the fork: a fork that appears to be gone is a data
 // risk only when commits of local branches exist on it alone (see
 // fetchFork); commits on the remote-tracking refs of either remote count as
-// pushed. The refs of other remotes do not count (with Offline too): sheaf
-// does not fetch them, so they may be stale (see forkDistrust.trusted).
+// pushed, except with Offline, where the fork's do not (as for wt rm and
+// prune, see offlineForkDistrust). The refs of other remotes do not count
+// (with Offline too): sheaf does not fetch them, so they may be stale (see
+// forkDistrust.trusted); nor do refs the fetches do not write (see
+// gitx.TrustedRemoteRefs).
 //
 // Before deleting anything it fetches origin (so that commits whose remote
 // branch was deleted count as unpushed), then gathers gitx.DeletionRisks for
@@ -203,6 +206,10 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 		return "", err
 	}
 	rs := RemotesOf(entry)
+	var distrust forkDistrust
+	if opts.Offline && rs.Forked() {
+		distrust = offlineForkDistrust(rs.Fork)
+	}
 	// The fetch happens once; the re-check after confirmation reuses its
 	// outcome.
 	// fetchForceable: the fetch problem is one that Force overrides (a gone
@@ -277,14 +284,14 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 		}
 	}
 	risksOf := func(ctx context.Context, dir, deletedRoot string) ([]gitx.Risk, error) {
-		return gitx.DeletionRisksWithOptions(ctx, dir, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: deletedRoot, TrustedRemotes: rs.All(), PublishedRefs: published, ForeignWorktrees: true})
+		return gitx.DeletionRisksWithOptions(ctx, dir, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: deletedRoot, TrustedRemotes: distrust.trusted(rs), PublishedRefs: published, ForeignWorktrees: true})
 	}
 	plan, err := planRemoval(ctx, w, name, wd, fetch, func() bool { return fetchForceable }, risksOf, emit)
 	if err != nil {
 		return "", err
 	}
 	if plan.Refused(opts.Force) {
-		if err := nameUnpushedBranches(ctx, &plan, rs, published); err != nil {
+		if err := nameUnpushedBranches(ctx, &plan, rs, distrust, published); err != nil {
 			return "", err
 		}
 		return "", &RisksError{Plan: plan, Force: opts.Force, Offline: opts.Offline, bundle: hintBundle(ctx)}
@@ -553,16 +560,18 @@ func failureLine(err error) string {
 
 // nameUnpushedBranches sets the Detail of the unpushed-commits risk of the
 // primary checkout's item to the branches carrying them (gitx.UnpushedBranches
-// with the remotes rs and the published refs Remove used), for the refusal
-// message, followed by the remote-tracking refs of other remotes that have
-// their tips (see unfetchedRefsNote).
-func nameUnpushedBranches(ctx context.Context, plan *RemovePlan, rs gitx.Remotes, published []string) error {
+// with the trusted remotes of rs under distrust and the published refs
+// Remove used), for the refusal message, followed by the distrust and the
+// untrusted remote-tracking refs that have their tips (see
+// untrustedRefsNote).
+func nameUnpushedBranches(ctx context.Context, plan *RemovePlan, rs gitx.Remotes, distrust forkDistrust, published []string) error {
 	for i, it := range plan.Items {
 		for j, r := range it.Risks {
 			if r.Kind != gitx.RiskUnpushedBranchCommits || it.Path != plan.Primary {
 				continue
 			}
-			names, err := gitx.UnpushedBranches(ctx, plan.Primary, gitx.DeletionRisksOptions{TrustedRemotes: rs.All(), PublishedRefs: published})
+			fetched := distrust.trusted(rs)
+			names, err := gitx.UnpushedBranches(ctx, plan.Primary, gitx.DeletionRisksOptions{TrustedRemotes: fetched, PublishedRefs: published})
 			if err != nil {
 				if ctx.Err() != nil {
 					return ctx.Err()
@@ -573,7 +582,11 @@ func nameUnpushedBranches(ctx context.Context, plan *RemovePlan, rs gitx.Remotes
 			for k, n := range names {
 				tips[k] = "refs/heads/" + n
 			}
-			plan.Items[i].Risks[j].Detail = branchList(names) + unfetchedRefsNote(ctx, plan.Primary, rs, tips)
+			detail := branchList(names) + distrust.note()
+			if trusted, err := gitx.TrustedRemoteRefs(ctx, plan.Primary, fetched); err == nil {
+				detail += untrustedRefsNote(ctx, plan.Primary, trusted, fetched, distrust, tips)
+			}
+			plan.Items[i].Risks[j].Detail = detail
 		}
 	}
 	return nil
@@ -686,7 +699,21 @@ func fetchFork(ctx context.Context, net gitx.Net, primary string, rs gitx.Remote
 // forkDistrust.trusted). Commits on neither remote's refs are not
 // included: the risk checks report them as unpushed.
 func forkOnlyCommits(ctx context.Context, primary string, rs gitx.Remotes) (int, error) {
-	return revCount(ctx, primary, "--remotes="+rs.Fork+"/*", "--not", "--remotes="+rs.Reference+"/*")
+	fork, err := gitx.TrustedRemoteRefs(ctx, primary, []string{rs.Fork})
+	if err != nil {
+		return 0, err
+	}
+	ref, err := gitx.TrustedRemoteRefs(ctx, primary, []string{rs.Reference})
+	if err != nil {
+		return 0, err
+	}
+	forkLead, forkRevs := fork.RevListArgs()
+	refLead, refRevs := ref.RevListArgs()
+	var lead []string
+	if len(forkLead) > 0 || len(refLead) > 0 {
+		lead = []string{"--ignore-missing"}
+	}
+	return revCount(ctx, primary, append(append(append(lead, forkRevs...), "--not"), refRevs...)...)
 }
 
 func joinProblem(a, b string) string {
