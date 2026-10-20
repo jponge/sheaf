@@ -337,9 +337,10 @@ zsh or fish); the key help then says `enter path` rather than
 `enter cd`. sheaf removes `SHEAF_CD_FILE` from its environment at startup, so
 the processes it starts (git, hooks, `sheaf run` commands) never see it.
 
-Outside a bundle, bare `sheaf` prints the help and a hint to run
-`sheaf create` or `sheaf init`. With `--no-tui` or without a terminal it
-prints the help.
+Outside a bundle, bare `sheaf` with standard input and output on a
+terminal prints the help and a hint to run `sheaf create` or `sheaf init`.
+With `--no-tui` or without a terminal (inside a bundle or not) it prints
+only the help, without that hint.
 
 ## Command reference
 
@@ -480,15 +481,21 @@ commit, pinned to the tag. Local tags are never deleted or overwritten.
 
 **`sheaf wt list [<repo>]`** (alias `ls`): every checkout with its directory,
 branch, flags (primary, off-default, detached, tag, locked, prunable,
-outside) and path. `--porcelain` prints paths only (`-z`: NUL-terminated),
-`--json`. Unusable worktrees (another repository's, or without `.git`) are
-reported and make the exit status 1.
+outside) and path. `outside` marks a worktree that is not a direct child of
+the repository directory `<bundle>/<repo>/` (by its path or its resolved
+path): elsewhere, but also deeper inside it (e.g. `<repo>/group/x`).
+`--porcelain` prints paths only (`-z`: NUL-terminated), `--json`. Unusable
+worktrees (another repository's, or without `.git`) are reported and make
+the exit status 1.
 
-**`sheaf wt rm [<repo>] [<branch-or-dir>]`** (alias `remove`): remove a linked
-worktree, named by branch, tag or directory (`--branch`/`--dir` when a name
-is both). `-d` also deletes the local branch if merged, `-D` even if
-unmerged; the plan says whether the branch is deleted or kept. Requires
-`--yes` in plain mode; TUI mode asks in a dialog.
+**`sheaf wt remove [<repo>] [<branch-or-dir>]`** (alias `rm`, used in this
+document): remove a linked worktree, named by branch, tag or directory
+(`--branch`/`--dir` when a name is both). `-d` also deletes the local branch
+if merged, `-D` even if unmerged; when `-d` finds the branch unmerged, the
+whole removal is refused (the worktree is kept too; use `-D`, or drop `-d`
+to keep the branch). Without `-d`/`-D` the branch is kept; the plan says
+whether it is deleted or kept. Requires `--yes` in plain mode; TUI mode
+asks in a dialog.
 `--force`, `--offline`. The primary checkout cannot be removed (use
 `sheaf remove`).
 
@@ -607,7 +614,14 @@ These commands share one set of rules.
 (`remove`, `wt rm`, `sync --remove-gone`); `prune` without `--yes` is a dry
 run. sheaf never prompts in plain mode: missing input is an error. In TUI
 mode, a dialog shows what will be deleted and asks for confirmation unless
-`--yes` is given.
+`--yes` is given. The hints of refusals and of `prune` give the complete
+command to run (e.g. with `--force`, `-D` or `--offline`). It includes
+`--yes` when the command that printed it was run with `--yes` in plain mode
+(`sync --remove-gone` always is), so that it runs as printed; otherwise it
+leaves `--yes` out, so that the pasted command asks for confirmation (a
+dialog in TUI mode, a hint with `--yes` in plain mode). The `sheaf remove`
+that `wt rm` suggests for a primary checkout never includes `--yes`: it
+deletes the whole repository.
 
 **Fetch first.** `remove`, `wt rm` and `prune` fetch before deciding, so
 that commits whose remote branch was deleted count as unpushed. `--offline`
@@ -638,9 +652,10 @@ nested repositories) do not. `sync` does not accept `--offline`.
   in any checkout or worktree; entries of the repository directory that
   belong to no checkout (OS files such as `.DS_Store` excepted); nested
   repositories (also inside ignored directories) that are dirty, have
-  stashes, unpushed commits or no remote; a remote repository that no
-  longer exists. Commits reachable from a pull request head recorded by
-  `wt pr` count as pushed (with `--offline`, as of its last fetch).
+  stashes, unpushed commits or no remote, or whose fetch failed (their
+  remote state is unknown); a remote repository that no longer exists.
+  Commits reachable from a pull request head recorded by `wt pr` count as
+  pushed (with `--offline`, as of its last fetch).
 - `wt rm`: uncommitted changes, untracked files, commits only on a detached
   HEAD in that worktree.
 - `sync --remove-gone`: as `remove`; in addition, a gone repository whose
@@ -648,16 +663,30 @@ nested repositories) do not. `sync` does not accept `--offline`.
   `--force`. When more than half of an organization's tracked repositories
   (more than one) look gone, removal also needs `--allow-mass-removal`.
 
+Commits reachable only from local tags are reported but never block (as
+for ignored files, the line says "informational, not blocking"): tags
+fetched from a remote cannot be told apart from local ones.
+
 **Never overridden by `--force`:**
 
 - the working directory is inside the repository or worktree to delete;
 - locked worktrees (`git worktree unlock` first);
 - worktrees outside the repository directory, and worktrees of another
-  repository inside it (`remove`);
+  repository inside it (`remove`). For `remove`, outside means not inside
+  `<bundle>/<repo>` at any depth (a worktree deeper inside is removed with
+  the directory); for `wt rm` and `prune`, it means not a direct child of
+  `<bundle>/<repo>/` (by its path or its resolved path), so a worktree such
+  as `<repo>/group/x` is refused there;
 - a missing primary checkout or a repository directory that is a symbolic
   link (`remove`); a worktree whose directory is missing (`wt rm`: run
   `git worktree prune`);
-- a failed fetch other than a gone remote;
+- a failed fetch of `origin` (for a fork: of `upstream` or of your fork),
+  except, for `remove` and `sync --remove-gone`, a remote that appears to
+  be gone (data at risk, see above); for `wt rm` a gone `origin` or
+  `upstream` is a failed fetch too, while a gone fork is not (its
+  remote-tracking refs are just not trusted). `--offline` decides on local
+  data instead. The failed fetch of a nested repository is not one of
+  these: it is data at risk, which `--force` overrides (`remove`, `wt rm`);
 - the primary checkout in `wt rm` (use `sheaf remove`).
 
 `remove` only deletes inside `<bundle>/<repo>`, a real directory directly
@@ -668,16 +697,18 @@ It checks the plan again under `.sheaf.lock` after confirmation.
 branch only if it is merged into its own upstream or into `origin/<default>`
 (`upstream/<default>` for a fork), or contained in another ref (an upstream
 or ref of a remote sheaf does not fetch does not count, see above); `-D`
-deletes it even if unmerged (its commits are lost). `--force` only concerns
-the worktree's own data, never the branch. Tags of tag worktrees are always
-kept.
+deletes it even if unmerged (its commits are lost). When `wt rm -d` finds
+the branch unmerged, it refuses the whole removal: the worktree is not
+removed either. `prune --delete-branches` instead removes the worktree and
+keeps the unmerged branch. `--force` only concerns the worktree's own data,
+never the branch. Tags of tag worktrees are always kept.
 
 **`prune`** has no `--force`: a worktree with uncommitted changes or
 untracked files is kept (ignored files do not block it). It never touches
-the primary checkout, worktrees outside the repository directory, locked
-worktrees, tag worktrees, or `wt pr` branches. A branch without commits of
-its own is never considered merged; a branch being rebased or bisected
-counts as in use.
+the primary checkout, worktrees outside the repository directory (not a
+direct child of it, see above), locked worktrees, tag worktrees, or `wt pr`
+branches. A branch without commits of its own is never considered merged; a
+branch being rebased or bisected counts as in use.
 
 ## TUI and plain mode
 
@@ -731,13 +762,30 @@ the other commands with `-j 1`. In TUI mode git never gets the terminal.
 - `update` lets a running fast-forward merge finish after the first Ctrl-C
   (interrupting it would leave a half-updated work tree) and starts no new
   one.
+- `remove` (also through `sync --remove-gone`) lets the final deletion of
+  the repository directory finish after the first Ctrl-C, then removes the
+  `sheaf.yaml` entry and reports the repository as removed (exit status 0
+  when nothing else was interrupted). The removal of a worktree (`wt rm`,
+  `prune --yes`, and the worktrees that `remove` removes before deleting
+  the directory) is stopped by the first Ctrl-C, which kills
+  `git worktree remove`: the worktree may be left half deleted, and is
+  reported as interrupted. If its `.git` file is gone, sheaf lists it as
+  unusable, with the `git worktree repair` command that restores it; the
+  deleted files then count as unstaged changes, so removing it needs
+  `wt rm --force`.
 - A second Ctrl-C is an emergency stop: the process groups of running git
   commands and `run` commands are killed and sheaf exits with 130 at once,
   without cleanup. A partial clone directory (`add`, `sync`), an
   `.sheaf-adopt-*` folder from an interrupted adopt, or a `.git/index.lock`
   and half-updated work tree from a killed fast-forward (`update`) may
   remain; the message says what to check for the operations that were
-  running.
+  running. An emergency stop during the final deletion of `remove` leaves
+  the repository directory partially deleted (e.g. `<repo>/main` without
+  its `.git`) while `sheaf.yaml` still lists the repository; the message
+  does not mention it. When the primary checkout lost its `.git`, `remove`,
+  even with `--force`, then refuses the repository ("no primary checkout
+  found"): delete what is left of `<bundle>/<repo>` by hand, then run
+  `sheaf remove <repo>` again, which only removes the entry.
 - `run`: Ctrl-C sends SIGTERM to the running commands and their children,
   then SIGKILL after 5 seconds.
 
