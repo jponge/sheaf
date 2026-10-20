@@ -219,7 +219,7 @@ func selectFromOrg(ctx context.Context, h hosting.Hosting, req AddRequest) ([]ho
 			if _, listedToo := findRepo(listed, name); !listedToo {
 				got, err := h.Repo(ctx, req.Org, name)
 				if err != nil {
-					return nil, "", err
+					return nil, "", fmt.Errorf("%s/%s: %w", req.Org, name, err)
 				}
 				if got.Archived && !req.IncludeArchived {
 					return nil, "", fmt.Errorf("repository %s is archived; to add it, run: %s", got.Slug(), includeArchivedCommand(ctx, req, name))

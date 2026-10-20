@@ -205,7 +205,7 @@ func TestHomeBrowse(t *testing.T) {
 	// A failure is the message too.
 	e.fake.BrowseErr = fmt.Errorf("gh repo view o/a --web: %w: exit status 4", hosting.ErrGHNotAuthenticated)
 	out = syncBuffer{}
-	in = newScript(t, false, ovKeys(t, &out, "STATE", 1, "b"), ovKeys(t, &out, "browse failed: gh repo view o/a --web: gh is not authenticated", 1, "q"))
+	in = newScript(t, false, ovKeys(t, &out, "STATE", 1, "b"), ovKeys(t, &out, "browse failed: opening o/a: gh repo view o/a --web: gh is not authenticated", 1, "q"))
 	errs, code = runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || strings.Contains(out.String(), "sheaf browse: ") || !strings.Contains(errs, "gh is not authenticated") {
 		t.Fatalf("failure: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)

@@ -278,10 +278,20 @@ func TestGHFailureSurfacesStderr(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path, _ := stubGH(t, map[string]resp{"repo list": {stderr: msg, code: 1}})
 			_, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).ListRepos(context.Background(), "smallrye")
-			if err == nil || !strings.Contains(err.Error(), msg) {
+			if err == nil {
+				t.Fatal("no error")
+			}
+			// A "not found" answer reads as one line (see
+			// TestGHErrorsOneLine): its *GHError keeps the command and
+			// gh's stderr.
+			text := err.Error()
+			if ge, ok := errors.AsType[*GHError](err); ok && errors.Is(err, ErrNotFound) {
+				text = "gh " + strings.Join(ge.Args, " ") + ": " + ge.Stderr
+			}
+			if !strings.Contains(text, msg) {
 				t.Fatalf("err = %v, want stderr %q", err, msg)
 			}
-			if strings.HasSuffix(err.Error(), ": ") || !strings.Contains(err.Error(), "repo list smallrye") {
+			if strings.HasSuffix(text, ": ") || !strings.Contains(text, "repo list smallrye") {
 				t.Fatalf("error should name the command: %v", err)
 			}
 		})
@@ -384,7 +394,9 @@ func TestGHNotFoundMapped(t *testing.T) {
 		err error
 		msg string
 	}{{err1, repoMsg}, {err2, prMsg}, {err3, ownerMsg}} {
-		if !errors.Is(c.err, ErrNotFound) || !strings.Contains(c.err.Error(), c.msg) {
+		// gh's stderr is kept in the *GHError (its text is one line, see
+		// TestGHErrorsOneLine).
+		if ge, ok := errors.AsType[*GHError](c.err); !errors.Is(c.err, ErrNotFound) || !ok || ge.Stderr != c.msg {
 			t.Errorf("case %d: err = %v", i, c.err)
 		}
 	}
@@ -392,6 +404,70 @@ func TestGHNotFoundMapped(t *testing.T) {
 	path, _ = stubGH(t, map[string]resp{"repo view": {stderr: "HTTP 502", code: 1}})
 	if _, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).Repo(ctx, "o", "n"); errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// The common gh failures read as one actionable line, without gh's
+// command line, exit status or multi-line text (B62 H2); the error still
+// wraps its kind (errors.Is) and keeps the command and what gh printed
+// (*GHError). Other failures keep all of it in their text.
+func TestGHErrorsOneLine(t *testing.T) {
+	const (
+		authLine = "gh is not authenticated: run `gh auth login`"
+		repoMsg  = "GraphQL: Could not resolve to a Repository with the name 'o/nope'. (repository)"
+		prMsg    = "GraphQL: Could not resolve to a PullRequest with the number of 7. (repository.pullRequest)"
+		ownerMsg = `the owner handle "nobody" was not recognized as either a GitHub user or an organization`
+		branch   = `no pull requests found for branch "feat"`
+	)
+	ctx := context.Background()
+	for _, c := range []struct {
+		name, cmd string
+		r         resp
+		call      func(*GH) error
+		want      string
+		kind      error
+	}{
+		{"repo view, no credentials", "repo view", resp{stderr: unauthenticatedStderr, code: 4},
+			func(g *GH) error { _, err := g.Repo(ctx, "o", "nope"); return err }, authLine, ErrGHNotAuthenticated},
+		{"pr view, no credentials", "pr view", resp{stderr: unauthenticatedStderr, code: 4},
+			func(g *GH) error { _, err := g.PR(ctx, "o", "r", 7); return err }, authLine, ErrGHNotAuthenticated},
+		{"repo list, bad credentials", "repo list", resp{stderr: badCredentialsStderr, code: 1},
+			func(g *GH) error { _, err := g.ListRepos(ctx, "o"); return err }, authLine, ErrGHNotAuthenticated},
+		{"api user, no credentials", "api user", resp{stderr: unauthenticatedStderr, code: 4},
+			func(g *GH) error { _, err := g.CurrentUser(ctx); return err }, authLine, ErrGHNotAuthenticated},
+		{"no such repository", "repo view", resp{stderr: repoMsg, code: 1},
+			func(g *GH) error { _, err := g.Repo(ctx, "o", "nope"); return err },
+			"no such repository on GitHub (or not visible to your gh account)", ErrNotFound},
+		{"pull request of no such repository", "pr view", resp{stderr: repoMsg, code: 1},
+			func(g *GH) error { _, err := g.PR(ctx, "o", "nope", 7); return err },
+			"no such repository on GitHub (or not visible to your gh account)", ErrNotFound},
+		{"no such pull request", "pr view", resp{stderr: prMsg, code: 1},
+			func(g *GH) error { _, err := g.PR(ctx, "o", "r", 7); return err }, "no such pull request on GitHub", ErrNotFound},
+		{"no such owner", "repo list", resp{stderr: ownerMsg, code: 1},
+			func(g *GH) error { _, err := g.ListRepos(ctx, "nobody"); return err }, "no such user or organization on GitHub", ErrNotFound},
+		{"no pull request for a branch", "pr view", resp{stderr: branch, code: 1},
+			func(g *GH) error { return g.Browse(ctx, "o", "r", Page{Head: "feat"}) }, branch, ErrNotFound},
+		// Not a recorded answer: another "Could not resolve to a" keeps
+		// gh's first line only.
+		{"other not found answer", "repo view", resp{stderr: "GraphQL: Could not resolve to a Thing. (x)\nmore", code: 1},
+			func(g *GH) error { _, err := g.Repo(ctx, "o", "r"); return err }, "GraphQL: Could not resolve to a Thing. (x)", ErrNotFound},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path, _ := stubGH(t, map[string]resp{c.cmd: c.r})
+			err := c.call(NewGH(GHOptions{Path: path, Protocol: "ssh"}))
+			if err == nil || err.Error() != c.want || !errors.Is(err, c.kind) {
+				t.Fatalf("err = %q, want %q wrapping %v", err, c.want, c.kind)
+			}
+			ge, ok := errors.AsType[*GHError](err)
+			if !ok || !strings.HasPrefix(strings.Join(ge.Args, " "), c.cmd+" ") || ge.Stderr != strings.TrimSpace(c.r.stderr) {
+				t.Fatalf("GHError = %+v, want the command %q and gh's stderr", ge, c.cmd)
+			}
+		})
+	}
+	path, _ := stubGH(t, map[string]resp{"repo view": {stderr: "HTTP 502: Bad Gateway", code: 1}})
+	_, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).Repo(ctx, "o", "r")
+	if want := "gh repo view o/r --json " + repoFields + ": exit status 1: HTTP 502: Bad Gateway"; err == nil || err.Error() != want {
+		t.Fatalf("other failure: err = %q, want %q", err, want)
 	}
 }
 

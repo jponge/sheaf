@@ -30,7 +30,10 @@ func TestGHCurrentUserFailures(t *testing.T) {
 	// Not parallel: writes an executable stub (ETXTBSY with concurrent forks).
 	t.Run("not logged in", func(t *testing.T) {
 		path, _ := stubGH(t, map[string]resp{"api user": {stderr: "gh auth login required", code: 4}})
-		if _, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).CurrentUser(context.Background()); err == nil || !strings.Contains(err.Error(), "gh auth login required") {
+		// gh's stderr is kept in the *GHError (its text is one line, see
+		// TestGHErrorsOneLine).
+		_, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).CurrentUser(context.Background())
+		if ge, ok := errors.AsType[*GHError](err); err == nil || !ok || ge.Stderr != "gh auth login required" {
 			t.Fatalf("err = %v", err)
 		}
 	})

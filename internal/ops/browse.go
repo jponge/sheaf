@@ -63,7 +63,7 @@ func Browse(ctx context.Context, w *Workspace, h hosting.Hosting, arg, cwd strin
 		err = h.Browse(ctx, owner, name, t.Page)
 	}
 	if err != nil {
-		return BrowseTarget{}, err
+		return BrowseTarget{}, fmt.Errorf("opening %s: %w", t, err)
 	}
 	return t, nil
 }

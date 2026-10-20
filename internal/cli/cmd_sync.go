@@ -101,6 +101,30 @@ func newSyncCmd(d Deps) *cobra.Command {
 	return cmd
 }
 
+// listingError is the failed listing of an organization in the error of
+// sync (see syncErr): its warning gave the reason (Err).
+type listingError struct {
+	Org string
+	Err error
+}
+
+func (e *listingError) Error() string { return "listing repositories of " + e.Org + " failed" }
+
+func (e *listingError) Unwrap() error { return e.Err }
+
+// syncErr returns the error of rep (see ops.SyncReport.Err) once its
+// warnings are printed: the failed listings, whose warnings said why, are
+// only named (see listingError).
+func syncErr(rep ops.SyncReport) error {
+	rep.Orgs = slices.Clone(rep.Orgs)
+	for i, o := range rep.Orgs {
+		if o.Err != nil {
+			rep.Orgs[i].Err = &listingError{Org: o.Org, Err: o.Err}
+		}
+	}
+	return rep.Err()
+}
+
 func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 	if err := fl.validate(); err != nil {
 		return err
@@ -154,7 +178,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 		if err := syWriteJSON(out, w.Root, rep); err != nil {
 			return err
 		}
-		return rep.Err()
+		return syncErr(rep)
 	}
 	if menu {
 		return tuiSync(c, d, w, rep, fl.noFork)
@@ -165,7 +189,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 	}
 	syWriteProposals(c.Context(), out, rep, w.Root, fl.orgs, !(fl.addNew || fl.removeGone || len(fl.exclude) > 0))
 
-	errs := []error{rep.Err()}
+	errs := []error{syncErr(rep)}
 	if len(excluded) > 0 {
 		if err := ops.SyncExclude(ctx, w, excluded); err != nil {
 			return errors.Join(append(errs, err)...)

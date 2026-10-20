@@ -170,6 +170,53 @@ func (g *GH) command(ctx context.Context, dir string, args []string) *exec.Cmd {
 	return cmd
 }
 
+// GHError is the failure of a gh command that ran (see GH.failure).
+type GHError struct {
+	Args   []string // the arguments of gh
+	Stderr string   // what gh printed on standard error, trimmed
+	// Err is the error of the run (an *exec.ExitError), wrapped in
+	// ErrNotFound or ErrGHNotAuthenticated when gh's answer says so.
+	Err error
+}
+
+// Error returns one actionable line for the common failures: for
+// ErrGHNotAuthenticated, how to log in; for ErrNotFound, what is missing
+// (see notFoundLine). Other failures name the command and keep the error
+// of the run and gh's standard error.
+func (e *GHError) Error() string {
+	switch {
+	case errors.Is(e.Err, ErrNotFound):
+		return notFoundLine(e.Stderr)
+	case errors.Is(e.Err, ErrGHNotAuthenticated):
+		return ErrGHNotAuthenticated.Error() + ": run `gh auth login`"
+	}
+	cmd := "gh " + strings.Join(e.Args, " ")
+	if e.Stderr == "" {
+		return cmd + ": " + e.Err.Error()
+	}
+	return cmd + ": " + e.Err.Error() + ": " + e.Stderr
+}
+
+func (e *GHError) Unwrap() error { return e.Err }
+
+// notFoundLine returns what is missing according to stderr, gh's answer
+// recognized by isNotFound: no such owner, repository (which may also be
+// one the account cannot see) or pull request; else the first line of
+// stderr (e.g. gh's "no pull requests found for branch ...").
+func notFoundLine(stderr string) string {
+	switch {
+	case strings.Contains(stderr, "Could not resolve to a RepositoryOwner"),
+		strings.Contains(stderr, "was not recognized as either a GitHub user or an organization"):
+		return "no such user or organization on GitHub"
+	case strings.Contains(stderr, "Could not resolve to a Repository with"):
+		return "no such repository on GitHub (or not visible to your gh account)"
+	case strings.Contains(stderr, "Could not resolve to a PullRequest"):
+		return "no such pull request on GitHub"
+	}
+	l, _, _ := strings.Cut(stderr, "\n")
+	return l
+}
+
 // failure returns the error of the gh command args whose run ended with
 // err (nil on success: failure then returns nil) and printed stderr.
 func (g *GH) failure(ctx context.Context, args []string, err error, stderr string) error {
@@ -190,10 +237,7 @@ func (g *GH) failure(ctx context.Context, args []string, err error, stderr strin
 	} else if isUnauthenticated(err, msg) {
 		wrapped = fmt.Errorf("%w: %w", ErrGHNotAuthenticated, err)
 	}
-	if msg == "" {
-		return fmt.Errorf("gh %s: %w", strings.Join(args, " "), wrapped)
-	}
-	return fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), wrapped, msg)
+	return &GHError{Args: args, Stderr: msg, Err: wrapped}
 }
 
 // runBrowser runs gh like run for a command that starts a web browser.

@@ -385,6 +385,12 @@ func TestAddOrgTruncatedListing(t *testing.T) {
 	if _, err := f.add(t, AddRequest{Org: "o", All: true}); !errors.Is(err, hosting.ErrPossiblyTruncated) {
 		t.Fatalf("add --all with truncated listing: err = %v, want ErrPossiblyTruncated", err)
 	}
+	// The failed lookup of a repository missing from the listing names it
+	// (the gh adapter's errors do not, see hosting.GHError).
+	f.fake.RepoErr["o/b"] = hosting.ErrGHNotAuthenticated
+	if _, err := f.add(t, AddRequest{Org: "o", Repos: []string{"b"}}); err == nil || err.Error() != "o/b: gh is not authenticated" || !errors.Is(err, hosting.ErrGHNotAuthenticated) {
+		t.Fatalf("add --repo b with truncated listing and failed lookup: err = %v", err)
+	}
 }
 
 // Cancelling a clone that is really running removes the partial

@@ -396,7 +396,7 @@ func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noF
 	if len(rep.Proposals) == 0 {
 		syWriteProposals(c.Context(), out, rep, w.Root, nil, false)
 		d.reportUnchanged("nothing to sync")
-		return rep.Err()
+		return syncErr(rep)
 	}
 	keys, err := s.multiSelect("Sync: choose the changes to apply", proposalItems(rep.Proposals))
 	if err != nil {
@@ -429,9 +429,9 @@ func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noF
 		fmt.Fprintln(out, "nothing selected; nothing changed")
 		d.reportUnchanged("nothing selected; nothing changed")
 		d.reportCancelled()
-		return rep.Err()
+		return syncErr(rep)
 	}
-	errs := []error{rep.Err()}
+	errs := []error{syncErr(rep)}
 	wd, err := d.getwd()
 	if err != nil {
 		return err
