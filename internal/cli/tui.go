@@ -574,6 +574,19 @@ func (d Deps) painter(c *cobra.Command, w io.Writer) func(tui.Level, string) str
 	return tui.Painter(terminalOf(w), environ())
 }
 
+// outputWidth returns the columns of the terminal behind w, the output of
+// c, in TUI mode (see tuiMode); else, and when unknown, 0: plain output
+// is never fitted to a terminal.
+func (d Deps) outputWidth(c *cobra.Command, w io.Writer) int {
+	if !d.tuiMode(c) {
+		return 0
+	}
+	if d.termWidth != nil {
+		return d.termWidth(w)
+	}
+	return terminalWidth(terminalOf(w))
+}
+
 // teeWriter writes to Writer, a copy of term (the terminal) and of
 // something else, and tells term as the terminal behind it (see
 // terminalOf): the home screen captures what its actions print.

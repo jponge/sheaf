@@ -11,6 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/tui"
@@ -112,6 +113,12 @@ status is known. Worktrees outside <bundle>/<repo>/ are marked "(outside)".
 Checkouts that cannot be inspected (e.g. a missing directory) are listed as
 problems after the table, and the exit code is then 1.
 
+On a terminal narrower than the table (outside plain mode), status prints
+the compact table of the home screen: REPO, DIR, BRANCH, CHANGES and STATE
+("clean, ↑1 ↓2", "dirty, no upstream", "clean, PR #7"...). CHANGES holds
+the non-zero counts: +staged ~unstaged ?untracked !conflicted $stashes.
+--no-tui and --json always print the full output.
+
 --json prints one document instead of the table:
 
   {
@@ -170,7 +177,7 @@ func newStatusCmd(d Deps) *cobra.Command {
 					return err
 				}
 			} else {
-				writeStatusTable(out, r, d.painter(c, out))
+				writeStatus(out, r, d.painter(c, out), d.outputWidth(c, out))
 			}
 			n := len(r.Problems)
 			for _, s := range r.Checkouts {
@@ -189,6 +196,65 @@ func newStatusCmd(d Deps) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.Fetch, "fetch", false, "fetch origin (upstream and origin for a clone of your fork) into each repository first")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON document (schema in --help)")
 	return cmd
+}
+
+// writeStatus writes the status table of r for a terminal of width
+// columns (0 = unknown, or not a terminal): the full table (see
+// writeStatusTable), or the compact one (see writeStatusCompact) when the
+// full one is wider than the terminal.
+func writeStatus(out io.Writer, r ops.StatusReport, paint func(tui.Level, string) string, width int) {
+	var full bytes.Buffer
+	writeStatusTable(&full, ops.StatusReport{Checkouts: r.Checkouts}, paint)
+	widest := 0
+	for l := range strings.Lines(full.String()) {
+		widest = max(widest, ansi.StringWidth(strings.TrimSuffix(l, "\n")))
+	}
+	if width <= 0 || widest <= width {
+		_, _ = full.WriteTo(out)
+		writeProblems(out, r.Problems, paint)
+		return
+	}
+	writeStatusCompact(out, r, paint, width)
+}
+
+// writeStatusCompact writes the status of r as the home screen's overview
+// shows it (see tui.Table), cut to width: REPO (blank when it repeats),
+// DIR, BRANCH, CHANGES (statusChanges) and STATE (homeState, colored
+// alike), then the problems.
+func writeStatusCompact(out io.Writer, r ops.StatusReport, paint func(tui.Level, string) string, width int) {
+	var rows []tui.Row
+	stashShown := ""
+	for _, c := range r.Checkouts {
+		changes := ""
+		if c.Err == nil {
+			stashes := 0
+			if stashShown != c.Repo {
+				stashes, stashShown = c.Status.Stashes, c.Repo
+			}
+			changes = statusChanges(*c.Status, stashes)
+		}
+		rows = append(rows, tui.Row{Cells: []string{c.Repo, displayDir(c.Checkout), homeBranch(c), changes, homeState(c)}, Alert: c.Err != nil, Level: homeLevel(c)})
+	}
+	for _, l := range tui.Table([]string{"REPO", "DIR", "BRANCH", "CHANGES", "STATE"}, rows, width, []int{2, 1}, paint) {
+		fmt.Fprintln(out, l)
+	}
+	writeProblems(out, r.Problems, paint)
+}
+
+// statusChanges returns the CHANGES cell of the compact status table: the
+// non-zero counts of s, as "+<staged> ~<unstaged> ?<untracked>
+// !<conflicts>", then "$<stashes>"; "" when all are zero.
+func statusChanges(s gitx.RepoStatus, stashes int) string {
+	var parts []string
+	for _, c := range []struct {
+		sym string
+		n   int
+	}{{"+", s.Staged}, {"~", s.Unstaged}, {"?", s.Untracked}, {"!", s.Conflicted}, {"$", stashes}} {
+		if c.n > 0 {
+			parts = append(parts, c.sym+strconv.Itoa(c.n))
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func writeStatusTable(out io.Writer, r ops.StatusReport, paint func(tui.Level, string) string) {

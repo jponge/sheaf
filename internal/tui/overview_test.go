@@ -1035,3 +1035,44 @@ func TestOverviewActionWithDoRunsInPlace(t *testing.T) {
 		t.Fatalf("refused Do ran (targets %q, command %v):\n%s", got, cmd != nil, view(m))
 	}
 }
+
+// Table renders rows as the overview renders its table, without cursor,
+// selection boxes or header style: grouped by the first cell, the
+// shrinkable columns narrowed to the width, the last cell painted at the
+// level of the row (failed for Alert), lines that still do not fit cut
+// with "…"; with an unknown width (0), nothing is narrowed or cut.
+func TestTable(t *testing.T) {
+	t.Parallel()
+	header := []string{"REPO", "DIR", "BRANCH", "CHANGES", "STATE"}
+	rows := []Row{
+		{Cells: []string{"api", "main", "main", "", "clean"}, Level: LevelOK},
+		{Cells: []string{"api", "fix-timeout", "fix/a-very-long-branch", "+1", "dirty, ↑1"}, Level: LevelWarn},
+		{Cells: []string{"web", "main", "main", "", "error: boom boom boom boom"}, Alert: true, Level: LevelOK},
+	}
+	names := map[Level]string{LevelOK: "32", LevelWarn: "33", LevelFail: "31"}
+	paint := func(l Level, s string) string { return "\x1b[" + names[l] + "m" + s + "\x1b[m" }
+	for _, tc := range []struct {
+		width int
+		want  []string
+	}{
+		{0, []string{
+			"REPO  DIR          BRANCH                  CHANGES  STATE",
+			"api   main         main                             \x1b[32mclean\x1b[m",
+			"      fix-timeout  fix/a-very-long-branch  +1       \x1b[33mdirty, ↑1\x1b[m",
+			"web   main         main                             \x1b[31merror: boom boom boom boom\x1b[m",
+		}},
+		{40, []string{
+			"REPO  DIR       BRANCH    CHANGES  STATE",
+			"api   main      main               \x1b[32mclean\x1b[m",
+			"      fix-tim…  fix/a-v…  +1       \x1b[33mdirt…\x1b[m",
+			"web   main      main               \x1b[31merro…\x1b[m",
+		}},
+	} {
+		if got := Table(header, rows, tc.width, []int{2, 1}, paint); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("width %d:\n%q\nwant\n%q", tc.width, got, tc.want)
+		}
+	}
+	if got := Table(header, rows[:1], 0, nil, nil); !reflect.DeepEqual(got, []string{"REPO  DIR   BRANCH  CHANGES  STATE", "api   main  main             clean"}) {
+		t.Errorf("unpainted:\n%q", got)
+	}
+}

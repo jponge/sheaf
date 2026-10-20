@@ -440,7 +440,12 @@ untracked, conflicted counts and stashes of every checkout, primary first.
 No network access: ahead/behind are relative to the last fetch, unless
 `--fetch`. `--repo`, `--primary-only`, `--dirty-only`, `--json`. Checkouts
 that cannot be inspected are listed as problems after the table and make
-the exit status 1.
+the exit status 1. Outside plain mode, on a terminal narrower than that
+table, status prints the compact table of the home screen instead: REPO,
+DIR, BRANCH, CHANGES and STATE (`clean, ↑1 ↓2`, `dirty, no upstream`,
+`clean, PR #7`...), with CHANGES made of the non-zero counts `+` staged,
+`~` unstaged, `?` untracked, `!` conflicted and `$` stashes (e.g. `+2 ~1
+?3`); `--no-tui` and `--json` always print the full output.
 
 **`sheaf fetch`**: `git fetch --prune origin` once per repository (for a fork:
 `upstream`, then `origin`), repositories in parallel. `--repo`.
@@ -747,7 +752,8 @@ level words of what commands print are coloured, OK green, INFO faint,
 WARN yellow, FAIL red: `OK`, `INFO`, `WARN`, `FAIL` of `doctor`; `done`,
 `skipped`, `failed` of summaries (and `fast-forwarded`, `up to date`,
 `pinned` of `update`); the `warning:` and `note:` markers; `clean`,
-`dirty`, `error:` and `problem:` of `status`. The report view of the home
+`dirty`, `error:` and `problem:` of `status` (the whole STATE of its
+compact table). The report view of the home
 screen colours them the same way.
 
 **Working indicator.** When standard error is a terminal, a spinner line

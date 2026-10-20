@@ -77,6 +77,9 @@ type Deps struct {
 	// now replaces time.Now for the AGE column of the home screen; tests
 	// only.
 	now func() time.Time
+	// termWidth replaces the width of the terminal behind standard output
+	// (see Deps.outputWidth); tests only.
+	termWidth func(io.Writer) int
 }
 
 // reportUnchanged tells d.unchanged, if set, that the command changed
@@ -390,6 +393,24 @@ func isTerminal(x any) bool {
 		return false
 	}
 	return isTerm
+}
+
+// terminalWidth returns the columns of x when it is an *os.File connected
+// to a terminal, else 0. It uses SyscallConn, as isTerminal.
+func terminalWidth(x any) int {
+	f, ok := x.(*os.File)
+	if !ok || f == nil || !isTerminal(f) {
+		return 0
+	}
+	rc, err := f.SyscallConn()
+	if err != nil {
+		return 0
+	}
+	w := 0
+	if err := rc.Control(func(fd uintptr) { w, _, _ = term.GetSize(fd) }); err != nil {
+		return 0
+	}
+	return w
 }
 
 // pipeWatch wraps standard output: the first write failing with EPIPE (the

@@ -558,6 +558,15 @@ func (m *Overview) scrollToCursor() {
 // row (not only the visible ones, so that filtering does not shift them),
 // the shrinkable columns narrowed to the window width (see WithShrinkable).
 func (m Overview) columnWidths() []int {
+	return fitColumns(m.header, m.rows, m.width, len("> [ ] "), m.shrink)
+}
+
+// fitColumns returns the width of each column over header and rows, with
+// the columns shrink narrowed, in that order and down to minShrunkWidth,
+// so that prefix and the table, its last column as wide as the widest
+// last cell of the header and the rows without Alert, fit width (0 =
+// unknown: nothing is narrowed); see WithShrinkable.
+func fitColumns(header []string, rows []Row, width, prefix int, shrink []int) []int {
 	var w []int
 	grow := func(cells []string) {
 		for i, c := range cells {
@@ -567,29 +576,29 @@ func (m Overview) columnWidths() []int {
 			w[i] = max(w[i], lipgloss.Width(sanitize(c)))
 		}
 	}
-	grow(m.header)
-	for _, r := range m.rows {
+	grow(header)
+	for _, r := range rows {
 		grow(r.Cells)
 	}
-	if m.width <= 0 || len(w) == 0 {
+	if width <= 0 || len(w) == 0 {
 		return w
 	}
 	last := len(w) - 1
-	excess := len("> [ ] ") + 2*last - m.width
+	excess := prefix + 2*last - width
 	for _, cw := range w[:last] {
 		excess += cw
 	}
 	lastWidth := 0
-	if last < len(m.header) {
-		lastWidth = lipgloss.Width(sanitize(m.header[last]))
+	if last < len(header) {
+		lastWidth = lipgloss.Width(sanitize(header[last]))
 	}
-	for _, r := range m.rows {
+	for _, r := range rows {
 		if !r.Alert && len(r.Cells) == len(w) {
 			lastWidth = max(lastWidth, lipgloss.Width(sanitize(r.Cells[last])))
 		}
 	}
 	excess += lastWidth
-	for _, c := range m.shrink {
+	for _, c := range shrink {
 		if excess <= 0 {
 			break
 		}
@@ -602,11 +611,41 @@ func (m Overview) columnWidths() []int {
 	return w
 }
 
+// Table renders header and rows as an Overview renders its table (see
+// WithGrouping and WithShrinkable), for output that is not a bubbletea
+// program (e.g. a command's table on a terminal), without cursor,
+// selection boxes or header style: the columns shrink are narrowed to fit
+// width (0 = unknown: nothing is narrowed or cut), the first cell is blank
+// when it repeats the one of the row above, the last cell is rendered by
+// paint (nil: unstyled) at the level of its row (LevelFail for Alert), and
+// lines still wider than width are cut with "…". Cells are sanitized.
+func Table(header []string, rows []Row, width int, shrink []int, paint func(Level, string) string) []string {
+	widths := fitColumns(header, rows, width, 0, shrink)
+	lines := []string{cells(header, widths, nil, nil)}
+	for i, r := range rows {
+		var last func(string) string
+		if paint != nil {
+			l := r.Level
+			if r.Alert {
+				l = LevelFail
+			}
+			last = func(s string) string { return paint(l, s) }
+		}
+		cs := r.Cells
+		if i > 0 && len(cs) > 0 && len(rows[i-1].Cells) > 0 && rows[i-1].Cells[0] == cs[0] {
+			cs = append([]string{""}, cs[1:]...)
+		}
+		lines = append(lines, cells(cs, widths, last, nil))
+	}
+	cutLines(lines, width)
+	return lines
+}
+
 // cells pads the cells to the column widths (not the last one), truncating
-// those wider than their column, and joins them; style, if set, renders the
+// those wider than their column, and joins them; last, if set, renders the
 // last cell. The first link of each cell is rendered as a hyperlink (see
 // link).
-func cells(cs []string, widths []int, last *lipgloss.Style, links []Link) string {
+func cells(cs []string, widths []int, last func(string) string, links []Link) string {
 	var b strings.Builder
 	for i, c := range cs {
 		c = sanitize(c)
@@ -624,7 +663,7 @@ func cells(cs []string, widths []int, last *lipgloss.Style, links []Link) string
 		}
 		if i == len(cs)-1 {
 			if last != nil {
-				c = last.Render(c)
+				c = last(c)
 			}
 			b.WriteString(c)
 			break
@@ -768,13 +807,13 @@ func (m Overview) renderRow(i int, widths []int) string {
 	if m.selected[r.Key] {
 		box = st.Checked.Render("[x]")
 	}
-	var last *lipgloss.Style
+	var last func(string) string
 	switch {
 	case r.Alert:
-		last = &st.Failed
+		last = func(s string) string { return st.Failed.Render(s) }
 	case r.Level != LevelNone:
-		s := st.Level(r.Level)
-		last = &s
+		style := st.Level(r.Level)
+		last = func(s string) string { return style.Render(s) }
 	}
 	cs := r.Cells
 	if prev := m.rows[m.visible[max(i-1, 0)]].Cells; m.grouped && i > m.offset && len(cs) > 0 && len(prev) > 0 && prev[0] == cs[0] {

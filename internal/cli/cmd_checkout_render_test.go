@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -96,6 +98,96 @@ func TestStatusTableStateLevels(t *testing.T) {
 		if !strings.HasSuffix(l, want[dir]) {
 			t.Errorf("%s: row %q, want the state %s", dir, l, want[dir])
 		}
+	}
+}
+
+// On a terminal narrower than the full table, status prints the compact
+// table of the overview (B62 H1): REPO grouped, DIR, BRANCH, CHANGES
+// (+staged ~unstaged ?untracked !conflicts $stashes, zeros left out) and
+// STATE as the overview shows it, colored alike; problems follow as
+// usual. Wide enough, or with an unknown width, the full table is
+// printed unchanged.
+func TestStatusCompactOnNarrowTerminal(t *testing.T) {
+	t.Parallel()
+	prob := ops.Problem{Repo: "b", Path: "/x/b/gone", Err: errors.New("worktree directory missing")}
+	r := ops.StatusReport{Checkouts: []ops.CheckoutStatus{
+		{Checkout: ops.Checkout{Repo: "a", Dir: "main", Primary: true, Branch: "main"}, Status: &gitx.RepoStatus{Branch: "main",
+			Upstream: "origin/main", Ahead: 1, Behind: 1, Staged: 2, Unstaged: 1, Untracked: 3, Conflicted: 1, Stashes: 1}},
+		{Checkout: ops.Checkout{Repo: "a", Dir: "feat", Branch: "feat"}, Status: &gitx.RepoStatus{Branch: "feat", Stashes: 1}},
+		{Checkout: ops.Checkout{Repo: "b", Dir: "main", Primary: true, Branch: "main"}, Err: errors.New("boom")},
+	}, Problems: []ops.Problem{prob}}
+	var full bytes.Buffer
+	writeStatusTable(&full, r, nil)
+	for _, width := range []int{0, 200} {
+		var b bytes.Buffer
+		writeStatus(&b, r, nil, width)
+		if b.String() != full.String() {
+			t.Errorf("width %d:\n%s\nwant the full table\n%s", width, b.String(), full.String())
+		}
+	}
+	var b bytes.Buffer
+	writeStatus(&b, r, nil, 80)
+	want := strings.Join([]string{
+		"REPO  DIR   BRANCH  CHANGES         STATE",
+		"a     main  main    +2 ~1 ?3 !1 $1  dirty, ↑1 ↓1",
+		"      feat  feat                    clean, no upstream",
+		"b     main  main                    error: boom",
+		"problem: " + prob.Error(),
+		"",
+	}, "\n")
+	if b.String() != want {
+		t.Errorf("compact:\n%q\nwant\n%q", b.String(), want)
+	}
+	b.Reset()
+	writeStatus(&b, r, func(l tui.Level, s string) string { return "\x1b[" + strconv.Itoa(int(l)) + "m" + s + "\x1b[m" }, 80)
+	for _, l := range []string{
+		"main  main    +2 ~1 ?3 !1 $1  \x1b[" + strconv.Itoa(int(tui.LevelFail)) + "mdirty, ↑1 ↓1\x1b[m\n",
+		"feat  feat                    \x1b[" + strconv.Itoa(int(tui.LevelInfo)) + "mclean, no upstream\x1b[m\n",
+		"main  main                    \x1b[" + strconv.Itoa(int(tui.LevelFail)) + "merror: boom\x1b[m\n",
+	} {
+		if !strings.Contains(b.String(), l) {
+			t.Errorf("colored compact lacks %q:\n%q", l, b.String())
+		}
+	}
+	// Narrower still: BRANCH, then DIR, are cut with "…" before STATE.
+	r.Checkouts[1].Branch, r.Checkouts[1].Dir = "feature/very-long-name", "feature-very-long-name"
+	b.Reset()
+	writeStatus(&b, r, nil, 60)
+	if !strings.Contains(b.String(), "\n      feature…  feature…"+strings.Repeat(" ", 2+14+2)+"clean, no upstream\n") {
+		t.Errorf("shrunk compact:\n%s", b.String())
+	}
+}
+
+// status chooses the compact table only in TUI mode, from the width of
+// the terminal; plain mode (pipes, --no-tui) and --json are unchanged.
+func TestStatusCompactOnlyOnNarrowTUITerminal(t *testing.T) {
+	t.Parallel()
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
+	plain := e.mustRun(t, "status")
+	asJSON := e.mustRun(t, "status", "--json")
+	d := e.deps()
+	d.termWidth = func(io.Writer) int { return 80 }
+	d.environ = func() []string { return nil }
+	for _, tc := range []struct {
+		tui  bool
+		args []string
+		want string
+	}{
+		{false, []string{"status"}, plain},
+		{false, []string{"status", "--json"}, asJSON},
+		{true, []string{"status", "--json"}, asJSON},
+		{true, []string{"status"}, "REPO   DIR   BRANCH  CHANGES  STATE\nalpha  main  main             clean\n"},
+	} {
+		d.UseTUI = func(io.Reader, io.Writer, bool) bool { return tc.tui }
+		if got, _, code := runDeps(t, d, tc.args...); code != 0 || got != tc.want {
+			t.Errorf("tui %v, %q: exit %d\n%q\nwant\n%q", tc.tui, tc.args, code, got, tc.want)
+		}
+	}
+	d.UseTUI = func(io.Reader, io.Writer, bool) bool { return true }
+	d.termWidth = func(io.Writer) int { return 500 }
+	if got, _, _ := runDeps(t, d, "status"); got != plain {
+		t.Errorf("wide terminal:\n%q\nwant\n%q", got, plain)
 	}
 }
 
