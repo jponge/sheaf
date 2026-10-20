@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func ovRows() []Row {
@@ -1061,16 +1062,22 @@ func TestTable(t *testing.T) {
 			"      fix-timeout  fix/a-very-long-branch  +1       \x1b[33mdirty, ↑1\x1b[m",
 			"web   main         main                             \x1b[31merror: boom boom boom boom\x1b[m",
 		}},
+		// Below minShrunkWidth, the widest columns first: the last column
+		// of the rows without Alert stays whole (B62 V1 review).
 		{40, []string{
-			"REPO  DIR       BRANCH    CHANGES  STATE",
-			"api   main      main               \x1b[32mclean\x1b[m",
-			"      fix-tim…  fix/a-v…  +1       \x1b[33mdirt…\x1b[m",
-			"web   main      main               \x1b[31merro…\x1b[m",
+			"REPO  DIR     BRANCH  CHANGES  STATE",
+			"api   main    main             \x1b[32mclean\x1b[m",
+			"      fix-t…  fix/a…  +1       \x1b[33mdirty, ↑1\x1b[m",
+			"web   main    main             \x1b[31merror: b…\x1b[m",
 		}},
 	} {
 		if got := Table(header, rows, tc.width, []int{2, 1}, paint); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("width %d:\n%q\nwant\n%q", tc.width, got, tc.want)
 		}
+	}
+	// The last column is never narrowed, even when shrink names it.
+	if got, want := Table(header, rows, 40, []int{4, 2, 1}, nil), Table(header, rows, 40, []int{2, 1}, nil); !reflect.DeepEqual(got, want) {
+		t.Errorf("shrink naming the last column:\n%q\nwant\n%q", got, want)
 	}
 	if got := Table(header, rows[:1], 0, nil, nil); !reflect.DeepEqual(got, []string{"REPO  DIR   BRANCH  CHANGES  STATE", "api   main  main             clean"}) {
 		t.Errorf("unpainted:\n%q", got)
@@ -1101,5 +1108,19 @@ func TestOverviewEmptyText(t *testing.T) {
 	m = NewOverview("t", []string{"REPO"}, ovRows(), ovActions()).WithEmpty(text).WithFilter("zzz")
 	if v := view(m); !strings.Contains(v, "No matches.") || strings.Contains(v, "Nothing here") {
 		t.Fatalf("filtered:\n%s", v)
+	}
+}
+
+// A line cut right after a cell cut with "…" ends with one ellipsis, not
+// "……" (B62 V1 review), styled or not.
+func TestCutLinesNoDoubleEllipsis(t *testing.T) {
+	t.Parallel()
+	lines := []string{"ab…  cd", "\x1b[1mab…\x1b[m  cd", "abcdef", "ab…"}
+	cutLines(lines, 4)
+	want := []string{"ab…", "\x1b[1mab…\x1b[m", "abc…", "ab…"}
+	for i := range lines {
+		if ansi.Strip(lines[i]) != ansi.Strip(want[i]) || lipgloss.Width(lines[i]) > 4 {
+			t.Errorf("line %d: %q, want %q", i, lines[i], want[i])
+		}
 	}
 }

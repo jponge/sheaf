@@ -113,8 +113,9 @@ status is known. Worktrees outside <bundle>/<repo>/ are marked "(outside)".
 Checkouts that cannot be inspected (e.g. a missing directory) are listed as
 problems after the table, and the exit code is then 1.
 
-On a terminal narrower than the table (outside plain mode), status prints
-the compact table of the home screen: REPO, DIR, BRANCH, CHANGES and STATE
+When standard input and output are terminals and the terminal is
+narrower than the table, status prints the compact table of the home
+screen, cut to the terminal's width: REPO, DIR, BRANCH, CHANGES and STATE
 ("clean, ↑1 ↓2", "dirty, no upstream", "clean, PR #7"...). CHANGES holds
 the non-zero counts: +staged ~unstaged ?untracked !conflicted $stashes.
 --no-tui and --json always print the full output.
@@ -220,7 +221,7 @@ func writeStatus(out io.Writer, r ops.StatusReport, paint func(tui.Level, string
 // writeStatusCompact writes the status of r as the home screen's overview
 // shows it (see tui.Table), cut to width: REPO (blank when it repeats),
 // DIR, BRANCH, CHANGES (statusChanges) and STATE (homeState, colored
-// alike), then the problems.
+// alike), then the problems, cut to width.
 func writeStatusCompact(out io.Writer, r ops.StatusReport, paint func(tui.Level, string) string, width int) {
 	var rows []tui.Row
 	stashShown := ""
@@ -238,7 +239,11 @@ func writeStatusCompact(out io.Writer, r ops.StatusReport, paint func(tui.Level,
 	for _, l := range tui.Table([]string{"REPO", "DIR", "BRANCH", "CHANGES", "STATE"}, rows, width, []int{2, 1}, paint) {
 		fmt.Fprintln(out, l)
 	}
-	writeProblems(out, r.Problems, paint)
+	var probs bytes.Buffer
+	writeProblems(&probs, r.Problems, paint)
+	for l := range strings.Lines(probs.String()) {
+		fmt.Fprintln(out, ansi.Truncate(strings.TrimSuffix(l, "\n"), width, "…"))
+	}
 }
 
 // statusChanges returns the CHANGES cell of the compact status table: the

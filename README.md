@@ -445,12 +445,16 @@ untracked, conflicted counts and stashes of every checkout, primary first.
 No network access: ahead/behind are relative to the last fetch, unless
 `--fetch`. `--repo`, `--primary-only`, `--dirty-only`, `--json`. Checkouts
 that cannot be inspected are listed as problems after the table and make
-the exit status 1. Outside plain mode, on a terminal narrower than that
+the exit status 1. When standard input and output are both terminals
+(without `--no-tui` or `--json`) and the terminal is narrower than that
 table, status prints the compact table of the home screen instead: REPO,
 DIR, BRANCH, CHANGES and STATE (`clean, ↑1 ↓2`, `dirty, no upstream`,
 `clean, PR #7`...), with CHANGES made of the non-zero counts `+` staged,
 `~` unstaged, `?` untracked, `!` conflicted and `$` stashes (e.g. `+2 ~1
-?3`); `--no-tui` and `--json` always print the full output.
+?3`). Its columns give way (with `…`) before STATE does, and its lines,
+problems included, are cut to the terminal's width. With standard input
+or output not a terminal (e.g. `echo | sheaf status`), `--no-tui` or
+`--json`, status always prints the full output.
 
 **`sheaf fetch`**: `git fetch --prune origin` once per repository (for a fork:
 `upstream`, then `origin`), repositories in parallel. `--repo`.

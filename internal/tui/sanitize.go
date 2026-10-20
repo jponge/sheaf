@@ -86,7 +86,8 @@ func splitAtWidth(s string, width int) (string, string) {
 }
 
 // cutLines cuts the lines wider than width (when known, > 0) at the width,
-// ending them with "…" so that the cut shows.
+// ending them with "…" so that the cut shows (one column short when the
+// cut would follow another "…").
 func cutLines(lines []string, width int) {
 	if width <= 0 {
 		return
@@ -94,6 +95,11 @@ func cutLines(lines []string, width int) {
 	for i, l := range lines {
 		if lipgloss.Width(l) > width {
 			lines[i] = ansi.Truncate(l, width, "…")
+			if strings.HasSuffix(ansi.Strip(lines[i]), "……") && width > 1 {
+				// The line is cut right after a cell cut with "…": one
+				// ellipsis shows both.
+				lines[i] = ansi.Truncate(l, width-1, "…")
+			}
 		}
 	}
 }

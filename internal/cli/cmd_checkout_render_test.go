@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/testutil"
@@ -155,6 +157,39 @@ func TestStatusCompactOnNarrowTerminal(t *testing.T) {
 	writeStatus(&b, r, nil, 60)
 	if !strings.Contains(b.String(), "\n      feature…  feature…"+strings.Repeat(" ", 2+14+2)+"clean, no upstream\n") {
 		t.Errorf("shrunk compact:\n%s", b.String())
+	}
+}
+
+// At any width, the lines of the compact status fit the terminal (problem
+// lines included, cut with "…"), never end with a double "……" (a cell cut,
+// then the line), and STATE stays whole while every other column can
+// still give way, down to one character.
+func TestStatusCompactFitsNarrowTerminals(t *testing.T) {
+	t.Parallel()
+	prob := ops.Problem{Repo: "b", Path: "/x/b/gone", Err: errors.New("worktree directory missing")}
+	r := ops.StatusReport{Checkouts: []ops.CheckoutStatus{
+		{Checkout: ops.Checkout{Repo: "alpha", Dir: "main", Primary: true, Branch: "main"}, Status: &gitx.RepoStatus{Branch: "main",
+			Upstream: "origin/main", Ahead: 1, Behind: 1, Staged: 2, Unstaged: 1, Untracked: 3, Conflicted: 1, Stashes: 1}},
+		{Checkout: ops.Checkout{Repo: "alpha", Dir: "feature-very-long-name", Branch: "feature/very-long-name"}, Status: &gitx.RepoStatus{Branch: "feature/very-long-name"}},
+	}, Problems: []ops.Problem{prob}}
+	// 5 columns of one character, 4 gaps of 2, "clean, no upstream".
+	const stateWhole = 5 + 8 + len("clean, no upstream")
+	for width := 12; width <= 60; width++ {
+		var b bytes.Buffer
+		writeStatus(&b, r, nil, width)
+		out := b.String()
+		for l := range strings.Lines(out) {
+			l = strings.TrimSuffix(l, "\n")
+			if w := ansi.StringWidth(l); w > width || strings.Contains(l, "……") {
+				t.Errorf("width %d: line %q (%d columns)", width, l, w)
+			}
+		}
+		if !strings.Contains(out, "problem: ") {
+			t.Errorf("width %d: no problem line:\n%s", width, out)
+		}
+		if width >= stateWhole && (!strings.Contains(out, "  dirty, ↑1 ↓1\n") || !strings.Contains(out, "  clean, no upstream\n")) {
+			t.Errorf("width %d: STATE cut:\n%s", width, out)
+		}
 	}
 }
 

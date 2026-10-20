@@ -588,6 +588,13 @@ func (m Overview) columnWidths() []int {
 // last cell of the header and the rows without Alert, fit width (0 =
 // unknown: nothing is narrowed); see WithShrinkable.
 func fitColumns(header []string, rows []Row, width, prefix int, shrink []int) []int {
+	w, _ := fitWidths(header, rows, width, prefix, shrink)
+	return w
+}
+
+// fitWidths is fitColumns, also returning the columns by which the table
+// is still wider than width (0 or less when it fits).
+func fitWidths(header []string, rows []Row, width, prefix int, shrink []int) ([]int, int) {
 	var w []int
 	grow := func(cells []string) {
 		for i, c := range cells {
@@ -602,7 +609,7 @@ func fitColumns(header []string, rows []Row, width, prefix int, shrink []int) []
 		grow(r.Cells)
 	}
 	if width <= 0 || len(w) == 0 {
-		return w
+		return w, 0
 	}
 	last := len(w) - 1
 	excess := prefix + 2*last - width
@@ -629,7 +636,7 @@ func fitColumns(header []string, rows []Row, width, prefix int, shrink []int) []
 			excess -= cut
 		}
 	}
-	return w
+	return w, excess
 }
 
 // Table renders header and rows as an Overview renders its table (see
@@ -640,8 +647,30 @@ func fitColumns(header []string, rows []Row, width, prefix int, shrink []int) []
 // when it repeats the one of the row above, the last cell is rendered by
 // paint (nil: unstyled) at the level of its row (LevelFail for Alert), and
 // lines still wider than width are cut with "…". Cells are sanitized.
+// When narrowing the columns shrink to minShrunkWidth is not enough, every
+// column but the last gives way, the widest first (ties: the columns
+// shrink, then the others from the right), down to one character, so that
+// the last column stays whole as long as possible.
 func Table(header []string, rows []Row, width int, shrink []int, paint func(Level, string) string) []string {
-	widths := fitColumns(header, rows, width, 0, shrink)
+	widths, excess := fitWidths(header, rows, width, 0, shrink)
+	order := slices.Clone(shrink)
+	for c := len(widths) - 2; c >= 0; c-- {
+		if !slices.Contains(shrink, c) {
+			order = append(order, c)
+		}
+	}
+	for ; excess > 0; excess-- {
+		widest := -1
+		for _, c := range order {
+			if c >= 0 && c < len(widths)-1 && widths[c] > 1 && (widest < 0 || widths[c] > widths[widest]) {
+				widest = c
+			}
+		}
+		if widest < 0 {
+			break
+		}
+		widths[widest]--
+	}
 	lines := []string{cells(header, widths, nil, nil)}
 	for i, r := range rows {
 		var last func(string) string
