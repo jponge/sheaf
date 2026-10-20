@@ -173,7 +173,7 @@ var gitCallCommands = []struct {
 		}
 		return err
 	}},
-	{"remove plan", 30 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"remove plan", 28 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		_, err := Remove(ctx, f.w, "r2", RemoveOptions{WorkingDir: f.w.Root, Force: true}, noEmit)
 		if errors.Is(err, ErrNotConfirmed) {
 			return nil
@@ -190,7 +190,7 @@ var gitCallCommands = []struct {
 	}},
 	// The home screen's r on two worktrees of a repository (47 calls
 	// when they were removed one after the other).
-	{"wt rm (2)", 47 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"wt rm (2)", 46 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		items := []WorktreeRemoval{{Repo: "r2", Target: WorktreeTarget{Name: "feat-a", Kind: TargetDir}}, {Repo: "r2", Target: WorktreeTarget{Name: "feat-b", Kind: TargetDir}}}
 		for _, r := range RemoveWorktrees(ctx, f.w, items, WorktreeRemoveOptions{WorkingDir: f.w.Root}, func([]WorktreeRemovalResult) bool { return true }, Discard) {
 			if r.Err != nil {
@@ -199,7 +199,7 @@ var gitCallCommands = []struct {
 		}
 		return nil
 	}},
-	{"remove", 61 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+	{"remove", 59 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		_, err := Remove(ctx, f.w, "r5", RemoveOptions{WorkingDir: f.w.Root, Force: true, Confirm: yes}, noEmit)
 		return err
 	}},

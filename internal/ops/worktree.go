@@ -1328,7 +1328,7 @@ func planWorktreeRemoval(ctx context.Context, r bundle.Repository, repoDir, prim
 		plan.Hard = append(plan.Hard, "detached HEAD: there is no branch to delete")
 	}
 	if inspectable {
-		risks, err := gitx.DeletionRisksWithOptions(ctx, wt.Path, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: wt.Path, TrustedRemotes: distrust.trusted(RemotesOf(r))})
+		risks, err := gitx.DeletionRisksWithOptions(ctx, wt.Path, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: wt.Path, TrustedRemotes: distrust.trusted(RemotesOf(r)), ConfigDir: primary})
 		if err != nil {
 			return plan, err
 		}
@@ -1390,11 +1390,15 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 	if d := "refs/remotes/" + rs.Reference + "/" + r.DefaultBranch; !slices.Contains(targets, d) {
 		targets = append(targets, d)
 	}
-	var names, missing []string
+	var names, missing, untrusted []string
 	for _, t := range targets {
 		short := strings.TrimPrefix(strings.TrimPrefix(t, "refs/remotes/"), "refs/heads/")
-		if ok, err := refExists(ctx, primary, t); err != nil || !ok || !trustsRef(t) {
+		if ok, err := refExists(ctx, primary, t); err != nil || !ok {
 			missing = append(missing, short)
+			continue
+		}
+		if !trustsRef(t) {
+			untrusted = append(untrusted, short)
 			continue
 		}
 		names = append(names, short)
@@ -1447,7 +1451,14 @@ func checkMerged(ctx context.Context, primary string, r bundle.Repository, branc
 	if len(names) > 0 {
 		plan.Unmerged = fmt.Sprintf("branch %s is not merged into %s; its %s would be lost", branch, strings.Join(names, " nor "), commits(lost))
 	} else {
-		plan.Unmerged = fmt.Sprintf("branch %s has no merge target (%s does not exist); its %s would be lost", branch, strings.Join(missing, ", "), commits(lost))
+		var why []string
+		if len(missing) > 0 {
+			why = append(why, strings.Join(missing, ", ")+" does not exist")
+		}
+		if len(untrusted) > 0 {
+			why = append(why, strings.Join(untrusted, ", ")+" is not trusted: sheaf's fetch of "+strings.Join(fetched, " and ")+" does not update it")
+		}
+		plan.Unmerged = fmt.Sprintf("branch %s has no merge target (%s); its %s would be lost", branch, strings.Join(why, "; "), commits(lost))
 	}
 	plan.Unmerged += distrust.note() + untrustedRefsNote(ctx, primary, trusted, fetched, distrust, []string{plan.branchOID})
 	if plan.TagOnlyCommits > 0 {

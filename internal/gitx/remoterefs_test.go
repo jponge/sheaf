@@ -1,8 +1,11 @@
 package gitx
 
 import (
+	"context"
 	"slices"
 	"testing"
+
+	"github.com/jponge/sheaf/internal/testutil"
 )
 
 func TestParseRemotes(t *testing.T) {
@@ -21,6 +24,29 @@ func TestParseRemotes(t *testing.T) {
 	}
 	if got := fetchAllRemotes(m); !slices.Equal(got, []string{"c", "origin"}) {
 		t.Fatalf("fetchAllRemotes = %v", got)
+	}
+}
+
+// The at-risk set of a remote keeps every ref it may have written.
+func TestRemoteNamespaceRefs(t *testing.T) {
+	t.Parallel()
+	_, dir := cloneOrigin(t, testutil.OriginOpts{})
+	testutil.Git(t, dir, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/mirror/*")
+	testutil.Git(t, dir, "config", "--add", "remote.origin.fetch", "refs/heads/x:refs/remotes/pinned/x")
+	testutil.Git(t, dir, "config", "--add", "remote.origin.fetch", "^refs/heads/old")
+	s, err := RemoteNamespaceRefs(context.Background(), dir, "origin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ref, want := range map[string]bool{
+		"refs/remotes/origin/a/b":  true,
+		"refs/remotes/mirror/main": true,
+		"refs/remotes/pinned/x":    true,
+		"refs/remotes/other/main":  false,
+	} {
+		if got := s.Contains(ref); got != want {
+			t.Errorf("Contains(%s) = %v, want %v", ref, got, want)
+		}
 	}
 }
 

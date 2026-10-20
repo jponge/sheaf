@@ -621,12 +621,13 @@ are never trusted, with or without `--offline`: commits only on them count
 as unpushed (push to `origin`, or use `--force` or `-D`). Of a trusted
 remote, only the refs its fetch writes and prunes count: the destinations
 of its fetch refspecs (`remote.<name>.fetch`, by default
-`refs/remotes/<name>/*`), not the refs of other remotes inside them (e.g.
-of a remote named `origin/x`); a remote with a negative refspec (`^...`) is
-not trusted at all. In a nested repository, which is fetched with `git
-fetch --all`, the same applies to the remotes that command fetches (not
-those with `remote.<name>.skipFetchAll`, nor those inside the deleted
-tree), also with `--offline`. The refusals about unpushed branches
+`refs/remotes/<name>/*`, as configured in the primary checkout, where sheaf
+fetches), not the refs of other remotes inside them (e.g. of a remote named
+`origin/x`); a remote with a negative refspec (`^...`) is not trusted at
+all. In a nested repository, which is fetched with `git fetch --all`, the
+same applies to the remotes that command fetches (not those with
+`remote.<name>.skipFetchAll`, nor those whose URL, after `insteadOf`
+rewriting, is inside the deleted tree), also with `--offline`. The refusals about unpushed branches
 (`remove`) and unmerged branches (`wt rm -d`, `prune --delete-branches`)
 name the untrusted refs that hold the commits; the others (detached HEAD,
 nested repositories) do not. `sync` does not accept `--offline`.

@@ -292,7 +292,7 @@ func planPruneRepo(ctx context.Context, root string, r bundle.Repository, primar
 			skip(in.Path, "its worktree is locked")
 		case ok:
 			c.Worktree, c.Dir, c.Path = true, in.Dir, in.Path
-			if risks, err := gitx.DeletionRisksWithOptions(ctx, in.Path, gitx.DeletionRisksOptions{TrustedRemotes: distrust.trusted(rs)}); err != nil {
+			if risks, err := gitx.DeletionRisksWithOptions(ctx, in.Path, gitx.DeletionRisksOptions{TrustedRemotes: distrust.trusted(rs), ConfigDir: primary}); err != nil {
 				if ctx.Err() != nil {
 					return fail(ctx.Err())
 				}

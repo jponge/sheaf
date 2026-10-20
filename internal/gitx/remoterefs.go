@@ -126,6 +126,34 @@ func TrustedRemoteRefs(ctx context.Context, dir string, remotes []string) (Remot
 	return refSetOf(conf, remotes), nil
 }
 
+// RemoteNamespaceRefs returns every remote-tracking ref that may hold what
+// fetches of remote brought, in the repository of dir: its
+// refs/remotes/<remote>/* namespace and the destinations under
+// refs/remotes/ of all its fetch refspecs, whatever they are (negative
+// refspecs or a missing URL do not shrink it). Meant for what is at risk,
+// e.g. the stale refs of a remote that is gone, where TrustedRemoteRefs
+// would leave refs out. One git call (see readRemotes).
+func RemoteNamespaceRefs(ctx context.Context, dir, remote string) (RemoteRefSet, error) {
+	conf, err := readRemotes(ctx, dir)
+	if err != nil {
+		return RemoteRefSet{}, err
+	}
+	s := RemoteRefSet{globs: []string{"refs/remotes/" + remote + "/*"}}
+	if c := conf[remote]; c != nil {
+		for _, f := range c.fetch {
+			dst, _ := refspecDst(f)
+			switch n := strings.Count(dst, "*"); {
+			case !strings.HasPrefix(dst, "refs/remotes/"):
+			case n == 1:
+				s.globs = append(s.globs, dst)
+			case n == 0:
+				s.refs = append(s.refs, dst)
+			}
+		}
+	}
+	return s, nil
+}
+
 func refSetOf(conf map[string]*remoteConf, trusted []string) RemoteRefSet {
 	var s RemoteRefSet
 	var exact []string

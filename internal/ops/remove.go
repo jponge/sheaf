@@ -218,8 +218,13 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 	// published: the recorded heads of pull request branches (see
 	// publishedPullHeads), set by fetch.
 	var published []string
+	// fetchDir: the primary checkout, where the fetches run; its
+	// configuration decides which refs they write (see
+	// gitx.DeletionRisksOptions.ConfigDir), for every work tree.
+	var fetchDir string
 	net := gitx.Net{Interactive: opts.Interactive}
 	fetch := func(primary string) (string, error) {
+		fetchDir = primary
 		if fetched {
 			return fetchMsg, nil
 		}
@@ -284,7 +289,7 @@ func Remove(ctx context.Context, w *Workspace, name string, opts RemoveOptions, 
 		}
 	}
 	risksOf := func(ctx context.Context, dir, deletedRoot string) ([]gitx.Risk, error) {
-		return gitx.DeletionRisksWithOptions(ctx, dir, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: deletedRoot, TrustedRemotes: distrust.trusted(rs), PublishedRefs: published, ForeignWorktrees: true})
+		return gitx.DeletionRisksWithOptions(ctx, dir, gitx.DeletionRisksOptions{BeforeNested: fetchNested, DeletedRoot: deletedRoot, TrustedRemotes: distrust.trusted(rs), ConfigDir: fetchDir, PublishedRefs: published, ForeignWorktrees: true})
 	}
 	plan, err := planRemoval(ctx, w, name, wd, fetch, func() bool { return fetchForceable }, risksOf, emit)
 	if err != nil {
@@ -692,14 +697,17 @@ func fetchFork(ctx context.Context, net gitx.Net, primary string, rs gitx.Remote
 }
 
 // forkOnlyCommits counts the commits reachable from the remote-tracking
-// refs of the fork of rs (stale once the fork is gone) and not from the
-// reference remote's: once the fork is gone, the clone holds their only
+// refs of the fork of rs (stale once the fork is gone; all of them, see
+// gitx.RemoteNamespaceRefs) and not from the reference remote's trusted
+// ones (gitx.TrustedRemoteRefs): once the fork is gone, the clone holds their only
 // copy, whether a local branch still points at them or not (the refs of
 // other remotes, which sheaf does not fetch, prove nothing; see
 // forkDistrust.trusted). Commits on neither remote's refs are not
 // included: the risk checks report them as unpushed.
 func forkOnlyCommits(ctx context.Context, primary string, rs gitx.Remotes) (int, error) {
-	fork, err := gitx.TrustedRemoteRefs(ctx, primary, []string{rs.Fork})
+	// At risk: every ref of the fork, not only those its fetch would be
+	// trusted for (see gitx.RemoteNamespaceRefs).
+	fork, err := gitx.RemoteNamespaceRefs(ctx, primary, rs.Fork)
 	if err != nil {
 		return 0, err
 	}

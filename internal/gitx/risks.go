@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hash"
 	"io/fs"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -296,6 +297,11 @@ type DeletionRisksOptions struct {
 	// --all` fetches (with a URL, without remote.<name>.skipFetchAll), the
 	// rule for nested repositories.
 	TrustFetchAllRemotes bool
+	// ConfigDir is the work tree whose configuration decides which refs
+	// the trusted remotes' fetches write (default: dir): the one where the
+	// caller fetches, since a work tree's own configuration (worktree
+	// config, includeIf) may differ from it.
+	ConfigDir string
 	// PublishedRefs are refs (full names) whose commits count as pushed for
 	// dir's own repository, like remote-tracking refs (not for nested
 	// repositories), e.g. recorded pull request heads (see PullHeadRef).
@@ -415,11 +421,15 @@ func deletionRisks(ctx context.Context, dir, top string, depth int, no *nestOpts
 // fetches of the trusted remotes (TrustedRemotes and, with
 // TrustFetchAllRemotes, those `git fetch --all` fetches, except
 // UntrustedRemotes; see TrustedRemoteRefs), then PublishedRefs, with
-// --ignore-missing for exact refs that do not exist. The configuration is
-// read (one git call) only when some remote may be trusted.
+// --ignore-missing for exact refs that do not exist. The configuration (of
+// opts.ConfigDir, default dir) is read (one git call) only when some remote
+// may be trusted.
 func pushedArgs(ctx context.Context, dir string, opts DeletionRisksOptions) (pushedRevs, error) {
 	var p pushedRevs
 	if len(opts.TrustedRemotes) > 0 || opts.TrustFetchAllRemotes {
+		if opts.ConfigDir != "" {
+			dir = opts.ConfigDir
+		}
 		conf, err := readRemotes(ctx, dir)
 		if err != nil {
 			return p, err
@@ -920,13 +930,17 @@ func nestedReasons(ctx context.Context, p, resolved string, bare bool, depth int
 	}
 	var reasons []string
 	conf, err := readRemotes(ctx, p)
+	var total, outside int
+	var trusted []string
+	if err == nil {
+		total, outside, trusted, err = remoteLocations(ctx, conf, p, no.root)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		return []string{"cannot inspect remotes: " + failureReason(err)}, nil
 	}
-	total, outside, trusted := remoteLocations(conf, p, no.root)
 	pushed := pushedRevs{}
 	pushed.lead, pushed.revs = refSetOf(conf, trusted).RevListArgs()
 	switch {
@@ -975,14 +989,16 @@ func nestedReasons(ctx context.Context, p, resolved string, bare bool, depth int
 	return reasons, nil
 }
 
-// remoteLocations counts the remotes (URLs) of the repository at p, with
-// configuration conf, and those that do not point inside root (resolved).
-// Local URLs (absolute or relative paths, file://) are resolved against p;
-// anything else (scp-like, ssh, https, ...) is outside. trusted names the
-// remotes whose refs count as pushed: those `git fetch --all` fetches (see
-// fetchAllRemotes) whose URL (the first one, which fetch uses) is outside
+// remoteLocations counts the remotes of the repository at p, with
+// configuration conf, and those whose URL does not point inside root
+// (resolved). The URL is the one fetch uses: the first configured one,
+// rewritten by url.<base>.insteadOf (`git ls-remote --get-url`, one git
+// call per remote). Local URLs (absolute or relative paths, file://) are
+// resolved against p; anything else (scp-like, ssh, https, ...) is
+// outside. trusted names the remotes whose refs count as pushed: those
+// `git fetch --all` fetches (see fetchAllRemotes) whose URL is outside
 // root.
-func remoteLocations(conf map[string]*remoteConf, p, root string) (total, outside int, trusted []string) {
+func remoteLocations(ctx context.Context, conf map[string]*remoteConf, p, root string) (total, outside int, trusted []string, err error) {
 	isOutside := func(u string) bool {
 		local, isLocal := localRemotePath(p, u)
 		if !isLocal {
@@ -991,23 +1007,25 @@ func remoteLocations(conf map[string]*remoteConf, p, root string) (total, outsid
 		rel, err := filepath.Rel(root, resolvePath(local))
 		return err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
-	for _, c := range conf {
-		for _, u := range c.urls {
-			if u == "" {
-				continue
-			}
-			total++
-			if isOutside(u) {
-				outside++
-			}
+	for _, name := range slices.Sorted(maps.Keys(conf)) {
+		c := conf[name]
+		if len(c.urls) == 0 || c.urls[0] == "" {
+			continue
 		}
-	}
-	for _, name := range fetchAllRemotes(conf) {
-		if u := conf[name].urls[0]; u != "" && isOutside(u) {
+		out, err := Run(ctx, p, "ls-remote", "--get-url", "--end-of-options", name)
+		if err != nil {
+			return 0, 0, nil, err
+		}
+		total++
+		if !isOutside(strings.TrimSpace(out)) {
+			continue
+		}
+		outside++
+		if !c.skipFetchAll {
 			trusted = append(trusted, name)
 		}
 	}
-	return total, outside, trusted
+	return total, outside, trusted, nil
 }
 
 // localRemotePath returns the filesystem path of a local remote URL.

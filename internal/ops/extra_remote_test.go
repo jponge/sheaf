@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -367,5 +368,113 @@ func TestRemoveNestedStaleRefOfSkippedRemoteIsNotPushed(t *testing.T) {
 	}
 	if !exists(n) {
 		t.Fatal("nested repository deleted")
+	}
+}
+
+// A gone fork's stale refs are at risk whatever its refspecs say: an exact
+// refspec (git remote set-branches) or a negative one makes them untrusted,
+// not safe to lose.
+func TestRemoveForkGoneOnlyCopyIsAtRiskWithNarrowedRefspec(t *testing.T) {
+	t.Parallel()
+	for _, narrow := range [][]string{
+		{"remote", "set-branches", "origin", "main"},
+		{"config", "--add", "remote.origin.fetch", "^refs/heads/nope"},
+	} {
+		f := newFixture(t)
+		fo, primary := f.addForked(t, "x", testutil.OriginOpts{})
+		f.forkOnlyBranch(t)
+		wt := filepath.Join(f.w.Root, "x", "topic")
+		testutil.Git(t, primary, "worktree", "remove", wt)
+		testutil.Git(t, primary, "branch", "-q", "-D", "topic")
+		testutil.Git(t, primary, narrow...)
+		if err := os.RemoveAll(fo.Fork.Path); err != nil {
+			t.Fatal(err)
+		}
+		_, err := f.remove(t, "x", false, yes)
+		if err == nil || !strings.Contains(err.Error(), "your fork (origin) appears to be gone and 1 commit exists only on it") {
+			t.Fatalf("%v: err = %v", narrow, err)
+		}
+		if !exists(filepath.Join(f.w.Root, "x")) {
+			t.Fatalf("%v: repository deleted", narrow)
+		}
+	}
+}
+
+// The fetch runs in the primary checkout: a worktree's own configuration
+// (extensions.worktreeConfig) does not decide which refs it writes.
+func TestRemoveWorktreeConfigRefspecIsNotTrusted(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	primary, _ := f.clonedRepo(t, "a")
+	w := f.mustAddWT(t, "a", "w").Path
+	testutil.Git(t, primary, "config", "core.repositoryFormatVersion", "1")
+	testutil.Git(t, primary, "config", "extensions.worktreeConfig", "true")
+	testutil.Git(t, w, "config", "--worktree", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/stale/*")
+	testutil.Git(t, w, "switch", "-q", "--detach")
+	testutil.CommitFile(t, w, "d.txt", "d\n", "only on the detached HEAD")
+	testutil.Git(t, primary, "branch", "-q", "-D", "w")
+	testutil.Git(t, w, "update-ref", "refs/remotes/stale/x", "HEAD")
+	_, err := f.removeOpts(t, "a", RemoveOptions{WorkingDir: f.w.Root, Confirm: yes})
+	if err == nil || !strings.Contains(err.Error(), "1 commit only on detached HEAD") {
+		t.Fatalf("err = %v", err)
+	}
+	if !exists(w) {
+		t.Fatal("worktree deleted")
+	}
+}
+
+// The URL deciding whether a nested remote is inside the deleted tree is
+// the one fetch uses, after url.<base>.insteadOf.
+func TestRemoveNestedRemoteInsideTheTreeThroughInsteadOf(t *testing.T) {
+	t.Parallel()
+	f, primary := nestedSetup(t)
+	n := filepath.Join(primary, "vendor", "n")
+	plainClone(t, testutil.NewOrigin(t, testutil.OriginOpts{}), n)
+	inner := filepath.Join(primary, "vendor", "inner.git")
+	testutil.Git(t, n, "init", "-q", "--bare", inner)
+	testutil.Git(t, n, "config", "url.file://"+inner+".insteadOf", "https://example.invalid/inner")
+	testutil.Git(t, n, "remote", "add", "inner", "https://example.invalid/inner")
+	testutil.Git(t, n, "update-ref", "refs/heads/work", localCommit(t, n))
+	testutil.Git(t, n, "push", "-q", "inner", "work")
+	testutil.Git(t, n, "fetch", "-q", "inner")
+	_, err := f.removeOpts(t, "a", RemoveOptions{WorkingDir: f.w.Root, Confirm: yes})
+	if err == nil || !strings.Contains(err.Error(), "vendor/n (1 unpushed commit on local branches)") {
+		t.Fatalf("err = %v", err)
+	}
+	if !exists(n) {
+		t.Fatal("nested repository deleted")
+	}
+}
+
+// A negative refspec: origin's fetch neither updates nor prunes the refs
+// of the excluded branches, so none of origin's refs is trusted.
+func TestRemoveNegativeRefspecRefsAreNotPushed(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	primary, _ := f.clonedRepo(t, "a")
+	testutil.Git(t, primary, "config", "--add", "remote.origin.fetch", "^refs/heads/old")
+	testutil.Git(t, primary, "update-ref", "refs/heads/old", localCommit(t, primary))
+	testutil.Git(t, primary, "update-ref", "refs/remotes/origin/old", "refs/heads/old")
+	_, err := f.removeOpts(t, "a", RemoveOptions{WorkingDir: f.w.Root, Confirm: yes})
+	if err == nil || !strings.Contains(err.Error(), "unpushed commits on local branches: ") || !strings.Contains(err.Error(), "old (also on ") {
+		t.Fatalf("err = %v", err)
+	}
+	if !exists(filepath.Join(f.w.Root, "a")) {
+		t.Fatal("repository deleted")
+	}
+}
+
+// A merge target that exists but is not trusted is not reported as missing.
+func TestRemoveWorktreeDeleteBranchUntrustedTargetIsNamedAsSuch(t *testing.T) {
+	t.Parallel()
+	f, primary, _, _ := workWorktree(t)
+	testutil.Git(t, primary, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/mirror/*")
+	_, err := f.rmWT(t, "a", "work", WorktreeRemoveOptions{DeleteBranch: true})
+	var refused *WorktreeRefusedError
+	if !errors.As(err, &refused) {
+		t.Fatalf("err = %v, want a refusal", err)
+	}
+	if u := refused.Plan.Unmerged; !strings.Contains(u, "branch work has no merge target (origin/main is not trusted:") || strings.Contains(u, "does not exist") {
+		t.Fatalf("unmerged = %q", u)
 	}
 }
