@@ -112,6 +112,10 @@ func (e *listingError) Error() string { return "listing repositories of " + e.Or
 
 func (e *listingError) Unwrap() error { return e.Err }
 
+// Summary is the reason on one line, for the message of the home screen
+// (see errorLine), which shows no warning.
+func (e *listingError) Summary() string { return firstLine(e.Err.Error()) }
+
 // syncErr returns the error of rep (see ops.SyncReport.Err) once its
 // warnings are printed: the failed listings, whose warnings said why, are
 // only named (see listingError).

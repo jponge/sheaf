@@ -149,3 +149,61 @@ func TestGHErrorsOneLine(t *testing.T) {
 		}
 	}
 }
+
+// twoOrgSync is syncBundle also tracking the organization p, whose listing
+// then fails as gh without credentials does: sync proposes b and c of o.
+func twoOrgSync(t *testing.T) *env {
+	t.Helper()
+	e, _ := syncBundle(t)
+	e.origin(t, "p", "x", false)
+	e.mustRun(t, "add", "--org", "p", "--repo", "x")
+	e.fake.ListErr["p"] = &hosting.GHError{Args: []string{"repo", "list", "p"}, Err: hosting.ErrGHNotAuthenticated}
+	return e
+}
+
+// The menu of a TUI sync, one listing failed, says that failure once in
+// full (its warning) whether nothing is selected or the selection is
+// applied; the final error only names it.
+func TestSyncTUIListingFailureSaidOnce(t *testing.T) {
+	t.Parallel()
+	const reason = "listing repositories of p: gh is not authenticated: run `gh auth login`"
+	for name, in := range map[string]func(*syncBuffer) io.Reader{
+		"nothing selected": func(*syncBuffer) io.Reader { return newScript(t, false, keys("\r")) },
+		"applied": func(out *syncBuffer) io.Reader {
+			return newScript(t, true, keys(" ", "\r"), []key{{wait: waitOutput(t, out, "Syncing: finished in")}})
+		},
+	} {
+		e := twoOrgSync(t)
+		var out syncBuffer
+		errs, code := e.runTUI(t, in(&out), &out, "sync")
+		lines := strings.Split(strings.TrimSuffix(errs, "\n"), "\n")
+		if code != 1 || strings.Count(errs, "gh is not authenticated") != 1 || !strings.Contains(errs, "sheaf: warning: "+reason+"\n") ||
+			lines[len(lines)-1] != "sheaf: listing repositories of p failed" {
+			t.Errorf("%s: exit %d\nstdout:\n%s\nstderr:\n%s", name, code, out.String(), errs)
+		}
+	}
+}
+
+// On the home screen, the message of a sync whose listing failed gives
+// the reason (one line), not only the name of the listing.
+func TestHomeSyncListingFailureMessageGivesTheReason(t *testing.T) {
+	t.Parallel()
+	e := twoOrgSync(t)
+	var out syncBuffer
+	want := "sync failed: listing repositories of p: gh is not authenticated: run `gh auth login` (see report)"
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "s"), keys("\r"), reportKey(t, &out, "sync", "q"), ovKeys(t, &out, want, 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 || !strings.Contains(out.String(), want) {
+		t.Fatalf("exit %d, want the message %q\nstdout:\n%s\nstderr:\n%s", code, want, out.String(), errs)
+	}
+}
+
+// The summary of a failed listing is the first line of its reason (gh's
+// other failures keep its text, which may have several lines).
+func TestListingErrorSummaryIsOneLine(t *testing.T) {
+	t.Parallel()
+	err := &listingError{Org: "p", Err: errors.New("listing repositories of p: gh repo list p: exit status 1: HTTP 502\nmore")}
+	if got, more := errorLine(fmt.Errorf("x: %w", errors.Join(err))); got != "listing repositories of p: gh repo list p: exit status 1: HTTP 502" || !more {
+		t.Fatalf("errorLine = %q, %v", got, more)
+	}
+}
