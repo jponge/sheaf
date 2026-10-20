@@ -102,7 +102,7 @@ func TestAddWorktreeConcurrentCollision(t *testing.T) {
 	f.clonedRepo(t, "a")
 	var arrived sync.WaitGroup
 	arrived.Add(2)
-	testHookAfterAddCheck = func() {
+	afterAddCheck := func() {
 		arrived.Done()
 		// Without serialization both adds get here; wait (bounded) for the
 		// other one to make the race deterministic.
@@ -113,14 +113,13 @@ func TestAddWorktreeConcurrentCollision(t *testing.T) {
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
-	t.Cleanup(func() { testHookAfterAddCheck = nil })
 	errs := make([]error, 2)
 	var wg sync.WaitGroup
 	for i, b := range []string{"Br", "br"} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = AddWorktree(context.Background(), f.w, "a", b, WorktreeAddOptions{NoFetch: true}, func(Event) {})
+			_, errs[i] = AddWorktree(context.Background(), f.w, "a", b, WorktreeAddOptions{NoFetch: true, afterAddCheck: afterAddCheck}, func(Event) {})
 		}()
 	}
 	wg.Wait()
@@ -264,16 +263,14 @@ func TestRemoveWorktreeRemovedDuringConfirm(t *testing.T) {
 }
 
 func TestRemoveWorktreeKeepsBranchThatMoved(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	p := f.mustAddWT(t, "a", "x").Path
-	testHookAfterWorktreeRemove = func() {
-		testutil.Git(t, primary, "update-ref", "refs/heads/x", "origin/feat")
-	}
-	t.Cleanup(func() { testHookAfterWorktreeRemove = nil })
 	var evs []Event
 	msg, err := RemoveWorktree(context.Background(), f.w, "a", WorktreeTarget{Name: "x"}, WorktreeRemoveOptions{
 		DeleteBranch: true, WorkingDir: f.w.Root, Confirm: func(WorktreeRemovePlan) bool { return true },
+		afterRemove: func() { testutil.Git(t, primary, "update-ref", "refs/heads/x", "origin/feat") },
 	}, func(e Event) { evs = append(evs, e) })
 	if err != nil {
 		t.Fatal(err)
@@ -287,15 +284,14 @@ func TestRemoveWorktreeKeepsBranchThatMoved(t *testing.T) {
 }
 
 func TestRemoveWorktreeKeepsBranchCheckedOutElsewhere(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	p := f.mustAddWT(t, "a", "x").Path
 	other := filepath.Join(t.TempDir(), "other")
-	testHookAfterWorktreeRemove = func() {
+	msg, err := f.rmWT(t, "a", "x", WorktreeRemoveOptions{DeleteBranch: true, afterRemove: func() {
 		testutil.Git(t, primary, "worktree", "add", "-q", other, "x")
-	}
-	t.Cleanup(func() { testHookAfterWorktreeRemove = nil })
-	msg, err := f.rmWT(t, "a", "x", WorktreeRemoveOptions{DeleteBranch: true})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

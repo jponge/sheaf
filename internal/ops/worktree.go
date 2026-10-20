@@ -350,12 +350,6 @@ type WorktreeTarget struct {
 	Kind TargetKind
 }
 
-// Test seams (nil in production).
-var (
-	testHookAfterAddCheck       func()
-	testHookAfterWorktreeRemove func()
-)
-
 // RepoError is the failure of one repository in a multi-repository listing.
 type RepoError struct {
 	Repo string
@@ -386,6 +380,9 @@ type WorktreeAddOptions struct {
 	// remotes (ops-internal) overrides the remotes searched for an
 	// existing remote branch (default: RemotesOf(r).BranchSearch()).
 	remotes []string
+	// afterAddCheck (test seam, nil in production) runs once the target
+	// was checked, under the bundle lock.
+	afterAddCheck func()
 }
 
 // WorktreeAddResult is the outcome of AddWorktree.
@@ -516,8 +513,8 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 	if err := checkNotOnlyATag(ctx, primary, branch, search); err != nil {
 		return WorktreeAddResult{}, err
 	}
-	if testHookAfterAddCheck != nil {
-		testHookAfterAddCheck()
+	if opts.afterAddCheck != nil {
+		opts.afterAddCheck()
 	}
 	base := opts.Base
 	if base == "" {
@@ -720,6 +717,9 @@ type WorktreeRemoveOptions struct {
 	// Confirm is called with the plan once RemoveWorktree may proceed;
 	// returning false (or a nil Confirm) aborts with ErrNotConfirmed.
 	Confirm func(WorktreeRemovePlan) bool
+	// afterRemove (test seam, nil in production) runs once the worktree
+	// was removed, before its branch is deleted.
+	afterRemove func()
 }
 
 // WorktreeRemovePlan describes a worktree removal.
@@ -1190,8 +1190,8 @@ func (x *worktreeRemoval) apply(ctx context.Context, w *Workspace, opts Worktree
 	if _, err := os.Lstat(wt.Path); !errors.Is(err, fs.ErrNotExist) {
 		return "", fmt.Errorf("git worktree remove succeeded but %s still exists", wt.Path)
 	}
-	if testHookAfterWorktreeRemove != nil {
-		testHookAfterWorktreeRemove()
+	if opts.afterRemove != nil {
+		opts.afterRemove()
 	}
 	msg := "removed worktree " + describe(wt) + " at " + wt.Path
 	if !x.deleteBr {
