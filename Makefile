@@ -68,7 +68,8 @@ vet-windows:
 # README): vhs renders through Chromium, which stays inside the image built
 # from demo/Dockerfile. sheaf is built for the container's architecture into
 # bin/linux/, then demo/record.sh creates the demo bundle in the container's
-# /tmp (demo/setup.sh) and runs vhs. Nothing uses the network (beyond pulling
+# /tmp (demo/setup.sh), runs vhs (a video) and makes the GIF in two ffmpeg
+# passes (vhs's own GIF output keeps every frame in memory). Nothing uses the network (beyond pulling
 # the image), gh or the user's configuration. The container runs with the
 # user's ids so that the GIF is theirs.
 DEMO_IMAGE := sheaf-demo-vhs

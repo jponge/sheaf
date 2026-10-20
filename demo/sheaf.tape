@@ -1,4 +1,5 @@
-# The demo of the README, rendered by `make demo` into demo/sheaf.gif.
+# The demo of the README, recorded by `make demo` (demo/record.sh): vhs
+# writes bin/demo.mp4, which demo/record.sh turns into demo/sheaf.gif.
 # demo/setup.sh first creates the demo bundle in $SHEAF_DEMO_DIR, offline
 # (see demo/record.sh); its env.sh isolates the shell from the user's
 # configuration and defines the sheaf shell function.
@@ -13,7 +14,7 @@
 # `add` that follows fails the recording if the branch was not entered. Wait
 # (current line) is used for the shell prompt.
 
-Output demo/sheaf.gif
+Output bin/demo.mp4
 
 Require sheaf
 Require git

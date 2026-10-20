@@ -784,12 +784,14 @@ make demo                                            # writes demo/sheaf.gif
 ```
 
 `make demo` builds sheaf for the container into `bin/linux/`, and
-`demo/record.sh` creates a throwaway bundle in the container's `/tmp`
-(`demo/setup.sh`): three repositories with local bare remotes (`file://`
-URLs), worktrees, a checkout behind its remote and a dirty one. The setup
-and the recording shell drop the `GIT_*` and gh variables, get their own
-`HOME`, git and gh configuration, and a `gh` stub that fails first on
-`PATH`; the shell also gets the `sheaf` shell function. Nothing uses the
+`demo/record.sh` records a video with vhs and turns it into the GIF in two
+ffmpeg passes (palette, then frames), which keeps memory low. The video is
+recorded in a throwaway bundle in the container's `/tmp` (`demo/setup.sh`):
+three repositories with local bare remotes (`file://` URLs), worktrees, a
+checkout behind its remote and a dirty one. The setup and the recording
+shell drop the `GIT_*` and gh variables, get their own `HOME`, git and gh
+configuration, and a `gh` stub that fails first on `PATH`; the shell also
+gets the `sheaf` shell function. Nothing uses the
 network (beyond pulling the image), GitHub or your configuration. `make
 demo-check` runs the steps of the tape in plain mode against such a bundle
 (`demo/check.sh`) and checks the tape with vhs's parser, without docker.
