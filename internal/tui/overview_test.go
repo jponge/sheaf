@@ -769,9 +769,9 @@ func TestOverviewGroupsRowsByFirstCell(t *testing.T) {
 	wantLines(NewOverview("t", []string{"REPO", "DIR", "STATE"}, rows, nil), "  [ ] alpha  feat-x  dirty")
 }
 
-// Shrinkable columns are truncated, in their order and down to a minimum
-// width, before the last column is cut at the window width; the width of
-// the last column ignores alert rows.
+// Shrinkable columns are truncated, the widest first (ties: in their
+// order) and down to a minimum width, before the last column is cut at the
+// window width; the width of the last column ignores alert rows.
 func TestOverviewShrinksColumnsBeforeTheLast(t *testing.T) {
 	t.Parallel()
 	rows := []Row{
@@ -798,7 +798,7 @@ func TestOverviewShrinksColumnsBeforeTheLast(t *testing.T) {
 		want  []string
 	}{
 		{100, []string{"      REPO   DIR               BRANCH                    AGE  STATE", "> [ ] alpha  feature-dir-long  feature/very-long-branch  2d   clean, ↑2 ↓1"}},
-		{60, []string{"      REPO   DIR               BRANCH      AGE  STATE", "> [ ] alpha  feature-dir-long  feature/v…  2d   clean, ↑2 ↓1", "  [ ] alpha  main              main        5m   dirty"}},
+		{60, []string{"      REPO   DIR            BRANCH         AGE  STATE", "> [ ] alpha  feature-dir-…  feature/very…  2d   clean, ↑2 ↓1", "  [ ] alpha  main           main           5m   dirty"}},
 		{50, []string{"      REPO   DIR       BRANCH    AGE  STATE", "> [ ] alpha  feature…  feature…  2d   clean, ↑2 ↓1"}},
 		{40, []string{"> [ ] alpha  feature…  feature…  2d   c…"}},
 	} {
@@ -807,7 +807,7 @@ func TestOverviewShrinksColumnsBeforeTheLast(t *testing.T) {
 		}
 	}
 	// The last column is never shrunk.
-	if v := at(NewOverview("t", header, rows, nil).WithShrinkable(4, 2, 1), 60); !hasLine(v, "> [ ] alpha  feature-dir-long  feature/v…  2d   clean, ↑2 ↓1") {
+	if v := at(NewOverview("t", header, rows, nil).WithShrinkable(4, 2, 1), 60); !hasLine(v, "> [ ] alpha  feature-dir-…  feature/very…  2d   clean, ↑2 ↓1") {
 		t.Errorf("last column listed as shrinkable:\n%s", v)
 	}
 	// The filter matches the whole cells.
@@ -817,6 +817,39 @@ func TestOverviewShrinksColumnsBeforeTheLast(t *testing.T) {
 	// Without shrinkable columns the line is cut, with an ellipsis (B52 E2).
 	if v := at(NewOverview("t", header, rows, nil), 60); !hasLine(v, "> [ ] alpha  feature-dir-long  feature/very-long-branch  2d…") {
 		t.Errorf("without shrinkable columns:\n%s", v)
+	}
+}
+
+// One long cell of a shrinkable column narrows that column, not the
+// others (B62 M3: a long DIR cut BRANCH on every row first): the widest
+// shrinkable column gives way first.
+func TestOverviewShrinksTheWidestColumnFirst(t *testing.T) {
+	t.Parallel()
+	rows := []Row{
+		{Key: "1", Cells: []string{"alpha", "a-very-long-directory-name", "feat/x", "2d", "clean"}},
+		{Key: "2", Cells: []string{"alpha", "", "feature/some-work", "5m", "dirty"}},
+	}
+	var m tea.Model = NewOverview("t", []string{"REPO", "DIR", "BRANCH", "AGE", "STATE"}, rows, nil).WithShrinkable(2, 1)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 64, Height: 20})
+	v := view(m)
+	for _, want := range []string{"> [ ] alpha  a-very-long-directo…  feat/x             2d   clean", "  [ ] alpha                        feature/some-work  5m   dirty"} {
+		if !hasLine(v, want) {
+			t.Errorf("view lacks %q:\n%s", want, v)
+		}
+	}
+}
+
+// The filter also matches a row's Match text, which is not displayed
+// (e.g. the text of a cell left blank).
+func TestOverviewFilterMatchesHiddenText(t *testing.T) {
+	t.Parallel()
+	rows := []Row{
+		{Key: "1", Cells: []string{"alpha", "", "feat/x", "clean"}, Match: "feat-x"},
+		{Key: "2", Cells: []string{"alpha", "", "main", "clean"}, Match: "main"},
+	}
+	m := NewOverview("t", []string{"REPO", "DIR", "BRANCH", "STATE"}, rows, nil).WithFilter("feat-x")
+	if v := view(m); !strings.Contains(v, "feat/x") || strings.Contains(v, "main") || strings.Contains(v, "feat-x  ") {
+		t.Errorf("filter on hidden text:\n%s", v)
 	}
 }
 

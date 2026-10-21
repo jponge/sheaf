@@ -21,6 +21,7 @@ type Row struct {
 	Alert bool     // the last cell is rendered with the Failed style (e.g. a problem)
 	Level Level    // unless Alert, the last cell is rendered in the style of this level
 	Links []Link   // hyperlinks in the cells, see Overview.WithHyperlinks
+	Match string   // also matched by the filter, not displayed (e.g. the text of a blank cell)
 }
 
 // Link makes the first occurrence of Text in the cell Cell of a Row a
@@ -201,8 +202,9 @@ func (m Overview) WithHyperlinks() Overview {
 }
 
 // WithShrinkable returns a copy of m in which the columns cols (indices,
-// not the last column) are narrowed, in that order, when the table is wider
-// than the window: their cells are truncated with an ellipsis, down to
+// not the last column) are narrowed when the table is wider than the
+// window, the widest first (ties: in the order of cols), one column at a
+// time: their cells are truncated with an ellipsis, down to
 // minShrunkWidth, so that the last column fits. The width of the last
 // column is taken over the rows without Alert (their free text, e.g. an
 // error, may be long); lines that still do not fit are cut at the window
@@ -494,7 +496,7 @@ func (m *Overview) applyFilter() {
 	m.visible = nil // fresh slice: copies of the model must not share it
 	m.cursor = 0
 	for i, r := range m.rows {
-		if needle == "" || strings.Contains(strings.ToLower(strings.Join(r.Cells, "\x00")), needle) {
+		if needle == "" || strings.Contains(strings.ToLower(strings.Join(append(slices.Clone(r.Cells), r.Match), "\x00")), needle) {
 			if i == current {
 				m.cursor = len(m.visible)
 			}
@@ -583,7 +585,8 @@ func (m Overview) columnWidths() []int {
 }
 
 // fitColumns returns the width of each column over header and rows, with
-// the columns shrink narrowed, in that order and down to minShrunkWidth,
+// the columns shrink narrowed, the widest first (ties: in the order of
+// shrink) and down to minShrunkWidth,
 // so that prefix and the table, its last column as wide as the widest
 // last cell of the header and the rows without Alert, fit width (0 =
 // unknown: nothing is narrowed); see WithShrinkable.
@@ -626,15 +629,17 @@ func fitWidths(header []string, rows []Row, width, prefix int, shrink []int) ([]
 		}
 	}
 	excess += lastWidth
-	for _, c := range shrink {
-		if excess <= 0 {
+	for ; excess > 0; excess-- {
+		widest := -1
+		for _, c := range shrink {
+			if c >= 0 && c < last && w[c] > minShrunkWidth && (widest < 0 || w[c] > w[widest]) {
+				widest = c
+			}
+		}
+		if widest < 0 {
 			break
 		}
-		if c >= 0 && c < last {
-			cut := min(excess, max(0, w[c]-minShrunkWidth))
-			w[c] -= cut
-			excess -= cut
-		}
+		w[widest]--
 	}
 	return w, excess
 }

@@ -238,6 +238,10 @@ when it opens. Checkouts that cannot be inspected are shown as problem rows.
 Rows are grouped by repository (primary first, problem rows last): REPO is
 only shown on the first row of each group, and on the first row on screen
 when the list is scrolled or filtered (the filter still matches it).
+DIR is blank when it is the directory sheaf derives from BRANCH (the branch
+or tag normalized as in [Repository layout](#repository-layout), e.g. `feat-x` for `feat/x`, or
+`main` for the primary checkout of `main`), so it shows only directories
+that differ (the filter still matches them).
 In a bundle without repositories, it lists what to run instead, one
 command per line: `sheaf add owner/repo`, `sheaf add --org <org>` and, for
 clones already in the bundle directory, `sheaf adopt <dir>` (`<dir>` is
@@ -262,7 +266,8 @@ relative to the pull request head recorded by the last `wt pr` (e.g.
 (`↑` and `↓`), `upstream gone`, errors and problem rows; yellow for local
 changes or commits to push or pull (`dirty`, `↑`, `↓`); faint for
 `no upstream`; green otherwise (clean, in sync or detached). In a narrow
-terminal, BRANCH and then DIR are truncated (with `…`) so that STATE fits;
+terminal, the wider of DIR and BRANCH is truncated first (with `…`), then
+both alike, down to 8 columns each, so that STATE fits;
 lines that still do not fit are cut at the right, ending with `…` (as in
 every view of the TUI). The title (`sheaf: <bundle>`) and that of the
 report view show the home directory as `~`; commands in hints keep

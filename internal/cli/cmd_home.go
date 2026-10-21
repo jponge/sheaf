@@ -264,7 +264,7 @@ func (h *home) overview() (tui.Overview, error) {
 	for i := range r.Checkouts {
 		cs := &r.Checkouts[i]
 		h.rows[cs.Path] = homeRow{checkout: cs}
-		rows = append(rows, tui.Row{Key: cs.Path, Cells: []string{cs.Repo, displayDir(cs.Checkout), homeBranch(*cs), homeAge(now, cs.HeadTime), homeState(*cs)}, Alert: cs.Err != nil, Level: homeLevel(*cs), Links: homeLinks(repoOf(h.bundle, cs.Repo), cs)})
+		rows = append(rows, tui.Row{Key: cs.Path, Cells: []string{cs.Repo, homeDir(cs.Checkout), homeBranch(*cs), homeAge(now, cs.HeadTime), homeState(*cs)}, Alert: cs.Err != nil, Level: homeLevel(*cs), Links: homeLinks(repoOf(h.bundle, cs.Repo), cs), Match: displayDir(cs.Checkout)})
 	}
 	for i := range r.Problems {
 		p := &r.Problems[i]
@@ -348,6 +348,20 @@ func (h *home) scope(name string) tui.Scope {
 		}
 	}
 	return tui.ScopeNone
+}
+
+// homeDir returns the DIR cell of the overview for c: its directory (see
+// displayDir), blank when it is the directory sheaf derives from its branch
+// or tag (see bundle.NormalizeBranch), which BRANCH shows.
+func homeDir(c ops.Checkout) string {
+	name := c.Branch
+	if c.Tag != "" {
+		name = c.Tag
+	}
+	if derived, err := bundle.NormalizeBranch(name); err == nil && name != "" && !c.Outside && c.Dir == derived {
+		return ""
+	}
+	return displayDir(c)
 }
 
 func homeBranch(c ops.CheckoutStatus) string {

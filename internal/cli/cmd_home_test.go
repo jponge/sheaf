@@ -259,6 +259,36 @@ func overviewLines(t *testing.T, d Deps, root string, width int) (header string,
 	return header, rows
 }
 
+// DIR is blank when it is the directory sheaf derives from BRANCH (the
+// normalized branch or tag; B62 M3: the column repeated the branch on
+// almost every row), and shown otherwise; the filter still matches it.
+func TestHomeBlanksDerivedDirectories(t *testing.T) {
+	t.Parallel()
+	e, alpha, _, _, _ := homeBundle(t)
+	repo := filepath.Dir(alpha)
+	testutil.Git(t, alpha, "worktree", "add", "-q", "-b", "topic/x", filepath.Join(repo, "elsewhere"))
+	testutil.Git(t, alpha, "worktree", "add", "-q", "-b", "topic/y", filepath.Join(repo, "topic-y"))
+	header, rows := overviewLines(t, e.deps(), e.cwd, 0)
+	dir, branch := strings.Index(header, "DIR"), strings.Index(header, "BRANCH")
+	if dir < 0 || branch < 0 || len(rows) != 5 {
+		t.Fatalf("overview:\n%s\n%s", header, strings.Join(rows, "\n"))
+	}
+	for _, r := range rows {
+		cell := strings.TrimSpace(r[dir:branch])
+		if want := map[bool]string{true: "elsewhere"}[strings.Contains(r, "topic/x")]; cell != want {
+			t.Errorf("DIR %q, want %q: %q", cell, want, r)
+		}
+	}
+	h := &home{d: e.deps(), s: &tuiSession{ctx: context.Background()}, root: e.cwd, jobs: 4, filter: "topic-y"}
+	ov, err := h.overview()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := ansi.Strip(ov.View().Content); !strings.Contains(v, "topic/y") || strings.Contains(v, "topic/x") || !strings.Contains(v, "1 shown") {
+		t.Errorf("filter on a blank DIR:\n%s", v)
+	}
+}
+
 // STATE gives the commits to push and pull as arrows, from local refs, and
 // AGE the age of the HEAD commit of each checkout; a problem row has no
 // age.
@@ -273,11 +303,11 @@ func TestHomeShowsAheadBehindAndAge(t *testing.T) {
 	d.now = func() time.Time { return now }
 	header, rows := overviewLines(t, d, e.cwd, 0)
 	want := []string{
-		"> [ ] alpha  main  main    2d   clean, ↑1",
-		"  [ ]        feat  feat    3h   dirty, ↑1 ↓1",
-		"  [ ] beta   main  main    1mo  clean, ↑1",
+		"> [ ] alpha       main    2d   clean, ↑1",
+		"  [ ]             feat    3h   dirty, ↑1 ↓1",
+		"  [ ] beta        main    1mo  clean, ↑1",
 	}
-	if header != "      REPO   DIR   BRANCH  AGE  STATE" || !slices.Equal(rows, want) {
+	if header != "      REPO   DIR  BRANCH  AGE  STATE" || !slices.Equal(rows, want) {
 		t.Errorf("overview:\n%s\n%s\nwant rows:\n%s", header, strings.Join(rows, "\n"), strings.Join(want, "\n"))
 	}
 	if err := os.RemoveAll(feat); err != nil {
@@ -305,20 +335,20 @@ func TestHomeGroupsRowsByRepository(t *testing.T) {
 			}
 		}
 	}
-	want(overviewRows(t, e), "> [ ] alpha  main ", "  [ ]        feat ", "  [ ] beta   main ")
+	want(overviewRows(t, e), "> [ ] alpha       main ", "  [ ]             feat ", "  [ ] beta        main ")
 	if err := os.RemoveAll(feat); err != nil {
 		t.Fatal(err)
 	}
 	rows := overviewRows(t, e)
-	want(rows, "> [ ] alpha  main ", "  [ ]        feat ", "  [ ] beta   main ")
+	want(rows, "> [ ] alpha        main ", "  [ ]        feat ", "  [ ] beta         main ")
 	if !strings.Contains(rows[1], "problem: worktree directory missing") {
 		t.Errorf("row 1 is not the problem: %q", rows[1])
 	}
 }
 
-// In a narrow window, BRANCH and then DIR are truncated so that STATE
-// fits.
-func TestHomeTruncatesBranchThenDir(t *testing.T) {
+// In a narrow window, the wider of DIR and BRANCH is truncated first so
+// that STATE fits (B62 M3: BRANCH was truncated first).
+func TestHomeTruncatesTheWiderOfDirAndBranch(t *testing.T) {
 	t.Parallel()
 	e, alpha, _, _, _ := homeBundle(t)
 	testutil.Git(t, alpha, "worktree", "add", "-q", "-b", "feature/a-very-long-branch", filepath.Join(filepath.Dir(alpha), "a-very-long-directory"))
@@ -333,7 +363,7 @@ func TestHomeTruncatesBranchThenDir(t *testing.T) {
 		t.Fatalf("width %d: no row of the worktree in\n%s", width, strings.Join(rows, "\n"))
 		return ""
 	}
-	if r := row(70); !strings.Contains(r, " a-very-long-directory  feature/…  ") || !strings.HasSuffix(r, "  clean, no upstream") {
+	if r := row(70); !strings.Contains(r, " a-very-long-di…  feature/a-very…  ") || !strings.HasSuffix(r, "  clean, no upstream") {
 		t.Errorf("width 70: %q", r)
 	}
 	if r := row(55); !strings.Contains(r, " a-very-…  feature…  ") {
