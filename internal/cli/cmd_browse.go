@@ -16,7 +16,7 @@ func newBrowseCmd(d Deps) *cobra.Command {
 	var opts ops.BrowseOptions
 	cmd := &cobra.Command{
 		Use:   "browse [<repo>]",
-		Short: "Open a repository, its pull request or branch on GitHub in the web browser",
+		Short: "Open a repository, its pull request or branch on GitHub",
 		Long: "Open a page of a GitHub repository in the web browser, with gh (which must be\n" +
 			"installed and logged in). Without argument, the repository of the checkout\n" +
 			"containing the working directory; with one, that repository of the bundle (its\n" +

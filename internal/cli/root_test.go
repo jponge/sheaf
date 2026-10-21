@@ -131,6 +131,58 @@ func TestRootHelpDescribesTheHomeScreen(t *testing.T) {
 	}
 }
 
+// The generated parts of every command's help fit 80 columns (B62 M8:
+// cobra does not wrap them, the terminal did, inside words): the one-liners
+// of the commands list (each at most 60 columns) and the global flags. The
+// -j usage is short: what -j 1 does to git's prompts is said once, in the
+// root help.
+func TestHelpListsAndGlobalFlagsFit80Columns(t *testing.T) {
+	t.Parallel()
+	var walk func(c *cobra.Command) []*cobra.Command
+	walk = func(c *cobra.Command) []*cobra.Command {
+		all := []*cobra.Command{c}
+		for _, s := range c.Commands() {
+			if s.IsAvailableCommand() || s.Name() == "help" {
+				all = append(all, walk(s)...)
+			}
+		}
+		return all
+	}
+	root := NewRootCmd(Streams{In: strings.NewReader("")})
+	for _, c := range walk(root) {
+		if n := len(c.Short); n > 60 {
+			t.Errorf("%q: one-liner of %d columns: %q", c.CommandPath(), n, c.Short)
+		}
+		args := append(strings.Fields(c.CommandPath())[1:], "--help")
+		out, _, err := run(t, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		section := ""
+		for _, l := range strings.Split(out, "\n") {
+			switch {
+			case l == "":
+				section = ""
+				continue
+			case strings.HasSuffix(l, ":") && !strings.HasPrefix(l, " "):
+				section = l
+				continue
+			}
+			global := section == "Global Flags:" || (c == root && section == "Flags:")
+			if (section == "Available Commands:" || global) && len([]rune(l)) > 80 {
+				t.Errorf("%q --help: %s line of %d columns: %q", c.CommandPath(), section, len([]rune(l)), l)
+			}
+		}
+	}
+	out, _, err := run(t, "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "With -j 1") || strings.Count(out, "passphrase") != 1 {
+		t.Errorf("the root help does not explain -j 1 once:\n%s", out)
+	}
+}
+
 func TestWindowsIsRefusedAtStartup(t *testing.T) {
 	t.Parallel()
 	for _, goos := range []string{"windows", "linux", "darwin"} {

@@ -83,7 +83,7 @@ func newInitCmd(d Deps) *cobra.Command {
 	var adoptAll bool
 	cmd := &cobra.Command{
 		Use:   "init [dir]",
-		Short: "Turn an existing directory into a bundle and list the checkouts found in it",
+		Short: "Turn a directory into a bundle and list its checkouts",
 		Long: "Create sheaf.yaml in an existing directory (default: the current directory) and list\n" +
 			"the checkouts found in its subdirectories: plain clones (<dir>/.git) and repositories\n" +
 			"with a single checkout <dir>/<child>/ (named after a branch, or <dir> named after the\n" +
@@ -271,7 +271,7 @@ func newRemoveCmd(d Deps) *cobra.Command {
 	var force, yes, offline bool
 	cmd := &cobra.Command{
 		Use:   "remove <repo>",
-		Short: "Remove a repository, its worktrees and its directory from the bundle",
+		Short: "Remove a repository, its worktrees and its directory",
 		Long: "Remove a repository: fetch it, refuse when any checkout or worktree has data that\n" +
 			"would be lost (changes, untracked files, stashes, unpushed commits) unless --force,\n" +
 			"then delete its worktrees, its directory and its sheaf.yaml entry. Commits of a pull\n" +

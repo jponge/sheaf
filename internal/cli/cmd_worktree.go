@@ -19,7 +19,7 @@ func addWorktreeCommands(root *cobra.Command, d Deps) {
 	wt := &cobra.Command{
 		Use:     "worktree",
 		Aliases: []string{"wt"},
-		Short:   "Add, list and remove worktrees (siblings of the primary checkout)",
+		Short:   "Add, list and remove worktrees beside the primary checkout",
 		Long: "Manage the worktrees of the bundle's repositories, located at\n" +
 			"<bundle>/<repo>/<normalized branch>/ next to the primary checkout. In plain mode with\n" +
 			"stdin on a terminal, add, remove and pr let git keep the terminal (ssh may prompt for\n" +
@@ -215,7 +215,7 @@ func newWorktreeListCmd(d Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list [<repo>]",
 		Aliases: []string{"ls"},
-		Short:   "List the checkouts and worktrees of the bundle (or of one repository)",
+		Short:   "List checkouts and worktrees (of the bundle or a repository)",
 		Long: "List every checkout of the bundle, or of <repo>: repository, directory, branch\n" +
 			"(\"(tag <tag>)\" for a worktree pinned at a tag, \"(tag <tag>, moved to <commit>)\"\n" +
 			"once its HEAD left the tag's commit), flags (primary, off-default,\n" +
@@ -525,7 +525,7 @@ func countOf(n int, one, many string) string {
 func newPathCmd(d Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "path [<repo>] [<branch-or-dir>]",
-		Short: "Print the path of the bundle, a repository's primary checkout or a worktree",
+		Short: "Print the path of the bundle, a checkout or a worktree",
 		Long: "Without arguments print the bundle root; with <repo> (or --repo) its primary\n" +
 			"checkout; with <repo> <branch-or-dir> (or --dir/--branch) that worktree. A worktree\n" +
 			"pinned at a tag is also named by its tag.\n\n" +
@@ -564,7 +564,7 @@ func newPathCmd(d Deps) *cobra.Command {
 func newWorktreePRCmd(d Deps) *cobra.Command {
 	return &cobra.Command{
 		Use:   "pr [<repo>] <number>",
-		Short: "Check out a GitHub pull request in a worktree and print its path",
+		Short: "Check out a pull request in a worktree and print its path",
 		Long: "Resolve the pull request with gh (GitHub repositories only) and fetch origin\n" +
 			"(for a clone of your fork: resolved against upstream, heads of your fork tracked\n" +
 			"from origin, other heads and pull refs from upstream).\n" +

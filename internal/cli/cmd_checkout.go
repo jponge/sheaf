@@ -159,7 +159,7 @@ func newStatusCmd(d Deps) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show branch, upstream and changes of every checkout and worktree",
+		Short: "Show branch, upstream and changes of checkouts and worktrees",
 		Long:  statusLong,
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {

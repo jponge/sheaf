@@ -51,7 +51,13 @@ func NewRootCmdWithDeps(s Streams, d Deps) *cobra.Command {
 Without a command, inside a bundle and with a terminal, sheaf opens its
 home screen: an overview of the bundle's checkouts with actions (update,
 fetch, add and remove worktrees, check out pull requests, open on GitHub,
-prune, doctor, sync). Without a terminal or with --no-tui, it prints this help.`,
+prune, doctor, sync). Without a terminal or with --no-tui, it prints this help;
+outside a bundle, it says how to create one.
+
+-j sets how many repositories are processed in parallel (checkouts for status
+and run). With -j 1, in plain mode with stdin on a terminal, git keeps the
+terminal and may prompt (ssh passphrase, host key): remove and wt add/rm/pr
+always do so.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(c *cobra.Command, _ []string) error {
@@ -87,9 +93,9 @@ prune, doctor, sync). Without a terminal or with --no-tui, it prints this help.`
 		root.SetErr(errw)
 	}
 	pf := root.PersistentFlags()
-	pf.String("bundle", "", "bundle directory (default: nearest parent containing sheaf.yaml)")
+	pf.String("bundle", "", "bundle directory (default: nearest sheaf.yaml upwards)")
 	pf.Bool("no-tui", false, "disable the interactive TUI and use plain CLI output")
-	pf.IntP("jobs", "j", runtime.NumCPU(), "number of repositories processed in parallel (checkouts for status and run); with -j 1, in plain mode with stdin on a terminal, git keeps the terminal and may prompt (ssh passphrase, host key): remove and wt add/rm/pr always do so")
+	pf.IntP("jobs", "j", runtime.NumCPU(), "repositories processed in parallel")
 
 	root.AddCommand(newVersionCmd())
 	addBundleCommands(root, d)

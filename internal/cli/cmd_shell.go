@@ -105,7 +105,7 @@ func genFishCompletion(r *cobra.Command, w io.Writer) error {
 func newShellInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "shell-init bash|zsh|fish",
-		Short: "Print the shell code defining scd, a cd that understands sheaf paths",
+		Short: "Print the shell code defining scd, a cd for sheaf paths",
 		Long: "Print shell code defining the function scd: `scd <args>` changes the directory to\n" +
 			"the output of `sheaf path <args>` (scd alone: the bundle root; scd <repo>; scd <repo>\n" +
 			"<branch-or-dir>). When sheaf path fails its status is returned and the directory is\n" +

@@ -47,7 +47,7 @@ func newSyncCmd(d Deps) *cobra.Command {
 	var fl syncFlags
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "Compare the tracked organizations with the bundle and apply chosen changes",
+		Short: "Compare with the tracked organizations, apply chosen changes",
 		Long: "List the repositories of each tracked organization (the sources of sheaf.yaml, or the\n" +
 			"--org ones) and compare them with the bundle:\n" +
 			"  new       listed, not in the bundle, not excluded (archived ones need --include-archived)\n" +
