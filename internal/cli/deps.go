@@ -143,12 +143,12 @@ func killAllOf(killGit, killCommands func() int) func() int {
 
 // interruptCtl implements the two-stage interruption shared by the signal
 // handler of execute and the ctrl+c key of the TUI (bubbletea's raw mode
-// turns ctrl+c into a key, not a SIGINT): see interrupt.
+// turns ctrl+c into a key, not a SIGINT): see interrupt. The home screen
+// scopes it to its actions (see beginAction).
 type interruptCtl struct {
 	cancel context.CancelFunc
 	force  chan struct{}
 	errw   io.Writer
-	count  atomic.Int32
 	// killAll and exit end the emergency stop (tests replace them).
 	killAll func() int
 	exit    func(int)
@@ -161,6 +161,15 @@ type interruptCtl struct {
 	// registered, if set, is called with each note registered by during
 	// (tests only).
 	registered func(note string)
+
+	// count is the number of interruptions so far, of the running action
+	// if any (see beginAction).
+	count int
+	// action cancels the context of the running action of the home
+	// screen, nil outside actions (see beginAction); cancelled tells that
+	// the command's context was cancelled.
+	action    context.CancelFunc
+	cancelled bool
 }
 
 // setNotify registers f, called with the number of interruptions so far on
@@ -213,25 +222,67 @@ func (c *interruptCtl) setRestore(f func()) {
 	c.mu.Unlock()
 }
 
-// interrupt is called for every interruption, a signal or a ctrl+c key:
-// the first one cancels the command's context; the second one is the
-// emergency stop (see execute); later ones do nothing. It is safe for
-// concurrent use, but must not be called from the event loop of a running
-// TUI program (its release hook waits for that program to end).
-func (c *interruptCtl) interrupt() {
-	n := c.count.Add(1)
+// interrupt is called for every interruption by the user, SIGINT or a
+// ctrl+c key: the first one cancels the context of the running action of
+// the home screen (see beginAction), else the command's context; the
+// second one (of the same action) is the emergency stop (see execute);
+// later ones do nothing. It is safe for concurrent use, but must not be
+// called from the event loop of a running TUI program (its release hook
+// waits for that program to end).
+func (c *interruptCtl) interrupt() { c.stop(false) }
+
+// terminate is interrupt for the signals that end sheaf (SIGTERM, SIGHUP):
+// the first one cancels the command's context, even during an action.
+func (c *interruptCtl) terminate() { c.stop(true) }
+
+func (c *interruptCtl) stop(command bool) {
 	c.mu.Lock()
-	notify := c.notify
+	c.count++
+	n, notify, cancel := c.count, c.notify, c.action
+	if command || cancel == nil {
+		cancel, c.cancelled = c.cancel, true
+	}
 	c.mu.Unlock()
 	if notify != nil && n <= 2 {
-		notify(int(n))
+		notify(n)
 	}
 	switch n {
 	case 1:
-		c.cancel()
+		cancel()
 	case 2:
 		c.emergencyStop()
 	}
+}
+
+// beginAction starts an action of the home screen, which runs with the
+// returned context, derived from ctx, until end is called: the first
+// interrupt during the action cancels that context only (the home screen
+// goes on), the second one is the emergency stop; each action counts its
+// own interruptions. end cancels the context too.
+func (c *interruptCtl) beginAction(ctx context.Context) (actx context.Context, end func()) {
+	actx, cancel := context.WithCancel(ctx)
+	c.mu.Lock()
+	c.action = cancel
+	c.mu.Unlock()
+	return actx, func() {
+		c.mu.Lock()
+		c.action = nil
+		if !c.cancelled {
+			// Once the command is cancelled, a next interruption is
+			// the emergency stop, as without actions.
+			c.count = 0
+		}
+		c.mu.Unlock()
+		cancel()
+	}
+}
+
+// inAction tells whether an action of the home screen is running (see
+// beginAction): ctrl+c then cancels it, rather than ending sheaf.
+func (c *interruptCtl) inAction() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.action != nil
 }
 
 // Advice of the emergency stop about the operations it may interrupt (see
@@ -305,7 +356,10 @@ var cancelSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
 
 // execute runs cmd with args under a context cancelled by the first of
 // cancelSignals, and returns the exit code: 130 with "interrupted" when the
-// command failed after such a signal. A second signal (or TUI ctrl+c, see
+// command failed after such a signal; during an action of the home screen,
+// SIGINT (ctrl+c outside the raw mode of a TUI program, or `kill -INT`,
+// which sheaf cannot tell apart) cancels the action only (see
+// interruptCtl.beginAction). A second signal (or TUI ctrl+c, see
 // interruptCtl; they count together) is an emergency stop:
 // the process groups of the running git commands receive SIGKILL (git then
 // leaves its lock files behind, see gitx.StaleLockPath) and sheaf exits with
@@ -337,10 +391,14 @@ func execute(cmd *cobra.Command, ctl *interruptCtl, args []string) int {
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
-		for range 2 {
+		for {
 			select {
-			case <-sigs:
-				ctl.interrupt()
+			case sig := <-sigs:
+				if sig == os.Interrupt {
+					ctl.interrupt()
+				} else {
+					ctl.terminate()
+				}
 			case <-done:
 				return
 			}

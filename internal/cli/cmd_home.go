@@ -66,7 +66,8 @@ func installHome(root *cobra.Command, d Deps) {
 // path is printed, with a hint to add the shell function (the key help
 // then says "path" rather than "cd"). On a terminal, the programs of
 // the home screen and of its actions set the window title (see homeTitle);
-// bubbletea clears it when each program ends.
+// bubbletea clears it when each program ends. The first interruption
+// during an action cancels the action only (see act).
 func runHome(c *cobra.Command, d Deps) error {
 	if !d.tuiMode(c) {
 		return c.Help()
@@ -157,8 +158,11 @@ type home struct {
 	// selected are the selected rows of the next overview: those of the
 	// last one, unless its action applied to them and succeeded.
 	selected []string
-	// action is the name of the running action.
+	// action is the name of the running action, and actx its context:
+	// the first interruption during the action cancels it, not the home
+	// screen (see interruptCtl.beginAction).
 	action string
+	actx   context.Context
 	// succeeded tells whether every run of the last action succeeded, and
 	// ran whether one ran, i.e. was not cancelled (see outcome).
 	succeeded, ran bool
@@ -594,9 +598,14 @@ func cdHint(shell string) string {
 // overview displays. An action that skips problem rows (see
 // skipsProblems) runs on the other targets, and its message says which
 // problem rows it skipped: "update: done · skipped 1 problem row
-// (alpha/feat)".
+// (alpha/feat)". The action runs with a context of its own (h.actx): the
+// first interruption (ctrl+c, SIGINT) cancels it, and the home screen
+// goes on; a second one during the action is the emergency stop (see
+// interruptCtl.beginAction).
 func (h *home) act(name string, targets []string) string {
-	h.action = name
+	actx, end := h.s.ctl.beginAction(h.s.ctx)
+	defer end()
+	h.action, h.actx = name, actx
 	h.unchanged = ""
 	h.output.Reset()
 	if !skipsProblems(name) {
@@ -663,7 +672,7 @@ func (h *home) inline(name string) (*cobra.Command, Deps) {
 	c.SetIn(h.c.InOrStdin())
 	c.SetOut(teeWriter{io.MultiWriter(h.c.OutOrStdout(), &h.output), h.c.OutOrStdout()})
 	c.SetErr(teeWriter{io.MultiWriter(h.c.ErrOrStderr(), &h.output), h.c.ErrOrStderr()})
-	c.SetContext(h.s.ctx)
+	c.SetContext(h.actx)
 	d := h.d
 	d.ctl, d.term, d.windowTitle = h.s.ctl, h.s.out, homeTitle(name, h.root)
 	return c, d
@@ -698,7 +707,7 @@ func (h *home) add(repo string) string {
 	// The hints follow wt add: an existing branch (local, then origin's),
 	// else a new one from the default branch; --tag pins a detached
 	// worktree at the tag.
-	ctx, cancel := context.WithCancel(h.s.ctx)
+	ctx, cancel := context.WithCancel(h.actx)
 	defer cancel()
 	prompt := tui.NewPrompt("New worktree of "+repo, []string{"branch", "tag"}).WithHints(
 		"an existing local or remote branch, else a new branch from the default branch",
@@ -750,10 +759,11 @@ func (h *home) pr(repo string) string {
 	return h.outcome("pr", []error{h.command("wt", "pr", "--", repo, strings.TrimSpace(p.Value()))})
 }
 
-// session returns the TUI session of the home screen with the window title
-// of the running action.
+// session returns the TUI session of the home screen with the context and
+// the window title of the running action.
 func (h *home) session() *tuiSession {
 	s := *h.s
+	s.ctx = h.actx
 	if s.title != "" {
 		s.title = homeTitle(h.action, h.root)
 	}
@@ -766,10 +776,10 @@ func (h *home) command(args ...string) error { return h.commandIn("", args...) }
 
 // commandIn runs `sheaf <args>` (global options of this run, the bundle of
 // the home screen) as a command line would, with dir as its working
-// directory when not empty, in this process and with its
-// context, so that interruptions are handled as usual. Its TUI renders on
-// the terminal; what it prints (standard output and error) goes to the
-// terminal as it runs, as for the command alone (so that it stays there,
+// directory when not empty, in this process and with the context of the
+// action (see act), so that interruptions are handled as usual. Its TUI
+// renders on the terminal; what it prints (standard output and error) goes
+// to the terminal as it runs, as for the command alone (so that it stays there,
 // e.g. after an interruption), and to h.output, for the report view. A
 // command whose user chose nothing (see Deps.cancelled) returns
 // errCancelled.
@@ -789,7 +799,7 @@ func (h *home) commandIn(dir string, args ...string) error {
 	errw := teeWriter{io.MultiWriter(h.c.ErrOrStderr(), &h.output), h.c.ErrOrStderr()}
 	root := NewRootCmdWithDeps(Streams{In: h.c.InOrStdin(), Out: out, Err: errw}, d)
 	root.SetArgs(append([]string{"--bundle=" + h.root, "--jobs=" + strconv.Itoa(h.jobs)}, args...))
-	err := root.ExecuteContext(h.s.ctx)
+	err := root.ExecuteContext(h.actx)
 	if err == nil && cancelled {
 		return errCancelled
 	}
@@ -803,11 +813,17 @@ func (h *home) commandIn(dir string, args ...string) error {
 // (e.g. "prune: nothing to prune"), "<command>: cancelled", "<command>
 // failed: <error>" (the error on one line, see errorLine, followed by
 // "(see report)" when the report has more), or the counts when the action
-// ran several times.
+// ran several times. An action that failed or was cancelled once
+// interrupted (its context cancelled, see act; e.g. a question answered
+// with ctrl+c) is "<command>: interrupted", whatever the errors,
+// which are not printed (as execute prints "interrupted" instead), and
+// counts as cancelled for the report view (see loop): what the action
+// printed tells what happened.
 func (h *home) outcome(name string, errs []error) string {
 	name = homeCommand(name)
 	var done, cancelled, failed int
 	var last error
+	interrupted := h.actx.Err() != nil
 	for _, err := range errs {
 		switch {
 		case err == nil:
@@ -817,13 +833,16 @@ func (h *home) outcome(name string, errs []error) string {
 		default:
 			failed++
 			last = err
-			if h.s.ctx.Err() == nil {
+			if !interrupted {
 				fmt.Fprintln(io.MultiWriter(h.c.ErrOrStderr(), &h.output), "sheaf:", err)
 			}
 		}
 	}
 	h.succeeded, h.ran = cancelled == 0 && failed == 0, done+failed > 0
 	switch {
+	case interrupted && done < len(errs):
+		h.ran = false
+		return name + ": interrupted"
 	case len(errs) > 1:
 		return fmt.Sprintf("%s: %d done, %d cancelled, %d failed", name, done, cancelled, failed)
 	case failed > 0:

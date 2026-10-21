@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jponge/sheaf/internal/testutil"
 	"github.com/jponge/sheaf/internal/tui"
 )
 
@@ -566,9 +567,11 @@ func TestHomeOnPTYAddProgressIsLive(t *testing.T) {
 	wantTerminalRestored(t, s, "130")
 }
 
-// An action interrupted with ctrl+c (exit 130) leaves what its command
-// printed on the normal screen, as the command alone would: here the
-// summary of a fetch whose git processes were killed, interrupted (B52 A6).
+// An action interrupted with ctrl+c leaves what its command printed on the
+// normal screen, as the command alone would: here the summary of a fetch
+// whose git processes were killed, interrupted (B52 A6), still there after
+// the report view and quitting (B62 H4: the first ctrl+c cancels the
+// action only).
 func TestHomeOnPTYInterruptedActionLeavesItsOutput(t *testing.T) {
 	e, _, _, _, _ := homeBundle(t)
 	git, err := exec.LookPath("git")
@@ -587,7 +590,10 @@ func TestHomeOnPTYInterruptedActionLeavesItsOutput(t *testing.T) {
 	s.waitFor(`Fetching`)
 	time.Sleep(200 * time.Millisecond)
 	s.write("\x03")
-	wantTerminalRestored(t, s, "130")
+	dismissReport(t, s, "fetch", 1)
+	s.waitFor(`fetch: interrupted`)
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
 	vt := newVTScreen(24, 100)
 	vt.write(s.output())
 	normal := vt.normalLines()
@@ -724,7 +730,10 @@ func TestHomeOnPTYDumbTerminalSendsNoWindowControls(t *testing.T) {
 	s.write("f")
 	s.waitFor(`Fetching · 1 running`)
 	s.write("\x03")
-	wantTerminalRestored(t, s, "130")
+	dismissReport(t, s, "fetch", 1)
+	s.waitFor(`fetch: interrupted`)
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
 	if all := titleControls.FindAllString(s.output(), -1); len(all) > 0 {
 		t.Errorf("title sequences %q with TERM=dumb", all)
 	}
@@ -1055,5 +1064,267 @@ func TestHomeOnPTYColorsStatesAndLevels(t *testing.T) {
 		if noColor && colorSGR.MatchString(out) {
 			t.Errorf("NO_COLOR: colors in\n%q", out)
 		}
+	}
+}
+
+// pidGit returns a directory holding a git wrapper (see fakeFetchGit) whose
+// fetches append their PID to the file pids, then run the shell code fetch.
+func pidGit(t *testing.T, fetch string) (bin, pids string) {
+	t.Helper()
+	pids = filepath.Join(t.TempDir(), "pids")
+	return fakeFetchGit(t, `echo $$ >> '`+pids+`'; `+fetch), pids
+}
+
+// waitPIDs waits until the file pids lists at least n processes, and
+// returns the PIDs it lists.
+func waitPIDs(t *testing.T, pids string, n int) []int {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		b, _ := os.ReadFile(pids)
+		var got []int
+		for _, f := range strings.Fields(string(b)) {
+			pid, err := strconv.Atoi(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, pid)
+		}
+		if len(got) >= n {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d processes recorded in %s, want %d", len(got), pids, n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// wantProcessesGone checks that none of the processes listed in pids (see
+// pidGit) is left, within a few seconds (killing a process group and
+// reaping it is not instantaneous).
+func wantProcessesGone(t *testing.T, pids string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for _, pid := range waitPIDs(t, pids, 1) {
+		for exists(fmt.Sprintf("/proc/%d", pid)) {
+			if time.Now().After(deadline) {
+				stat, _ := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+				t.Errorf("process %d (fake git) left behind: %s", pid, stat)
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
+// waitOverviewMessage waits until the overview shows a status line (see
+// overviewStatus) matching re.
+func waitOverviewMessage(t *testing.T, s *ptyShell, re string) {
+	t.Helper()
+	rx := regexp.MustCompile(re)
+	waitScreenState(t, s, "the overview with a status line matching "+re, func(vt *vtScreen) bool {
+		alt := vt.altLines()
+		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf: ") &&
+			slices.ContainsFunc(alt, func(l string) bool { return overviewMessage(l) != "" && rx.MatchString(l) })
+	})
+}
+
+// dismissReportOf waits until the terminal shows the report view of the
+// command name (e.g. "wt add") or the overview with the message, and
+// dismisses the report view if that is what it shows: an action cancelled
+// before printing anything has none.
+func dismissReportOf(t *testing.T, s *ptyShell, name, message string) {
+	t.Helper()
+	isReport := func(vt *vtScreen) bool {
+		alt := vt.altLines()
+		return len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf "+name+": ")
+	}
+	vt := waitScreenState(t, s, "the report view of "+name+" or the overview", func(vt *vtScreen) bool {
+		return vt.altActive() && (isReport(vt) || slices.ContainsFunc(vt.altLines(), func(l string) bool { return overviewMessage(l) == message }))
+	})
+	if isReport(vt) {
+		time.Sleep(tui.ReportGrace)
+		s.write("q")
+	}
+}
+
+// The first ctrl+c during an action of the home screen cancels the action
+// only (B62 H4): its git processes are stopped as for the command alone,
+// the report view shows what the action printed (the interrupted rows),
+// and the overview comes back with the selection kept and the message
+// "fetch: interrupted"; sheaf goes on (here it quits with q, status 0).
+// The progress view's hint says "^C cancel".
+func TestHomeOnPTYCtrlCCancelsTheAction(t *testing.T) {
+	for _, c := range []struct {
+		key, name, summary string // summary: regular expression of the summary line
+	}{
+		{"f", "fetch", `^0 done, 0 skipped, 0 failed, 2 interrupted$`}, // a command (see home.command)
+		{"u", "update", `, \d+ interrupted$`},                          // inline (see home.inline)
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e, _, _, _, _ := homeBundle(t)
+			bin, pids := pidGit(t, `exec sleep 30`)
+			s := startPTYShell(t, e.cwd, `PATH='`+bin+`':$PATH; export PATH; B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+			s.waitFor(`STATE`)
+			s.write("a")
+			s.write(c.key)
+			s.waitFor(`\^C cancel`)
+			waitPIDs(t, pids, 1)
+			s.write("\x03")
+			summary := regexp.MustCompile(c.summary)
+			waitScreenState(t, s, "the report view of the interrupted "+c.name, func(vt *vtScreen) bool {
+				alt := vt.altLines()
+				return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf "+c.name+": ") &&
+					slices.ContainsFunc(alt, summary.MatchString)
+			})
+			wantProcessesGone(t, pids)
+			time.Sleep(tui.ReportGrace)
+			s.write("q")
+			waitOverviewMessage(t, s, `^3/3 selected · `+c.name+`: interrupted$`)
+			if out := s.output(); strings.Contains(out, "SHEAF-EXIT=") || strings.Contains(out, "sheaf: interrupted") {
+				t.Fatalf("sheaf ended or reported its own interruption after the first ctrl+c:\n%q", out)
+			}
+			s.write("q")
+			wantTerminalRestored(t, s, "0")
+			wantWindowTitleRestored(t, s.output())
+			wantTerminalProgressReset(t, s.output())
+		})
+	}
+}
+
+// A second ctrl+c during the same action is the emergency stop: sheaf
+// exits with 130 at once, with the terminal restored (modes, window
+// title, progress indicator) and the git processes killed, even those
+// that ignore SIGTERM.
+func TestHomeOnPTYSecondCtrlCInTheActionIsTheEmergencyStop(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	bin, pids := pidGit(t, `trap '' TERM INT HUP; while :; do sleep 1; done`)
+	s := startPTYShell(t, e.cwd, `PATH='`+bin+`':$PATH; export PATH; B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	s.write("f")
+	s.waitFor(`\^C cancel`)
+	waitPIDs(t, pids, 1)
+	s.write("\x03")
+	s.waitFor(`Interrupted: no new work`)
+	s.write("\x03")
+	s.waitFor(`interrupted again`)
+	wantTerminalRestored(t, s, "130")
+	wantWindowTitleRestored(t, s.output())
+	wantTerminalProgressReset(t, s.output())
+	wantProcessesGone(t, pids)
+}
+
+// Each action counts its own interruptions: after an action cancelled by
+// ctrl+c, the first ctrl+c of the next one cancels it too (no emergency
+// stop), and ctrl+c in the overview still exits with 130.
+func TestHomeOnPTYEachActionCountsItsInterruptions(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	bin, pids := pidGit(t, `exec sleep 30`)
+	s := startPTYShell(t, e.cwd, `PATH='`+bin+`':$PATH; export PATH; B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	for n := 1; n <= 2; n++ {
+		s.write("f")
+		waitPIDs(t, pids, n)
+		s.write("\x03")
+		dismissReport(t, s, "fetch", n)
+		deadline := time.Now().Add(30 * time.Second)
+		for strings.Count(s.output(), "fetch: interrupted") < n {
+			if time.Now().After(deadline) {
+				t.Fatalf("overview %d after an interrupted fetch never shown:\n%q", n, s.output())
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	wantProcessesGone(t, pids)
+	s.write("\x03")
+	wantTerminalRestored(t, s, "130")
+	if out := s.output(); strings.Contains(out, "interrupted again") || !strings.Contains(out, "sheaf: interrupted") {
+		t.Errorf("want a plain interruption in the overview, no emergency stop:\n%q", out)
+	}
+}
+
+// ctrl+c in the prompt or in the question of an action cancels that action
+// only: the overview comes back with "<command>: interrupted", nothing was
+// changed, and sheaf goes on.
+func TestHomeOnPTYCtrlCInActionDialogs(t *testing.T) {
+	for _, c := range []struct {
+		name, keys, wait, command string
+		sigint                    bool // a SIGINT (kill -INT) rather than the ctrl+c key
+	}{
+		{"prompt", "w", `New worktree of alpha`, "wt add", false},
+		{"prompt, SIGINT", "w", `New worktree of alpha`, "wt add", true},
+		{"question", "jr", `\[y/N\]`, "wt rm", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e, _, feat, _, _ := homeBundle(t)
+			if err := os.Remove(filepath.Join(feat, "new.txt")); err != nil { // removable without --force
+				t.Fatal(err)
+			}
+			s := startPTYShell(t, e.cwd, `B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+			s.waitFor(`STATE`)
+			s.write(c.keys)
+			s.waitFor(c.wait)
+			if c.sigint {
+				if err := syscall.Kill(childPID(t, s.cmd.Process.Pid), syscall.SIGINT); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				s.write("\x03")
+			}
+			dismissReportOf(t, s, c.command, c.command+": interrupted")
+			waitOverviewMessage(t, s, " · "+c.command+`: interrupted$`)
+			out := s.output()
+			if strings.Contains(out, "SHEAF-EXIT=") {
+				t.Fatalf("sheaf ended:\n%q", out)
+			}
+			if c.command == "wt add" && strings.Contains(windowTitleSeq.ReplaceAllString(out, ""), "sheaf wt add: ") {
+				t.Errorf("a report view after the prompt interrupted before anything was printed:\n%q", out)
+			}
+			if !exists(feat) {
+				t.Error("the worktree feat was removed")
+			}
+			s.write("q")
+			wantTerminalRestored(t, s, "0")
+		})
+	}
+}
+
+// A SIGINT while an action prints on the normal screen (the terminal is
+// not in raw mode there, so ctrl+c is a SIGINT; `kill -INT` is the same)
+// cancels the action like the ctrl+c key: here the fetch of wt add, whose
+// git process is stopped; nothing is added. SIGTERM still ends sheaf
+// (exit 130).
+func TestHomeOnPTYSignalsDuringAnAction(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		sig  syscall.Signal
+	}{{"SIGINT", syscall.SIGINT}, {"SIGTERM", syscall.SIGTERM}} {
+		t.Run(c.name, func(t *testing.T) {
+			e, alpha, _, _, _ := homeBundle(t)
+			bin, pids := pidGit(t, `exec sleep 30`)
+			s := startPTYShell(t, e.cwd, `PATH='`+bin+`':$PATH; export PATH; B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+			s.waitFor(`STATE`)
+			s.write("w")
+			s.waitFor(`New worktree of alpha`)
+			s.write("topic/sig\r")
+			waitPIDs(t, pids, 1)
+			if err := syscall.Kill(childPID(t, s.cmd.Process.Pid), c.sig); err != nil {
+				t.Fatal(err)
+			}
+			if c.sig == syscall.SIGTERM {
+				wantTerminalRestored(t, s, "130")
+				wantProcessesGone(t, pids)
+				return
+			}
+			dismissReportOf(t, s, "wt add", "wt add: interrupted")
+			waitOverviewMessage(t, s, ` · wt add: interrupted$`)
+			wantProcessesGone(t, pids)
+			if wt := testutil.Git(t, alpha, "worktree", "list", "--porcelain"); strings.Contains(wt, "topic/sig") {
+				t.Errorf("a worktree was added:\n%s", wt)
+			}
+			s.write("q")
+			wantTerminalRestored(t, s, "0")
+		})
 	}
 }

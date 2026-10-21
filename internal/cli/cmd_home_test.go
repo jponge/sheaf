@@ -450,6 +450,21 @@ func TestHomeCtrlCExits130(t *testing.T) {
 	}
 }
 
+// ctrl+c in the prompt of an action cancels the action only (B62 H4): the
+// overview comes back with "wt add: interrupted", and quitting then exits
+// with 0.
+func TestHomeCtrlCInActionPromptReturnsToOverview(t *testing.T) {
+	t.Parallel()
+	e, _, _, _, _ := homeBundle(t)
+	var out syncBuffer
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "w"), []key{{keys: "\x03", wait: waitOutput(t, &out, "New worktree of alpha")}},
+		ovKeys(t, &out, "wt add: interrupted", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 || strings.Contains(errs, "interrupted") {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+}
+
 func TestHomeEnterPrintsPath(t *testing.T) {
 	t.Parallel()
 	e, _, feat, _, _ := homeBundle(t)

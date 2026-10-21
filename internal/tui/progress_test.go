@@ -553,6 +553,34 @@ func TestProgressHeaderCancelHint(t *testing.T) {
 	}
 }
 
+// WithInterruptHint replaces the text of the hint ("^C quit" for a command
+// that ctrl+c ends, B62 H4), which takes its place in the width
+// decisions; it is still faint and dropped once interrupted.
+func TestProgressHeaderInterruptHintText(t *testing.T) {
+	t.Parallel()
+	p, _ := newTestProgress("Fetching")
+	p = p.WithInterrupt(func() {}).WithInterruptHint("^C quit")
+	header := "Fetching · 1 running, 0 done, 0 skipped, 0 failed · 0s"
+	pad := elapsedReserve - len("0s")
+	build := func(width int, msgs ...tea.Msg) string {
+		m, _ := feed(p, append([]tea.Msg{RowUpdate{Key: "a", Label: "alpha", State: RowRunning}, tea.WindowSizeMsg{Width: width, Height: 20}}, msgs...)...)
+		return strings.Split(view(m), "\n")[0]
+	}
+	if h := build(lipgloss.Width(header) + pad + len("  ^C quit")); h != header+"  ^C quit" {
+		t.Errorf("header %q, want %q", h, header+"  ^C quit")
+	}
+	if h := build(lipgloss.Width(header) + pad + len("  ^C quit") - 1); h != header {
+		t.Errorf("one column short: header %q, want %q", h, header)
+	}
+	if h := build(200, InterruptedMsg{Count: 1}); strings.Contains(h, "^C") {
+		t.Errorf("interrupted: header %q", h)
+	}
+	m, _ := feed(p, RowUpdate{Key: "a", Label: "alpha", State: RowRunning}, tea.WindowSizeMsg{Width: 200, Height: 20})
+	if raw := strings.Split(m.View().Content, "\n")[0]; !strings.HasSuffix(raw, DefaultStyles().Status.Render("^C quit")) {
+		t.Errorf("hint not faint: %q", raw)
+	}
+}
+
 // At 80 columns, the header of a fetch of a few repositories has room for
 // both the bar and the cancel hint (B52 D3 review).
 func TestProgressHeaderBarAndHintFitIn80Columns(t *testing.T) {

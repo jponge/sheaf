@@ -149,6 +149,7 @@ type Progress struct {
 	width, height    int
 	profile          colorprofile.Profile
 	terminalProgress bool
+	interruptHint    string // see WithInterruptHint; "" for "^C cancel"
 
 	spin   spinner.Model
 	styles Styles
@@ -180,6 +181,14 @@ func (m Progress) WithClock(now func() time.Time) Progress {
 // pressed outside a question.
 func (m Progress) WithInterrupt(f func()) Progress {
 	m.interrupt = f
+	return m
+}
+
+// WithInterruptHint returns a copy of m whose hint (see WithInterrupt)
+// says hint rather than "^C cancel", e.g. "^C quit" when ctrl+c ends the
+// command.
+func (m Progress) WithInterruptHint(hint string) Progress {
+	m.interruptHint = hint
 	return m
 }
 
@@ -497,15 +506,20 @@ func (m Progress) headerLine() string {
 	return h + "  " + m.bar(w, r) + hint
 }
 
-// cancelHint returns the faint "^C cancel" ending the header while the
-// work runs and ctrl+c cancels it (an interrupt function, see
-// WithInterrupt, and no interruption yet: the interruption note then
-// tells what ctrl+c does), preceded by its separator; "" otherwise.
+// cancelHint returns the faint "^C cancel" (see WithInterruptHint) ending
+// the header while the work runs and ctrl+c cancels it (an interrupt
+// function, see WithInterrupt, and no interruption yet: the interruption
+// note then tells what ctrl+c does), preceded by its separator; ""
+// otherwise.
 func (m Progress) cancelHint() string {
 	if m.interrupt == nil || m.interrupts > 0 || m.finished {
 		return ""
 	}
-	return "  " + m.styles.Status.Render("^C cancel")
+	hint := m.interruptHint
+	if hint == "" {
+		hint = "^C cancel"
+	}
+	return "  " + m.styles.Status.Render(hint)
 }
 
 // Colors of the progress bar of the header: those of bubbles' progress bar

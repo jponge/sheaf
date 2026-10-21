@@ -208,7 +208,7 @@ func (s *tuiSession) titled(m tea.Model) tea.Model {
 	return tui.Titled{Model: m, Title: s.title}
 }
 
-// run runs a menu or confirmation program. An interruption (signal) kills
+// run runs a menu or confirmation program. An interruption (signal) quits
 // it and returns the context's error.
 func (s *tuiSession) run(m tea.Model) (tea.Model, error) { return s.runModel(keepLastLine{m}) }
 
@@ -218,9 +218,26 @@ func (s *tuiSession) runModel(m tea.Model) (tea.Model, error) {
 	if err := s.ctx.Err(); err != nil {
 		return nil, err
 	}
+	p, err := tui.NewProgram(s.titled(m), s.in, s.out, tea.WithoutSignalHandler())
+	if err != nil {
+		return m, err
+	}
 	flush(s.errw) // the program owns the terminal
 	s.spin.hold()
-	final, err := tui.Run(s.titled(m), s.in, s.out, tea.WithContext(s.ctx), tea.WithoutSignalHandler())
+	// An interruption quits the program rather than killing it (as
+	// tea.WithContext would): bubbletea then waits for its input reader,
+	// which otherwise takes the next key typed, meant for the next program
+	// of the home screen (B62 H4), and drains the terminal's answers.
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			p.Quit()
+		case <-done:
+		}
+	}()
+	final, err := p.Run()
+	close(done)
 	s.spin.release()
 	if cerr := s.ctx.Err(); cerr != nil {
 		return nil, cerr
@@ -230,7 +247,8 @@ func (s *tuiSession) runModel(m tea.Model) (tea.Model, error) {
 	}
 	m = unwrapModel(final)
 	if i, ok := m.(interface{ Interrupted() bool }); ok && i.Interrupted() {
-		// ctrl+c in a menu or dialog: like SIGINT (exit 130).
+		// ctrl+c in a menu or dialog: like SIGINT (exit 130, or the end of
+		// the action of the home screen, see interruptCtl.beginAction).
 		s.ctl.interrupt()
 		return nil, s.ctx.Err()
 	}
@@ -298,6 +316,9 @@ type progressOpts struct {
 func (s *tuiSession) progress(title string, o progressOpts, work func(ctx context.Context, rep ops.Reporter, ask askFunc)) {
 	plain := checkoutRenderer{plainRenderer{s.errw}}
 	model := tui.NewProgress(title).WithInterrupt(s.ctl.interrupt)
+	if !s.ctl.inAction() {
+		model = model.WithInterruptHint("^C quit") // ctrl+c ends sheaf
+	}
 	if o.Aside != "" {
 		model = model.WithAside(o.Aside)
 	}

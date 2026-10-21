@@ -292,7 +292,7 @@ including SSH aliases of github.com, have no link.
 | p, d, s | `prune`, `doctor`, `sync` on the whole bundle |
 | ? | show every key in the key help, or only the main ones again |
 | q, esc | quit with status 0 (esc first clears an applied filter) |
-| ctrl+c | exit with status 130 |
+| ctrl+c | exit with status 130 (during an action, cancel the action, see below) |
 
 The key help below the table is one short line (`space toggle • a/n
 all/none • enter cd • u update • f fetch • ? more • q quit`, with
@@ -332,6 +332,16 @@ overview then shows the outcome (e.g. `prune: nothing to prune` when
 nothing changed, `add failed: ...`); quitting afterwards still exits with
 0. The selection is kept, except after an update, fetch or removal of the
 selected rows that succeeded.
+
+Ctrl-C during an action (in its progress view, which says `^C cancel`, its
+dialogs, menus or prompt, or while it prints on the normal screen) cancels
+the action, not sheaf: its work is interrupted as for the command alone
+(see [Interruption](#interruption-ctrl-c)), the report view shows what it
+printed (none when it printed nothing, e.g. Ctrl-C in its prompt), then
+the overview comes back with `<action>: interrupted` (e.g.
+`fetch: interrupted`) and the selection kept. A second Ctrl-C during the
+same action is the emergency stop, which ends sheaf with 130. Ctrl-C in
+the overview or the report view exits with 130.
 
 Enter writes the checkout's path to the file named by `SHEAF_CD_FILE`, which
 the `sheaf` shell function defined by `sheaf shell-init` creates and then
@@ -785,7 +795,12 @@ the other commands with `-j 1`. In TUI mode git never gets the terminal.
 - The first Ctrl-C (or SIGINT, SIGTERM, SIGHUP) cancels the command: git
   processes are stopped, sheaf prints `interrupted` and exits with 130.
   Ctrl-C in a TUI menu or dialog also exits with 130. A progress view
-  reminds it in its header (`^C cancel`); q and esc do nothing there.
+  reminds it in its header (`^C quit`); q and esc do nothing there.
+- In the [home screen](#the-home-screen), the first Ctrl-C during an
+  action cancels the action only, as above, and the home screen goes on
+  (its progress views say `^C cancel`); a SIGINT sent with `kill -INT`
+  cannot be told apart from Ctrl-C and does the same. SIGTERM and SIGHUP
+  end sheaf (exit status 130), action or not.
 - `update` lets a running fast-forward merge finish after the first Ctrl-C
   (interrupting it would leave a half-updated work tree) and starts no new
   one.
@@ -800,7 +815,8 @@ the other commands with `-j 1`. In TUI mode git never gets the terminal.
   unusable, with the `git worktree repair` command that restores it; the
   deleted files then count as unstaged changes, so removing it needs
   `wt rm --force`.
-- A second Ctrl-C is an emergency stop: the process groups of running git
+- A second Ctrl-C (in the home screen, during the same action) is an
+  emergency stop: the process groups of running git
   commands and `run` commands are killed and sheaf exits with 130 at once,
   without cleanup. A partial clone directory (`add`, `sync`), an
   `.sheaf-adopt-*` folder from an interrupted adopt, or a `.git/index.lock`

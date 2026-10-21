@@ -148,6 +148,83 @@ func TestInterruptControllerNotifies(t *testing.T) {
 	}
 }
 
+// During an action of the home screen (beginAction), the first interrupt
+// cancels the action's context only, the second one of the same action is
+// the emergency stop; each action counts its own, and outside actions the
+// first one cancels the command. terminate cancels the command even during
+// an action, and the count then goes on (B62 H4).
+func TestInterruptControllerActionScope(t *testing.T) {
+	t.Parallel()
+	newCtl := func() (context.Context, *interruptCtl, chan struct{}, chan int) {
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		ctl := newInterruptCtl()
+		ctl.bind(cancel, &syncBuffer{})
+		killed, exited := stubEmergency(ctl)
+		return ctx, ctl, killed, exited
+	}
+
+	ctx, ctl, killed, exited := newCtl()
+	var notified []int
+	ctl.setNotify(func(n int) { notified = append(notified, n) })
+	if ctl.inAction() {
+		t.Error("in an action before beginAction")
+	}
+	actx, end := ctl.beginAction(ctx)
+	if !ctl.inAction() {
+		t.Error("not in an action after beginAction")
+	}
+	ctl.interrupt()
+	if actx.Err() == nil || ctx.Err() != nil {
+		t.Fatalf("first interrupt of an action: action %v, command %v; want only the action cancelled", actx.Err(), ctx.Err())
+	}
+	select {
+	case <-ctl.force:
+		t.Fatal("force channel closed by the first interrupt of an action")
+	default:
+	}
+	end()
+	if ctl.inAction() {
+		t.Error("in an action after its end")
+	}
+	actx, end = ctl.beginAction(ctx)
+	ctl.interrupt()
+	if len(exited) > 0 || ctx.Err() != nil {
+		t.Fatal("the first interrupt of the second action counted with those of the first one")
+	}
+	ctl.interrupt()
+	if len(exited) != 1 || len(killed) != 1 {
+		t.Fatalf("second interrupt of an action: %d exits, %d kills; want the emergency stop", len(exited), len(killed))
+	}
+	end()
+	if code := <-exited; code != 130 || actx.Err() == nil {
+		t.Errorf("exit(%d), action %v", code, actx.Err())
+	}
+	if !slices.Equal(notified, []int{1, 1, 2}) {
+		t.Errorf("notified %v, want [1 1 2]", notified)
+	}
+
+	ctx, ctl, _, exited = newCtl()
+	_, end = ctl.beginAction(ctx)
+	end()
+	ctl.interrupt()
+	if ctx.Err() == nil || len(exited) > 0 {
+		t.Errorf("interrupt after an action: command %v, %d exits; want the command cancelled", ctx.Err(), len(exited))
+	}
+
+	ctx, ctl, _, exited = newCtl()
+	actx, end = ctl.beginAction(ctx)
+	ctl.terminate()
+	if ctx.Err() == nil || actx.Err() == nil {
+		t.Fatalf("terminate during an action: command %v, action %v; want both cancelled", ctx.Err(), actx.Err())
+	}
+	end()
+	ctl.interrupt()
+	if len(exited) != 1 {
+		t.Errorf("interrupt after terminate: %d exits, want the emergency stop", len(exited))
+	}
+}
+
 // Ctrl-C in a menu interrupts the command like SIGINT: exit 130.
 func TestTUIMenuCtrlCExits130(t *testing.T) {
 	t.Parallel()

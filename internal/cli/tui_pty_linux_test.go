@@ -283,6 +283,25 @@ func TestTUIEmergencyStopResetsTerminalProgress(t *testing.T) {
 	wantTerminalProgressReset(t, s.output())
 }
 
+// A command run alone ends on the first ctrl+c (exit 130, git processes
+// stopped), and its progress view says so: "^C quit" (B62 H4; the home
+// screen's actions say "^C cancel").
+func TestTUIFetchCtrlCQuits(t *testing.T) {
+	e := newBundleEnv(t)
+	e.addRepo(t, "alpha")
+	bin, pids := pidGit(t, `exec sleep 30`)
+	s := startPTYShell(t, e.cwd, `PATH='`+bin+`':$PATH; export PATH; B=$(stty -g); "$SHEAF" fetch`+sttyCheck, 0)
+	s.waitFor(`Fetching`)
+	waitPIDs(t, pids, 1)
+	s.waitFor(`\^C quit`)
+	s.write("\x03")
+	wantTerminalRestored(t, s, "130")
+	if out := s.output(); !strings.Contains(out, "sheaf: interrupted") || strings.Contains(out, "^C cancel") {
+		t.Errorf("want the interruption message and no \"^C cancel\" hint:\n%q", out)
+	}
+	wantProcessesGone(t, pids)
+}
+
 // Without the TUI (--no-tui) nothing drives the terminal's progress
 // indicator nor sets the window title.
 func TestPlainFetchOnPTYLeavesTerminalProgressAlone(t *testing.T) {

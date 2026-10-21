@@ -4,6 +4,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -189,6 +190,67 @@ func TestSignalThenKeyIsEmergencyStop(t *testing.T) {
 	if code := execute(root, d.ctl, []string{"probe"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
+}
+
+// A SIGINT during an action of the home screen (see
+// interruptCtl.beginAction) cancels that action only, for every action
+// (B62 H4: ctrl+c outside the raw mode of a TUI program is a SIGINT);
+// SIGTERM and SIGHUP still cancel the command, action or not.
+func TestSignalsDuringHomeActions(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGHUP} {
+		t.Run(sig.String(), func(t *testing.T) {
+			net := make(chan os.Signal, 8)
+			signal.Notify(net, syscall.SIGINT, sig)
+			defer signal.Stop(net)
+			d := Deps{ctl: newInterruptCtl()}
+			_, exited := stubEmergency(d.ctl)
+			root := NewRootCmdWithDeps(Streams{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}, d)
+			var probeErr error // execute reports any error as "interrupted" once cancelled
+			root.AddCommand(&cobra.Command{Use: "probe", RunE: func(c *cobra.Command, _ []string) error {
+				probeErr = probeActionSignals(c.Context(), d.ctl, sig, exited)
+				return probeErr
+			}})
+			var errb bytes.Buffer
+			root.SetErr(&errb)
+			if code := execute(root, d.ctl, []string{"probe"}); code != 0 || probeErr != nil {
+				t.Fatalf("exit %d: %v\n%s", code, probeErr, errb.String())
+			}
+		})
+	}
+}
+
+// probeActionSignals is the command of TestSignalsDuringHomeActions: three
+// actions, each cancelled by a SIGINT, then sig during a fourth one.
+func probeActionSignals(ctx context.Context, ctl *interruptCtl, sig syscall.Signal, exited chan int) error {
+	for i := 1; i <= 3; i++ {
+		actx, end := ctl.beginAction(ctx)
+		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+		select {
+		case <-actx.Done():
+		case <-time.After(5 * time.Second):
+			end()
+			return fmt.Errorf("SIGINT %d did not cancel the action", i)
+		}
+		end()
+		if ctx.Err() != nil {
+			return fmt.Errorf("SIGINT %d cancelled the command", i)
+		}
+		if len(exited) > 0 {
+			return fmt.Errorf("SIGINT %d was an emergency stop", i)
+		}
+	}
+	actx, end := ctl.beginAction(ctx)
+	defer end()
+	_ = syscall.Kill(os.Getpid(), sig)
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		return errors.New(sig.String() + " during an action did not cancel the command")
+	}
+	if actx.Err() == nil || len(exited) > 0 {
+		return fmt.Errorf("%s: action not cancelled, or emergency stop (%d)", sig, len(exited))
+	}
+	return nil
 }
 
 // notesDuring runs sheaf args with the TUI forced on when in is not nil,
