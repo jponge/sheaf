@@ -172,6 +172,11 @@ func TestHelpListsAndGlobalFlagsFit80Columns(t *testing.T) {
 			if (section == "Available Commands:" || global) && len([]rune(l)) > 80 {
 				t.Errorf("%q --help: %s line of %d columns: %q", c.CommandPath(), section, len([]rune(l)), l)
 			}
+			// -j points to the root help, which says what -j 1 does (V3
+			// review: the note was no longer discoverable from a command).
+			if global && strings.Contains(l, "--jobs") && !strings.Contains(l, "-j 1: sheaf --help") {
+				t.Errorf("%q --help: -j usage without a pointer to sheaf --help: %q", c.CommandPath(), l)
+			}
 		}
 	}
 	out, _, err := run(t, "--help")

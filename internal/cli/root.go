@@ -95,7 +95,7 @@ always do so.`,
 	pf := root.PersistentFlags()
 	pf.String("bundle", "", "bundle directory (default: nearest sheaf.yaml upwards)")
 	pf.Bool("no-tui", false, "disable the interactive TUI and use plain CLI output")
-	pf.IntP("jobs", "j", runtime.NumCPU(), "repositories processed in parallel")
+	pf.IntP("jobs", "j", runtime.NumCPU(), "repositories at once (-j 1: sheaf --help)")
 
 	root.AddCommand(newVersionCmd())
 	addBundleCommands(root, d)
