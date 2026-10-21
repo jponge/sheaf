@@ -1201,7 +1201,7 @@ func TestHomeRefusesEnterAndUpdateOnProblemRows(t *testing.T) {
 		}
 		var out syncBuffer
 		in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "j", k),
-			key{keys: "q", wait: waitOutput(t, &out, problemRefusal)}))
+			key{keys: "q", wait: waitScreen(t, &out, problemRefusal)}))
 		errs, code := runHomeWith(t, e.deps(), in, &out)
 		if code != 0 || strings.Contains(out.String(), "Updating") || strings.Contains(out.String(), "Remove worktree") || strings.HasSuffix(out.String(), feat+"\n") {
 			t.Fatalf("%q: exit %d\nstdout:\n%s\nstderr:\n%s", k, code, out.String(), errs)
@@ -1210,7 +1210,9 @@ func TestHomeRefusesEnterAndUpdateOnProblemRows(t *testing.T) {
 }
 
 // problemRefusal is the refusal of an action on the problem row of
-// homeBundle's feat worktree once deleted.
+// homeBundle's feat worktree once deleted. Tests wait for it on the
+// screen (waitScreen): it replaces the problem text as the message (B62
+// M5), and the renderer rewrites only what changed after "problem".
 const problemRefusal = "problem row, see `sheaf doctor`: alpha/feat"
 
 // u on a selection of problem rows only is refused with the reason first,
@@ -1227,7 +1229,7 @@ func TestHomeRefusesSelectionOfProblemRowsReasonFirst(t *testing.T) {
 	}
 	var out syncBuffer
 	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "j", " ", "j", " ", "u"),
-		key{keys: "q", wait: waitOutput(t, &out, "problem rows, see `sheaf doctor`: alpha/")}))
+		key{keys: "q", wait: waitScreen(t, &out, "problem rows, see `sheaf doctor`: alpha/")}))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	o := out.String()
 	if code != 0 || strings.Contains(o, "Updating") || !strings.Contains(o, "alpha/feat") || !strings.Contains(o, "alpha/other") {
@@ -1486,7 +1488,7 @@ func TestHomeCopyRefusedOnProblemRowsAndNonTerminals(t *testing.T) {
 	}
 	var out syncBuffer
 	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "j", "y"),
-		key{keys: "k", wait: waitOutput(t, &out, problemRefusal)},
+		key{keys: "k", wait: waitScreen(t, &out, problemRefusal)},
 		key{keys: "y"},
 		key{keys: "q", wait: waitOutput(t, &out, "copy not available: the output is not a terminal, or TERM=dumb")}))
 	errs, code := runHomeWith(t, e.deps(), in, &out)

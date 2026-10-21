@@ -224,7 +224,9 @@ func TestHomeBrowse(t *testing.T) {
 	} {
 		out = syncBuffer{}
 		ks := append([]string{"/"}, append(strings.Split(c.filter, ""), "\r", "b")...)
-		in = newScript(t, false, append(ovKeys(t, &out, "STATE", 1, ks...), key{keys: "q", wait: waitOutput(t, &out, c.refusal)}))
+		// On the screen: the renderer rewrites only what changed, e.g. after
+		// "problem" when the problem text was the message (B62 M5).
+		in = newScript(t, false, append(ovKeys(t, &out, "STATE", 1, ks...), key{keys: "q", wait: waitScreen(t, &out, c.refusal)}))
 		errs, code = runHomeWith(t, e.deps(), in, &out)
 		if code != 0 || strings.Contains(out.String(), "browse: ") || strings.Contains(out.String(), "browse failed") {
 			t.Fatalf("%s: exit %d\nstdout:\n%s\nstderr:\n%s", c.filter, code, out.String(), errs)
