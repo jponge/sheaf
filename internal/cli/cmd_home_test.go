@@ -261,21 +261,27 @@ func overviewLines(t *testing.T, d Deps, root string, width int) (header string,
 
 // DIR is blank when it is the directory sheaf derives from BRANCH (the
 // normalized branch or tag; B62 M3: the column repeated the branch on
-// almost every row), and shown otherwise; the filter still matches it.
+// almost every row), and shown otherwise, as for a worktree outside the
+// repository directory (marked so); the filter still matches it.
 func TestHomeBlanksDerivedDirectories(t *testing.T) {
 	t.Parallel()
 	e, alpha, _, _, _ := homeBundle(t)
 	repo := filepath.Dir(alpha)
 	testutil.Git(t, alpha, "worktree", "add", "-q", "-b", "topic/x", filepath.Join(repo, "elsewhere"))
 	testutil.Git(t, alpha, "worktree", "add", "-q", "-b", "topic/y", filepath.Join(repo, "topic-y"))
+	testutil.Git(t, alpha, "worktree", "add", "-q", "-b", "topic/z", filepath.Join(t.TempDir(), "topic-z"))
 	header, rows := overviewLines(t, e.deps(), e.cwd, 0)
 	dir, branch := strings.Index(header, "DIR"), strings.Index(header, "BRANCH")
-	if dir < 0 || branch < 0 || len(rows) != 5 {
+	if dir < 0 || branch < 0 || len(rows) != 6 {
 		t.Fatalf("overview:\n%s\n%s", header, strings.Join(rows, "\n"))
 	}
 	for _, r := range rows {
 		cell := strings.TrimSpace(r[dir:branch])
-		if want := map[bool]string{true: "elsewhere"}[strings.Contains(r, "topic/x")]; cell != want {
+		want := map[bool]string{true: "elsewhere"}[strings.Contains(r, "topic/x")]
+		if strings.Contains(r, "topic/z") {
+			want = "topic-z (outside)"
+		}
+		if cell != want {
 			t.Errorf("DIR %q, want %q: %q", cell, want, r)
 		}
 	}
@@ -590,11 +596,12 @@ func TestUpdateAndPruneCounts(t *testing.T) {
 		{Checkout: co("none"), Outcome: gitx.PullSkippedNoUpstream, Reason: "no upstream branch configured"},
 		{Checkout: co("det"), Outcome: gitx.PullSkippedDetached, Reason: "detached HEAD"},
 		{Checkout: co("untracked"), Outcome: gitx.PullFailed, UntrackedInTheWay: []string{"x"}, Err: errors.New("x")},
+		{Checkout: co("pr-7"), Outcome: gitx.PullSkippedNoUpstream, Reason: "pull request branch (refs/pull/7/head, no remote-tracking branch): refresh it with `sheaf wt pr a 7`"},
 		{Checkout: co("tag"), Outcome: gitx.PullSkippedDetached, Pinned: true},
 		{Checkout: co("failed"), Outcome: gitx.PullFailed, Err: errors.New("boom")},
 		{Checkout: co("stopped"), Outcome: gitx.PullFailed, Err: context.Canceled},
 	}}
-	want := []string{"1 fast-forwarded", "1 pinned", "7 skipped (diverged, dirty, upstream gone, no upstream, detached, untracked files)", "1 failed", "1 interrupted"}
+	want := []string{"1 fast-forwarded", "1 pinned", "8 skipped (diverged, dirty, upstream gone, no upstream, detached, untracked files, PR #7)", "1 failed", "1 interrupted"}
 	if got := updateCounts(r); !slices.Equal(got, want) {
 		t.Errorf("update counts %q, want %q", got, want)
 	}

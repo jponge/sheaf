@@ -517,7 +517,7 @@ func updateCounts(r ops.UpdateReport) []string {
 }
 
 // skipReason returns why update skipped u, in brief, in the words of the
-// overview's STATE where they exist ("dirty", "upstream gone").
+// overview's STATE where they exist ("dirty", "upstream gone", "PR #7").
 func skipReason(u ops.CheckoutUpdate) string {
 	switch {
 	case len(u.UntrackedInTheWay) > 0:
@@ -530,6 +530,10 @@ func skipReason(u ops.CheckoutUpdate) string {
 		return "diverged"
 	case strings.HasPrefix(u.Reason, "upstream "): // see ops.classifyUpdate
 		return "upstream gone"
+	}
+	var n int // a pull request branch, see ops.pullRequestReason
+	if _, err := fmt.Sscanf(u.Reason, "pull request branch (refs/pull/%d/head", &n); err == nil {
+		return fmt.Sprintf("PR #%d", n)
 	}
 	return "no upstream"
 }
