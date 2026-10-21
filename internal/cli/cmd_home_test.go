@@ -94,21 +94,6 @@ func homeBundle(t *testing.T) (e *env, alpha, feat, beta string, o testutil.Orig
 	return e, alpha, feat, beta, o
 }
 
-// helpOf returns the output of the root command's help, as printed when
-// sheaf runs without a command and without the home screen.
-func helpOf(t *testing.T, e *env) string {
-	t.Helper()
-	var out bytes.Buffer
-	d := e.deps()
-	d.ctl = newInterruptCtl()
-	root := NewRootCmdWithDeps(Streams{In: strings.NewReader(""), Out: &out, Err: &out}, d)
-	root.RunE = nil
-	if code := execute(root, d.ctl, nil); code != 0 {
-		t.Fatalf("help: exit %d\n%s", code, out.String())
-	}
-	return out.String()
-}
-
 // TestBareSheafPlainBehavesAsANonRunnableRoot is a regression guard: in
 // plain mode (no terminal or --no-tui) bare sheaf, its help and its errors
 // are exactly those of a root command without the home screen.
@@ -137,20 +122,32 @@ func TestBareSheafPlainBehavesAsANonRunnableRoot(t *testing.T) {
 	}
 }
 
-func TestBareSheafOutsideABundlePrintsHelpAndHint(t *testing.T) {
+// Outside a bundle, bare sheaf prints three lines (B62 M4: it printed the
+// whole help, then the hint as its 46th line), with or without a terminal:
+// not in a bundle, how to make one, where the commands are listed; exit 0.
+// A command that needs a bundle fails with the same hint.
+func TestBareSheafOutsideABundlePrintsHint(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t) // the working directory is not in a bundle
+	want := "sheaf: not in a bundle: no sheaf.yaml found in " + e.cwd + " or any parent directory\n" +
+		"hint: create one with `sheaf create [dir]`, or `sheaf init [dir]` to adopt existing checkouts\n" +
+		"hint: `sheaf --help` lists the commands\n"
 	var out syncBuffer
 	errs, code := runHomeWith(t, e.deps(), newScript(t, false), &out)
 	if code != 0 || errs != "" {
 		t.Fatalf("exit %d, stderr %q", code, errs)
 	}
-	want := helpOf(t, e) + homeHint + "\n"
 	if out.String() != want {
 		t.Fatalf("stdout:\n%s\nwant:\n%s", out.String(), want)
 	}
-	if !strings.Contains(homeHint, "sheaf create") || !strings.Contains(homeHint, "sheaf init") {
-		t.Fatalf("hint %q", homeHint)
+	for _, args := range [][]string{{}, {"--no-tui"}} {
+		if out, errs, code := e.run(t, args...); code != 0 || errs != "" || out != want {
+			t.Fatalf("sheaf %q without a terminal: exit %d\nstdout:\n%s\nstderr:\n%s\nwant:\n%s", args, code, out, errs, want)
+		}
+	}
+	if out, errs, code := e.run(t, "status"); code != 1 || out != "" ||
+		errs != "sheaf: no sheaf.yaml found in "+e.cwd+" or any parent directory\nhint: create one with `sheaf create [dir]`, or `sheaf init [dir]` to adopt existing checkouts\n" {
+		t.Fatalf("status: exit %d\nstdout:\n%s\nstderr:\n%s", code, out, errs)
 	}
 	// An explicit --bundle that is not a bundle is an error, as for every command.
 	_, code = runHomeWith(t, e.deps(), newScript(t, false), &out, "--bundle", e.cwd)

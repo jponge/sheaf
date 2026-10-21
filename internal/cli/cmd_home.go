@@ -23,8 +23,10 @@ import (
 	"github.com/jponge/sheaf/internal/tui"
 )
 
-// homeHint follows the help of bare sheaf outside a bundle.
-const homeHint = "Not in a bundle: create one with `sheaf create [dir]`, or `sheaf init [dir]` to adopt existing checkouts."
+// notInBundleHint follows the errors that say no bundle was found (see
+// bundle.ErrNotFound): what bare sheaf prints outside a bundle, and every
+// command needing a bundle that ran outside one (see execute).
+const notInBundleHint = "hint: create one with `sheaf create [dir]`, or `sheaf init [dir]` to adopt existing checkouts"
 
 // cdFileVar names the file in which the shell function defined by
 // shell-init expects the directory to change to (see runHome).
@@ -46,9 +48,11 @@ func installHome(root *cobra.Command, d Deps) {
 	})
 }
 
-// runHome is bare sheaf. Without the TUI (no terminal, --no-tui) it prints
-// the help, as before the home screen existed; outside a bundle, the help
-// and a hint. Otherwise it opens the overview of the bundle's checkouts
+// runHome is bare sheaf. Outside a bundle (none found from the working
+// directory) it says so, with how to make one (see notInBundleHint) and
+// where the commands are listed, with or without the TUI. Otherwise,
+// without the TUI (no terminal, --no-tui) it prints the help, as before
+// the home screen existed (also with --bundle). Otherwise it opens the overview of the bundle's checkouts
 // (local state only, nothing is fetched) and runs the action chosen there
 // with the TUI of its command, then opens the overview again, until the
 // user quits. The overview is on the alternate screen, so that each one
@@ -69,21 +73,24 @@ func installHome(root *cobra.Command, d Deps) {
 // bubbletea clears it when each program ends. The first interruption
 // during an action cancels the action only (see act).
 func runHome(c *cobra.Command, d Deps) error {
-	if !d.tuiMode(c) {
+	tuiMode, o := d.tuiMode(c), OptionsFrom(c)
+	if !tuiMode && o.Bundle != "" {
 		return c.Help()
 	}
-	o := OptionsFrom(c)
 	wd, err := d.getwd()
 	if err != nil {
+		if !tuiMode {
+			return c.Help()
+		}
 		return err
 	}
 	root, err := ops.FindBundle(o.Bundle, wd)
 	if errors.Is(err, bundle.ErrNotFound) {
-		if err := c.Help(); err != nil {
-			return err
-		}
-		fmt.Fprintln(c.OutOrStdout(), homeHint)
+		fmt.Fprintf(c.OutOrStdout(), "sheaf: not in a bundle: %v\n%s\nhint: `sheaf --help` lists the commands\n", err, notInBundleHint)
 		return nil
+	}
+	if !tuiMode {
+		return c.Help()
 	}
 	if err != nil {
 		return err

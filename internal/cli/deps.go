@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/term"
+	"github.com/jponge/sheaf/internal/bundle"
 	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/hosting"
 	"github.com/jponge/sheaf/internal/ops"
@@ -431,6 +432,9 @@ func execute(cmd *cobra.Command, ctl *interruptCtl, args []string) int {
 			return 130
 		}
 		fmt.Fprintln(cmd.ErrOrStderr(), "sheaf:", err)
+		if errors.Is(err, bundle.ErrNotFound) {
+			fmt.Fprintln(cmd.ErrOrStderr(), notInBundleHint)
+		}
 		return 1
 	}
 	return 0
