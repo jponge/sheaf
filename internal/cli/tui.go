@@ -208,6 +208,11 @@ func (s *tuiSession) titled(m tea.Model) tea.Model {
 	return tui.Titled{Model: m, Title: s.title}
 }
 
+// quitWait bounds the wait of the emergency stop for a program of runModel
+// to quit: more than the drain of the terminal's answers (300 ms, see
+// tui.NewProgram) and bubbletea's wait for its input reader.
+const quitWait = time.Second
+
 // run runs a menu or confirmation program. An interruption (signal) quits
 // it and returns the context's error.
 func (s *tuiSession) run(m tea.Model) (tea.Model, error) { return s.runModel(keepLastLine{m}) }
@@ -227,7 +232,10 @@ func (s *tuiSession) runModel(m tea.Model) (tea.Model, error) {
 	// An interruption quits the program rather than killing it (as
 	// tea.WithContext would): bubbletea then waits for its input reader,
 	// which otherwise takes the next key typed, meant for the next program
-	// of the home screen (B62 H4), and drains the terminal's answers.
+	// of the home screen (B62 H4), and the terminal's answers are drained
+	// (see tui.NewProgram). The emergency stop (a second interruption, e.g.
+	// while the program quits) waits for it to restore the terminal, up to
+	// quitWait, then kills it, as for a progress view.
 	done := make(chan struct{})
 	go func() {
 		select {
@@ -236,7 +244,21 @@ func (s *tuiSession) runModel(m tea.Model) (tea.Model, error) {
 		case <-done:
 		}
 	}()
+	s.ctl.setRelease(func() {
+		go p.Quit() // blocks until the event loop takes it, or the program ends
+		select {
+		case <-done:
+			return
+		case <-time.After(quitWait):
+		}
+		p.Kill()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
+	})
 	final, err := p.Run()
+	s.ctl.setRelease(nil)
 	close(done)
 	s.spin.release()
 	if cerr := s.ctx.Err(); cerr != nil {

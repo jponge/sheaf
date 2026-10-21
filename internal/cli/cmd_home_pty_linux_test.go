@@ -1018,6 +1018,52 @@ func TestHomeOnPTYMouseOffOnEveryExit(t *testing.T) {
 	}
 }
 
+// Two signals close together while a program of the home screen is open
+// (the overview, the prompt of an action) end sheaf with the terminal
+// restored: the second one may arrive while the program quits after the
+// first one (waiting up to drainTimeout for the terminal's answers), and
+// the emergency stop must then release the program (review of B62 H4).
+// The terminal answers its queries at once or after 100 ms (a quit drains
+// the answers for at most 300 ms, two rounds: slower terminals get the
+// last answer after sheaf ends, as when q quits).
+func TestHomeOnPTYTwoSignalsRestoreTheTerminal(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		keys  string // typed in the overview first, if any
+		wait  string // shown after the keys
+		sig   syscall.Signal
+		delay time.Duration
+	}{
+		{"overview, one SIGTERM, slow terminal", "", "", syscall.SIGTERM, 100 * time.Millisecond},
+		{"overview, SIGTERM", "", "", syscall.SIGTERM, 0},
+		{"overview, SIGTERM, slow terminal", "", "", syscall.SIGTERM, 100 * time.Millisecond},
+		{"overview, SIGINT", "", "", syscall.SIGINT, 0},
+		{"overview, SIGINT, slow terminal", "", "", syscall.SIGINT, 100 * time.Millisecond},
+		{"prompt, SIGINT", "w", `New worktree of alpha`, syscall.SIGINT, 0},
+		{"prompt, SIGINT, slow terminal", "w", `New worktree of alpha`, syscall.SIGINT, 100 * time.Millisecond},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e, _, _, _, _ := homeBundle(t)
+			s := startPTYShell(t, e.cwd, `B=$(stty -g); "$SHEAF"`+sttyCheck, c.delay)
+			s.waitFor(`STATE`)
+			if c.keys != "" {
+				s.write(c.keys)
+				s.waitFor(c.wait)
+			}
+			time.Sleep(c.delay + 50*time.Millisecond) // the startup queries answered
+			pid := childPID(t, s.cmd.Process.Pid)
+			if err := syscall.Kill(pid, c.sig); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(c.name, "overview, one ") {
+				time.Sleep(30 * time.Millisecond)
+				_ = syscall.Kill(pid, c.sig) // sheaf may have ended already
+			}
+			wantTerminalRestored(t, s, "130")
+		})
+	}
+}
+
 // With TERM=dumb, the home screen never turns mouse reporting on (B49).
 func TestHomeOnPTYDumbTerminalEnablesNoMouse(t *testing.T) {
 	e, _, _, _, _ := homeBundle(t)
