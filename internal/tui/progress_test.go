@@ -581,6 +581,18 @@ func TestProgressHeaderInterruptHintText(t *testing.T) {
 	}
 }
 
+// WithForceHint replaces what the interruption note says a second ctrl+c
+// does ("Ctrl-C again to stop sheaf" in the home screen, B62 H4 review).
+func TestProgressForceHint(t *testing.T) {
+	t.Parallel()
+	p, _ := newTestProgress("Fetching")
+	p = p.WithInterrupt(func() {}).WithForceHint("Ctrl-C again to stop sheaf")
+	m, _ := feed(p, RowUpdate{Key: "a", Label: "alpha", State: RowRunning}, InterruptedMsg{Count: 1})
+	if v := view(m); !strings.Contains(v, "waiting for the running operations (Ctrl-C again to stop sheaf)") || strings.Contains(v, "to force") {
+		t.Errorf("interruption note:\n%s", v)
+	}
+}
+
 // At 80 columns, the header of a fetch of a few repositories has room for
 // both the bar and the cancel hint (B52 D3 review).
 func TestProgressHeaderBarAndHintFitIn80Columns(t *testing.T) {

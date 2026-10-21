@@ -272,8 +272,15 @@ func probeActionSignals(ctx context.Context, ctl *interruptCtl, sig syscall.Sign
 	case <-time.After(5 * time.Second):
 		return errors.New(sig.String() + " during an action did not cancel the command")
 	}
-	if actx.Err() == nil || len(exited) > 0 {
-		return fmt.Errorf("%s: action not cancelled, or emergency stop (%d)", sig, len(exited))
+	// The action's context is cancelled right after the command's (the
+	// children of a context are cancelled after its Done channel closes).
+	select {
+	case <-actx.Done():
+	case <-time.After(5 * time.Second):
+		return errors.New(sig.String() + " during an action did not cancel the action")
+	}
+	if len(exited) > 0 {
+		return fmt.Errorf("%s: emergency stop (%d)", sig, len(exited))
 	}
 	return nil
 }

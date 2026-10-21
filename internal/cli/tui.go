@@ -338,7 +338,10 @@ type progressOpts struct {
 func (s *tuiSession) progress(title string, o progressOpts, work func(ctx context.Context, rep ops.Reporter, ask askFunc)) {
 	plain := checkoutRenderer{plainRenderer{s.errw}}
 	model := tui.NewProgress(title).WithInterrupt(s.ctl.interrupt)
-	if !s.ctl.inAction() {
+	if s.ctl.inAction() {
+		// ctrl+c cancels the action of the home screen; again, it ends sheaf.
+		model = model.WithForceHint("Ctrl-C again to stop sheaf")
+	} else {
 		model = model.WithInterruptHint("^C quit") // ctrl+c ends sheaf
 	}
 	if o.Aside != "" {

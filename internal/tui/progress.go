@@ -150,6 +150,7 @@ type Progress struct {
 	profile          colorprofile.Profile
 	terminalProgress bool
 	interruptHint    string // see WithInterruptHint; "" for "^C cancel"
+	forceHint        string // see WithForceHint; "" for "Ctrl-C again to force"
 
 	spin   spinner.Model
 	styles Styles
@@ -189,6 +190,14 @@ func (m Progress) WithInterrupt(f func()) Progress {
 // command.
 func (m Progress) WithInterruptHint(hint string) Progress {
 	m.interruptHint = hint
+	return m
+}
+
+// WithForceHint returns a copy of m whose interruption note says hint
+// rather than "Ctrl-C again to force" about a second ctrl+c, e.g. "Ctrl-C
+// again to stop sheaf" when the first one cancelled only part of the work.
+func (m Progress) WithForceHint(hint string) Progress {
+	m.forceHint = hint
 	return m
 }
 
@@ -577,7 +586,11 @@ func (m Progress) render() string {
 	var footer []string
 	switch {
 	case m.interrupts == 1:
-		footer = append(footer, m.styles.Question.Render("Interrupted: no new work is started; waiting for the running operations (Ctrl-C again to force)"))
+		force := m.forceHint
+		if force == "" {
+			force = "Ctrl-C again to force"
+		}
+		footer = append(footer, m.styles.Question.Render("Interrupted: no new work is started; waiting for the running operations ("+force+")"))
 	case m.interrupts > 1:
 		footer = append(footer, m.styles.Question.Render("Interrupted again: forcing stop…"))
 	}

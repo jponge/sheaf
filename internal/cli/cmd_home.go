@@ -214,7 +214,7 @@ func (h *home) loop() error {
 		}
 		if (h.ran || h.output.Len() > 0) && name != "browse" {
 			// What the action printed, in a view until q, esc or enter is pressed
-			// (ctrl+c interrupts, as in the action's dialogs; input
+			// (ctrl+c exits with 130, as in the overview: the action is over; input
 			// ending returns to the overview); none after an action
 			// cancelled before printing anything, nor after browse,
 			// whose outcome (the page opened, or the error) fits in the

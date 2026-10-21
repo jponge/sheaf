@@ -1252,7 +1252,7 @@ func TestHomeOnPTYSecondCtrlCInTheActionIsTheEmergencyStop(t *testing.T) {
 	s.waitFor(`\^C cancel`)
 	waitPIDs(t, pids, 1)
 	s.write("\x03")
-	s.waitFor(`Interrupted: no new work`)
+	s.waitFor(`Interrupted: no new work .*\(Ctrl-C again to stop sheaf\)`)
 	s.write("\x03")
 	s.waitFor(`interrupted again`)
 	wantTerminalRestored(t, s, "130")
@@ -1334,6 +1334,41 @@ func TestHomeOnPTYCtrlCInActionDialogs(t *testing.T) {
 			wantTerminalRestored(t, s, "0")
 		})
 	}
+}
+
+// After a prompt ended by a SIGINT, the next key reaches the overview that
+// follows. A program killed (rather than quit) leaves its input reader
+// running, which may take that key: a race, hence rounds, each waiting
+// for the next overview, then typing w, which must open the prompt again
+// (with the program killed, 8 rounds lost a key in 2 runs out of 5, 30
+// rounds in 10 out of 10).
+func TestHomeOnPTYKeysReachTheOverviewAfterInterruptedPrompts(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	s := startPTYShell(t, e.cwd, `B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	count := func(what string, n int) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for strings.Count(s.output(), what) < n {
+			if time.Now().After(deadline) {
+				t.Fatalf("%q shown %d times, want %d: the key was lost\n%q", what, strings.Count(s.output(), what), n, s.output())
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	pid := childPID(t, s.cmd.Process.Pid)
+	const rounds = 30
+	for i := 1; i <= rounds; i++ {
+		count("\x1b[?1049h", i) // overview i on the alternate screen
+		s.write("w")
+		count("\x1b]2;sheaf wt add: ", i) // prompt i (its window title, set once)
+		if err := syscall.Kill(pid, syscall.SIGINT); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count("\x1b[?1049h", rounds+1)
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
 }
 
 // A SIGINT while an action prints on the normal screen (the terminal is
