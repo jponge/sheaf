@@ -574,7 +574,8 @@ func TestOverviewDropsSpacingToFitWithoutScrolling(t *testing.T) {
 
 // A message cut off entirely by the truncation to the width leaves no
 // dangling separator on the status line; one cut partway ends with "…"
-// after at least its first character (B52 E2), else it is dropped.
+// after at least its first character (B52 E2). One whose first word does
+// not fit after the first part goes to a second line (B62 M6), cut there.
 func TestOverviewNarrowStatusLineHasNoDanglingSeparator(t *testing.T) {
 	t.Parallel()
 	for w := 10; w <= 20; w++ {
@@ -588,7 +589,7 @@ func TestOverviewNarrowStatusLineHasNoDanglingSeparator(t *testing.T) {
 	}
 	var m tea.Model = newOv().WithMessage("prune: nothing to prune")
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 17, Height: 24})
-	if !hasLine(view(m), "0/3 selected · p…") {
+	if !hasLine(view(m), "0/3 selected") || !hasLine(view(m), "prune: nothing t…") {
 		t.Errorf("width 17:\n%s", view(m))
 	}
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 16, Height: 24})
@@ -711,6 +712,117 @@ func TestOverviewStatusPartsAreShownWholeOrNotAtAll(t *testing.T) {
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 18, Height: 30})
 	if l := statusLine(t, m); l != "0/25 selected" {
 		t.Errorf("width 18: status line %q, want %q", l, "0/25 selected")
+	}
+}
+
+// The message wins over the optional status parts (B62 M6: it was cut
+// first, though often the point, e.g. a command to paste): "N shown" and
+// "rows a-b of n" are dropped before the message is cut, and a message
+// that does not fit after the first part wraps to a second line (at
+// spaces), counted in the layout; only then is it cut ("…"). At every
+// width and height, no line is wider than the window, the view is not
+// taller, and the cursor row is shown.
+func TestOverviewMessageWinsOverStatusParts(t *testing.T) {
+	t.Parallel()
+	var rows []Row
+	for i := range 32 {
+		rows = append(rows, Row{Key: fmt.Sprint(i), Cells: []string{fmt.Sprintf("r%02d", i), "main"}})
+	}
+	msg := "primary checkout, not a worktree; run: sheaf remove -- alpha"
+	ov := func(w, h int) tea.Model {
+		var m tea.Model = NewOverview("t", []string{"REPO", "DIR"}, rows, ovActions()).WithMessage(msg).WithFilter("r")
+		m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+		return m
+	}
+	// Wide enough: every part and the message on one line.
+	if v := view(ov(120, 20)); !hasLine(v, "0/32 selected · 32 shown · rows 1-12 of 32 · "+msg) {
+		t.Errorf("width 120:\n%s", v)
+	}
+	// The parts give way to the message.
+	if v := view(ov(90, 20)); !hasLine(v, "0/32 selected · 32 shown · "+msg) {
+		t.Errorf("width 90:\n%s", v)
+	}
+	if v := view(ov(76, 20)); !hasLine(v, "0/32 selected · "+msg) {
+		t.Errorf("width 76:\n%s", v)
+	}
+	// Then the message wraps, at a space, to a second line.
+	m := ov(60, 20)
+	v := view(m)
+	if !hasLine(v, "0/32 selected · primary checkout, not a worktree; run: sheaf") || !hasLine(v, "remove -- alpha") {
+		t.Errorf("width 60:\n%s", v)
+	}
+	if got := ovShape(m); !strings.Contains(got, "R _ S ? _ K") {
+		t.Errorf("width 60: shape %q:\n%s", got, v)
+	}
+	// Short of room, the second line goes before the key help.
+	if v := view(ov(60, 7)); !strings.Contains(v, "space toggle") || strings.Contains(v, "remove -- alpha") || !strings.Contains(v, "0/32 selected · primary") {
+		t.Errorf("width 60, height 7:\n%s", v)
+	}
+	for w := 20; w <= 130; w += 5 {
+		for h := 1; h <= 20; h++ {
+			m := ov(w, h)
+			m, _ = press(m, "end")
+			v := view(m)
+			for _, l := range strings.Split(v, "\n") {
+				if lipgloss.Width(l) > w {
+					t.Fatalf("width %d, height %d: line %q:\n%s", w, h, l, v)
+				}
+			}
+			if lineCount(v) > h || !strings.Contains(v, "> [ ] r31") {
+				t.Fatalf("width %d, height %d: %d lines:\n%s", w, h, lineCount(v), v)
+			}
+			if h >= 12 && w >= 45 {
+				// The message is whole when it has room on two lines.
+				if got := strings.Join(strings.Fields(v), " "); !strings.Contains(got, msg) {
+					t.Fatalf("width %d, height %d: message not whole:\n%s", w, h, v)
+				}
+			}
+		}
+	}
+}
+
+// On a problem row (Alert), the message line shows the row's whole last
+// cell (B62 M5: cut in the table even at 120 columns), wrapped to a
+// second line if need be, in place of an older message; moving off the
+// row or a refused action replaces it.
+func TestOverviewShowsTheWholeProblemOfTheCurrentRow(t *testing.T) {
+	t.Parallel()
+	problem := "problem: worktree directory missing (still registered in git; `git worktree prune` removes the entry)"
+	rows := []Row{
+		{Key: "/b/alpha/main", Cells: []string{"alpha", "main", "main", "clean"}},
+		{Key: "/b/alpha/gone", Cells: []string{"alpha", "gone", "-", problem}, Alert: true},
+		{Key: "/b/beta/main", Cells: []string{"beta", "main", "main", "clean"}},
+	}
+	var m tea.Model = NewOverview("t", []string{"REPO", "DIR", "BRANCH", "STATE"}, rows, ovActions()).WithMessage("update: done")
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	if v := view(m); !hasLine(v, "0/3 selected · update: done") {
+		t.Fatalf("start:\n%s", v)
+	}
+	m, _ = press(m, "down")
+	v := view(m)
+	if got := strings.Join(strings.Fields(v), " "); !strings.Contains(got, "0/3 selected · "+problem) || strings.Contains(v, "update: done") {
+		t.Errorf("on the problem row:\n%s", v)
+	}
+	if !hasLine(v, "0/3 selected · problem: worktree directory missing (still registered in git;") {
+		t.Errorf("on the problem row, first status line:\n%s", v)
+	}
+	m, _ = press(m, "down")
+	if v := view(m); strings.Contains(v, "registered in git") || !hasLine(v, "0/3 selected") {
+		t.Errorf("off the problem row:\n%s", v)
+	}
+	// Starting on the problem row without a message shows it.
+	var s tea.Model = NewOverview("t", []string{"REPO", "DIR", "BRANCH", "STATE"}, rows, ovActions()).WithCursor("/b/alpha/gone")
+	s, _ = s.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
+	if v := view(s); !hasLine(v, "0/3 selected · "+problem) {
+		t.Errorf("start on the problem row:\n%s", v)
+	}
+	// A refused action says why instead.
+	actions := append(ovActions(), OverviewAction{Key: "b", Name: "browse", Scope: ScopeCurrent, Check: func([]string) string { return "problem row, see sheaf doctor" }})
+	var r tea.Model = NewOverview("t", []string{"REPO", "DIR", "BRANCH", "STATE"}, rows, actions).WithCursor("/b/alpha/gone")
+	r, _ = r.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
+	r, _ = press(r, "b")
+	if v := view(r); !hasLine(v, "0/3 selected · problem row, see sheaf doctor") {
+		t.Errorf("refused action:\n%s", v)
 	}
 }
 

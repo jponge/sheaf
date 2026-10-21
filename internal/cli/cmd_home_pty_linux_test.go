@@ -750,7 +750,7 @@ func TestHomeOnPTYCopiesPathWithOSC52(t *testing.T) {
 		term, message string
 		sent          bool
 	}{
-		{"xterm-256color", "sent to the clipboard: ", true},
+		{"xterm-256color", "sent to the clipboard:", true}, // the path may wrap to the next line (B62 M6)
 		{"dumb", "copy not available: the output is not a terminal, or TERM=dumb", false},
 	} {
 		t.Run(c.term, func(t *testing.T) {

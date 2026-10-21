@@ -238,10 +238,10 @@ when it opens. Checkouts that cannot be inspected are shown as problem rows.
 Rows are grouped by repository (primary first, problem rows last): REPO is
 only shown on the first row of each group, and on the first row on screen
 when the list is scrolled or filtered (the filter still matches it).
-DIR is blank when it is the directory sheaf derives from BRANCH (the branch
-or tag normalized as in [Repository layout](#repository-layout), e.g. `feat-x` for `feat/x`, or
-`main` for the primary checkout of `main`), so it shows only directories
-that differ (the filter still matches them).
+DIR is blank when it is the directory sheaf derives from BRANCH (the
+branch or tag normalized as in [Repository layout](#repository-layout),
+e.g. `feat-x` for `feat/x`, or `main` for the primary checkout of `main`),
+so it shows only directories that differ (the filter still matches them).
 In a bundle without repositories, it lists what to run instead, one
 command per line: `sheaf add owner/repo`, `sheaf add --org <org>` and, for
 clones already in the bundle directory, `sheaf adopt <dir>` (`<dir>` is
@@ -272,6 +272,15 @@ lines that still do not fit are cut at the right, ending with `…` (as in
 every view of the TUI). The title (`sheaf: <bundle>`) and that of the
 report view show the home directory as `~`; commands in hints keep
 absolute paths, so that they can be pasted.
+
+Below the table, the status line gives the number of rows selected, the
+number shown by the filter (`N shown`) and the scroll position (`rows a-b
+of n`), then the message: the outcome of the last action, or why a key was
+refused. The message wins: `N shown` and the scroll position are left out
+when they would cut it, and a message that does not fit after the number
+selected wraps to a second line, cut with `…` only beyond it. On a problem
+row, the message is the whole problem (the table may cut it), until the
+cursor moves or a key gets another answer.
 
 On a terminal (not with `TERM=dumb`), the names of the repositories hosted
 on github.com are hyperlinks to their page (for a clone of your fork, the
@@ -325,9 +334,9 @@ report view on the alternate screen, titled
 nothing. Lines wider than the terminal wrap, their continuation lines
 indented under the text (after the level word or a short label, e.g. `OK`,
 `done`, `hint:`; by 2 columns after a path). Up/down (k/j) and the mouse
-wheel scroll it, pgup/pgdown (b/space) by a page, home/end (g/G) jump to the top or the bottom; q, esc or
-enter returns to the overview (other keys are ignored), ctrl+c exits with
-130. An action cancelled in its
+wheel scroll it, pgup/pgdown (b/space) by a page, home/end (g/G) jump to
+the top or the bottom; q, esc or enter returns to the overview (other keys
+are ignored), ctrl+c exits with 130. An action cancelled in its
 dialog, menu or prompt (enter in the `sync` menu with nothing selected
 counts as cancelled) shows no report view, unless it printed something
 (e.g. the warnings of `sync` before its menu; progress lines such as

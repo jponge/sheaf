@@ -298,8 +298,43 @@ func (m Overview) FullHelp() bool { return m.fullHelp }
 
 func (m Overview) done() bool { return m.chosen != "" || m.cancelled }
 
-// Update implements tea.Model.
+// Update implements tea.Model. Moving the cursor to a row with Alert
+// clears the message, so that the row's last cell shows instead (see
+// shownMessage).
 func (m Overview) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	prev := m.CurrentKey()
+	next, cmd := m.update(msg)
+	if o, ok := next.(Overview); ok && o.CurrentKey() != prev && o.currentAlert() != "" {
+		o.message = ""
+		next = o
+	}
+	return next, cmd
+}
+
+// currentAlert returns the last cell of the current row if it has Alert
+// (e.g. a problem), else "".
+func (m Overview) currentAlert() string {
+	if m.cursor >= len(m.visible) {
+		return ""
+	}
+	r := m.rows[m.visible[m.cursor]]
+	if !r.Alert || len(r.Cells) == 0 {
+		return ""
+	}
+	return r.Cells[len(r.Cells)-1]
+}
+
+// shownMessage returns the message displayed on the status line: the
+// message, else the whole last cell of the current row if it has Alert
+// (B62 M5: a problem is often cut in the table).
+func (m Overview) shownMessage() string {
+	if m.message != "" {
+		return sanitize(m.message)
+	}
+	return sanitize(m.currentAlert())
+}
+
+func (m Overview) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.done() {
 		return m, nil
 	}
@@ -511,6 +546,7 @@ func (m *Overview) applyFilter() {
 // rows fit.
 type ovLayout struct {
 	title, filter, header, status, help bool // status: with the message
+	message2                            bool // the second line of the message, see statusLines
 	gaps                                int  // blank lines below the title and of the footer, see splitGaps
 	rows                                int
 }
@@ -519,11 +555,11 @@ type ovLayout struct {
 // title and of the footer are dropped (the one above the help first, then
 // the one below the title) when that lets every visible row fit (see
 // fitGaps and splitGaps). When the window is too small for at least one
-// row, the blank lines, then the help, title, status (with the message),
-// filter and header lines are dropped in that order. With an unknown
-// height every visible row is shown.
+// row, the blank lines, then the second line of the message, the help,
+// title, status (with the message), filter and header lines are dropped in
+// that order. With an unknown height every visible row is shown.
 func (m Overview) layout() ovLayout {
-	l := ovLayout{title: true, filter: m.filtering || m.filter != "", header: true, status: true, help: true, gaps: 3}
+	l := ovLayout{title: true, filter: m.filtering || m.filter != "", header: true, status: true, help: true, gaps: 3, message2: m.messageWraps()}
 	body := max(1, len(m.visible))
 	if len(m.rows) == 0 {
 		body = len(m.emptyLines())
@@ -534,7 +570,7 @@ func (m Overview) layout() ovLayout {
 	}
 	chrome := func() int {
 		n := l.gaps
-		for _, shown := range []bool{l.title, l.filter, l.header, l.status} {
+		for _, shown := range []bool{l.title, l.filter, l.header, l.status, l.status && l.message2} {
 			if shown {
 				n++
 			}
@@ -545,12 +581,13 @@ func (m Overview) layout() ovLayout {
 		return n
 	}
 	l.gaps = fitGaps(l.gaps, m.height, chrome()-l.gaps, body)
-	for _, line := range []*bool{&l.help, &l.title, &l.status, &l.filter, &l.header} {
+	for _, line := range []*bool{&l.message2, &l.help, &l.title, &l.status, &l.filter, &l.header} {
 		if m.height-chrome() >= 1 {
 			break
 		}
 		*line = false
 	}
+	l.message2 = l.message2 && l.status
 	l.rows = max(1, m.height-chrome())
 	return l
 }
@@ -797,18 +834,7 @@ func (m Overview) View() tea.View {
 	}
 	var status, help []string
 	if l.status {
-		// The message follows the parts, unstyled; free text, it may be
-		// cut partway (ending with "…", see cutLines), but is dropped
-		// with its separator when not even its first character fits
-		// with the ellipsis.
-		parts := m.status()
-		parts = parts[:fitStatus(m.width, parts)]
-		line := st.Status.Render(joinStatus(parts...))
-		msg := sanitize(m.message)
-		if msg != "" && (m.width <= 0 || m.width-lipgloss.Width(joinStatus(parts...)+" · ") >= min(2, lipgloss.Width(msg))) {
-			line = joinStatus(line, msg)
-		}
-		status = []string{line}
+		status = m.statusLines(l.message2)
 	}
 	if l.help {
 		help = m.helpLines()
@@ -888,15 +914,65 @@ func (m Overview) renderRow(i int, widths []int) string {
 	return cursor + box + " " + text
 }
 
-// status returns the parts of the status line, without the message.
-func (m Overview) status() []string {
+// selectedPart returns the first part of the status line, always shown:
+// the number of rows selected.
+func (m Overview) selectedPart() string {
 	n := 0
 	for _, r := range m.rows {
 		if m.selected[r.Key] {
 			n++
 		}
 	}
-	parts := []string{fmt.Sprintf("%d/%d selected", n, len(m.rows))}
+	return fmt.Sprintf("%d/%d selected", n, len(m.rows))
+}
+
+// messageWraps reports whether the message displayed (see shownMessage)
+// does not fit on the status line after its first part (see statusLines).
+func (m Overview) messageWraps() bool {
+	msg := m.shownMessage()
+	return m.width > 0 && msg != "" && lipgloss.Width(joinStatus(m.selectedPart(), msg)) > m.width
+}
+
+// statusLines renders the status line: its parts (see status), each shown
+// whole or dropped (see fitStatus), then the message (see shownMessage),
+// unstyled. The message wins over the parts after the first (B62 M6): they
+// are dropped, the last first, until the message fits. When it does not
+// fit after the first part, it wraps (at spaces, see wrap) to a second
+// line if two is set, its first word going to that line when it is not
+// wider than the window; the lines are then cut at the width (ending with
+// "…", see cutLines). Without the second line, the message is cut on the
+// first one, and dropped with its separator when not even its first
+// character fits with the ellipsis.
+func (m Overview) statusLines(two bool) []string {
+	st := m.styles
+	parts, msg := m.status(), m.shownMessage()
+	if msg == "" {
+		return []string{st.Status.Render(joinStatus(parts[:fitStatus(m.width, parts)]...))}
+	}
+	for n := len(parts); n >= 1; n-- {
+		if m.width <= 0 || lipgloss.Width(joinStatus(append(parts[:n:n], msg)...)) <= m.width {
+			return []string{joinStatus(st.Status.Render(joinStatus(parts[:n]...)), msg)}
+		}
+	}
+	first := st.Status.Render(parts[0])
+	room := m.width - lipgloss.Width(parts[0]+" · ")
+	if !two {
+		if room >= min(2, lipgloss.Width(msg)) {
+			return []string{joinStatus(first, msg)}
+		}
+		return []string{first}
+	}
+	word, _, _ := strings.Cut(msg, " ")
+	if room < 1 || lipgloss.Width(word) > room && lipgloss.Width(word) <= m.width {
+		return []string{first, msg}
+	}
+	head := wrap(msg, room)[0]
+	return []string{joinStatus(first, head), strings.TrimLeft(msg[len(head):], " ")}
+}
+
+// status returns the parts of the status line, without the message.
+func (m Overview) status() []string {
+	parts := []string{m.selectedPart()}
 	if m.filter != "" {
 		parts = append(parts, fmt.Sprintf("%d shown", len(m.visible)))
 	}

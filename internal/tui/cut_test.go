@@ -20,7 +20,8 @@ func longText(prefix string, n int) string {
 
 // A line of a view wider than the window is cut at its width and ends with
 // "…" (B52 E2: the title, the overview message and STATE were cut without
-// it), at every width from 20 to 200 columns, in every view.
+// it), at every width from 20 to 200 columns, in every view. The overview
+// message wraps to a second line first (B62 M6), which is the one cut.
 func TestViewsEndCutLinesWithEllipsis(t *testing.T) {
 	t.Parallel()
 	title := longText("sheaf: /bundle", 260)
@@ -47,7 +48,22 @@ func TestViewsEndCutLinesWithEllipsis(t *testing.T) {
 			}
 			cut := map[string]string{"title": title}
 			if name == "overview" {
-				cut["STATE"], cut["message"] = state, msg
+				cut["STATE"] = state
+				// The message: on the status line and the next one, whole
+				// or cut at the end of the second line.
+				for i, l := range lines {
+					if !strings.HasPrefix(l, "0/1 selected · wt") || i+1 >= len(lines) {
+						continue
+					}
+					next := lines[i+1]
+					if strings.Join(strings.Fields(l+" "+next), " ") == "0/1 selected · "+msg {
+						continue // whole
+					}
+					if strings.HasSuffix(l, "…") || lipgloss.Width(next) != w || !strings.HasSuffix(next, "…") {
+						t.Errorf("%s, width %d: the message is not cut at the end of its second line: %q, %q", name, w, l, next)
+						break widths
+					}
+				}
 			}
 			for what, text := range cut {
 				// The line of text: the one containing its start (words
