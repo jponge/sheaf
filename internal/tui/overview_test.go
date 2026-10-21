@@ -745,10 +745,11 @@ func TestOverviewMessageWinsOverStatusParts(t *testing.T) {
 	if v := view(ov(76, 20)); !hasLine(v, "0/32 selected · "+msg) {
 		t.Errorf("width 76:\n%s", v)
 	}
-	// Then the message wraps, at a space, to a second line.
+	// Then the message wraps, at a space, to a second line, after the parts
+	// that leave it whole.
 	m := ov(60, 20)
 	v := view(m)
-	if !hasLine(v, "0/32 selected · primary checkout, not a worktree; run: sheaf") || !hasLine(v, "remove -- alpha") {
+	if !hasLine(v, "0/32 selected · 32 shown · rows 1-10 of 32 · primary") || !hasLine(v, "checkout, not a worktree; run: sheaf remove -- alpha") {
 		t.Errorf("width 60:\n%s", v)
 	}
 	if got := ovShape(m); !strings.Contains(got, "R _ S ? _ K") {
@@ -778,6 +779,32 @@ func TestOverviewMessageWinsOverStatusParts(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// A message that wraps to a second line anyway keeps the status parts
+// that fit before it on the first line, as long as it stays whole (V3
+// review: on a problem row of a scrolled list, "rows a-b of n" vanished).
+func TestOverviewWrappedMessageKeepsTheStatusParts(t *testing.T) {
+	t.Parallel()
+	problem := "problem: worktree directory missing (still registered in git; `git worktree prune` removes the entry)"
+	var rows []Row
+	for i := range 30 {
+		rows = append(rows, Row{Key: fmt.Sprint(i), Cells: []string{fmt.Sprintf("r%02d", i), "main", "clean"}})
+	}
+	rows = append(rows, Row{Key: "p", Cells: []string{"r30", "gone", problem}, Alert: true})
+	var m tea.Model = NewOverview("t", []string{"REPO", "DIR", "STATE"}, rows, ovActions())
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	m, _ = press(m, "end")
+	v := view(m)
+	if !strings.Contains(statusLine(t, m), "rows ") || !strings.Contains(strings.Join(strings.Fields(v), " "), problem) {
+		t.Errorf("width 80:\n%s", v)
+	}
+	// Too narrow for both: the message stays whole, the parts go.
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
+	v = view(m)
+	if strings.Contains(statusLine(t, m), "rows ") || !strings.Contains(strings.Join(strings.Fields(v), " "), problem) {
+		t.Errorf("width 60:\n%s", v)
 	}
 }
 

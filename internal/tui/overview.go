@@ -938,9 +938,10 @@ func (m Overview) messageWraps() bool {
 // unstyled. The message wins over the parts after the first (B62 M6): they
 // are dropped, the last first, until the message fits. When it does not
 // fit after the first part, it wraps (at spaces, see wrap) to a second
-// line if two is set, its first word going to that line when it is not
-// wider than the window; the lines are then cut at the width (ending with
-// "…", see cutLines). Without the second line, the message is cut on the
+// line if two is set, after the parts that leave it whole on the two
+// lines, its first word going to that line when it is not wider than the
+// window; the lines are then cut at the width (ending with "…", see
+// cutLines). Without the second line, the message is cut on the
 // first one, and dropped with its separator when not even its first
 // character fits with the ellipsis.
 func (m Overview) statusLines(two bool) []string {
@@ -954,20 +955,34 @@ func (m Overview) statusLines(two bool) []string {
 			return []string{joinStatus(st.Status.Render(joinStatus(parts[:n]...)), msg)}
 		}
 	}
-	first := st.Status.Render(parts[0])
-	room := m.width - lipgloss.Width(parts[0]+" · ")
 	if !two {
+		room := m.width - lipgloss.Width(parts[0]+" · ")
 		if room >= min(2, lipgloss.Width(msg)) {
-			return []string{joinStatus(first, msg)}
+			return []string{joinStatus(st.Status.Render(parts[0]), msg)}
 		}
-		return []string{first}
+		return []string{st.Status.Render(parts[0])}
 	}
+	// The parts that fit before the message stay on the first line (the
+	// last given up first) as long as the message stays whole on the two
+	// lines (V3 review: "rows a-b of n" vanished on problem rows).
+	for n := len(parts); ; n-- {
+		lines := m.wrapMessage(st.Status.Render(joinStatus(parts[:n]...)), lipgloss.Width(joinStatus(parts[:n]...)), msg)
+		if n == 1 || lipgloss.Width(lines[len(lines)-1]) <= m.width && lipgloss.Width(joinStatus(parts[:n]...)+" · ") < m.width {
+			return lines
+		}
+	}
+}
+
+// wrapMessage returns the status line made of prefix (prefixWidth columns
+// wide) and msg, wrapped to a second line (see statusLines).
+func (m Overview) wrapMessage(prefix string, prefixWidth int, msg string) []string {
+	room := m.width - prefixWidth - lipgloss.Width(" · ")
 	word, _, _ := strings.Cut(msg, " ")
 	if room < 1 || lipgloss.Width(word) > room && lipgloss.Width(word) <= m.width {
-		return []string{first, msg}
+		return []string{prefix, msg}
 	}
 	head := wrap(msg, room)[0]
-	return []string{joinStatus(first, head), strings.TrimLeft(msg[len(head):], " ")}
+	return []string{joinStatus(prefix, head), strings.TrimLeft(msg[len(head):], " ")}
 }
 
 // status returns the parts of the status line, without the message.

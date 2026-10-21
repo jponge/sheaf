@@ -278,7 +278,8 @@ number shown by the filter (`N shown`) and the scroll position (`rows a-b
 of n`), then the message: the outcome of the last action, or why a key was
 refused. The message wins: `N shown` and the scroll position are left out
 when they would cut it, and a message that does not fit after the number
-selected wraps to a second line, cut with `…` only beyond it. On a problem
+selected wraps to a second line (after the parts that leave it whole),
+cut with `…` only beyond it. On a problem
 row, the message is the whole problem (the table may cut it), until the
 cursor moves or a key gets another answer.
 
