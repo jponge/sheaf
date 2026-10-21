@@ -507,7 +507,7 @@ func TestHomeOnPTYDoctorReportScrolls(t *testing.T) {
 	s.write("q")
 	waitScreenStateRows(t, s, 10, "the overview after doctor", func(vt *vtScreen) bool {
 		alt := vt.altLines()
-		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf: ") && slices.ContainsFunc(alt, func(l string) bool { return overviewMessage(l) == "doctor: done" })
+		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf: ") && slices.ContainsFunc(alt, func(l string) bool { return overviewMessage(l) == "doctor: 3 warnings" })
 	})
 	s.write("q")
 	wantTerminalRestored(t, s, "0")
@@ -940,7 +940,7 @@ func TestHomeOnPTYWheelScrollsTheReport(t *testing.T) {
 	doctorView(t, s, e.cwd, "lines 4- after the grace period", from("4"))
 	s.write("q")
 	waitScreenStateRows(t, s, 10, "the overview after doctor", func(vt *vtScreen) bool {
-		return vt.altActive() && slices.ContainsFunc(vt.altLines(), func(l string) bool { return overviewMessage(l) == "doctor: done" })
+		return vt.altActive() && slices.ContainsFunc(vt.altLines(), func(l string) bool { return overviewMessage(l) == "doctor: 3 warnings" })
 	})
 	s.write("q")
 	wantTerminalRestored(t, s, "0")

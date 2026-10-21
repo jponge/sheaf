@@ -565,7 +565,15 @@ func TestHomeOutcomeFromCounts(t *testing.T) {
 		{"several counts", "update", []string{"1 fast-forwarded", "2 up to date"}, "", []error{nil}, "update: 1 fast-forwarded, 2 up to date"},
 		{"no counts", "doctor", nil, "", []error{nil}, "doctor: done"},
 		{"unchanged", "prune", nil, "nothing to prune", []error{nil}, "prune: nothing to prune"},
-		{"failed", "update", []string{"1 failed"}, "", []error{errors.New("1 of 1 checkouts failed")}, "update failed: 1 of 1 checkouts failed"},
+		{"failed", "update", []string{"1 failed"}, "", []error{errors.New("1 of 1 checkouts failed")}, "update: 1 failed (see report)"},
+		// A failure with counts that tell it says them (V3 review: "sync
+		// failed: 1 of 1 repositories failed" after 2 added).
+		{"partly failed", "sync", []string{"2 added", "1 failed"}, "", []error{errors.New("1 of 1 repositories failed")}, "sync: 2 added, 1 failed (see report)"},
+		{"partly failed update", "update", []string{"3 fast-forwarded", "1 failed"}, "", []error{errors.New("1 of 4 checkouts failed")}, "update: 3 fast-forwarded, 1 failed (see report)"},
+		{"doctor failed", "doctor", []string{"2 warnings", "1 failure"}, "", []error{errDoctorFailed}, "doctor: 2 warnings, 1 failure (see report)"},
+		{"doctor", "doctor", []string{"all OK"}, "", []error{nil}, "doctor: all OK"},
+		// Counts that do not tell the failure leave it as before.
+		{"failed, counts without it", "sync", []string{"2 added"}, "", []error{errors.New("listing of o failed")}, "sync failed: listing of o failed"},
 		{"cancelled", "remove", nil, "", []error{errCancelled}, "wt rm: cancelled"},
 		{"several runs, counts", "remove", []string{"2 removed", "1 failed"}, "", []error{nil, nil, errors.New("refused")}, "wt rm: 2 removed, 1 failed"},
 		{"several runs, no counts", "remove", nil, "", []error{nil, nil}, "wt rm: 2 done"},
@@ -583,7 +591,8 @@ func TestHomeOutcomeFromCounts(t *testing.T) {
 
 // The counts of update and prune are those of their summary lines, the
 // zero ones left out; update's skips say why, briefly (the reasons in the
-// order of the checkouts, each once).
+// order of the checkouts, each once). Doctor counts its warnings and
+// failures, or says "all OK".
 func TestUpdateAndPruneCounts(t *testing.T) {
 	t.Parallel()
 	co := func(dir string) ops.Checkout { return ops.Checkout{Repo: "a", Branch: dir, Dir: dir} }
@@ -616,6 +625,26 @@ func TestUpdateAndPruneCounts(t *testing.T) {
 	})
 	if want := []string{"2 removed", "1 interrupted"}; !slices.Equal(got, want) {
 		t.Errorf("prune counts %q, want %q", got, want)
+	}
+	checks := func(levels ...ops.CheckLevel) []ops.Check {
+		var cs []ops.Check
+		for _, l := range levels {
+			cs = append(cs, ops.Check{Level: l})
+		}
+		return cs
+	}
+	for _, tc := range []struct {
+		checks []ops.Check
+		want   []string
+	}{
+		{checks(ops.CheckOK, ops.CheckWarn, ops.CheckFail, ops.CheckWarn, ops.CheckInfo), []string{"2 warnings", "1 failure"}},
+		{checks(ops.CheckOK, ops.CheckWarn), []string{"1 warning"}},
+		{checks(ops.CheckFail, ops.CheckFail), []string{"2 failures"}},
+		{checks(ops.CheckOK, ops.CheckInfo), []string{"all OK"}},
+	} {
+		if got := doctorCounts(tc.checks); !slices.Equal(got, tc.want) {
+			t.Errorf("doctor counts %q, want %q", got, tc.want)
+		}
 	}
 	if got := pruneCounts([]ops.PruneResult{{PruneCandidate: c, Outcome: ops.PruneKept}, {PruneCandidate: c, Outcome: ops.PruneFailed, Err: errors.New("x")}}); !slices.Equal(got, []string{"1 kept", "1 failed"}) {
 		t.Errorf("prune counts %q", got)
@@ -983,7 +1012,7 @@ func TestHomeDoctorShowsReportView(t *testing.T) {
 		t.Parallel()
 		e, _, _, _, _ := homeBundle(t)
 		var out syncBuffer
-		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), reportKey(t, &out, "doctor", "q"), ovKeys(t, &out, "doctor: done", 1, "q"))
+		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), reportKey(t, &out, "doctor", "q"), ovKeys(t, &out, "doctor: 3 warnings", 1, "q"))
 		errs, code := runHomeWith(t, probeDeps(e, hosting.ErrGHNotFound), in, &out)
 		if o := out.String(); code != 0 || errs != "" || !strings.Contains(o, "sheaf doctor: ") || !strings.Contains(o, "WARN  gh not found") {
 			t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, o, errs)
@@ -996,7 +1025,7 @@ func TestHomeDoctorShowsReportView(t *testing.T) {
 			t.Fatal(err)
 		}
 		var out syncBuffer
-		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), reportKey(t, &out, "doctor", "q"), ovKeys(t, &out, "doctor failed", 1, "q"))
+		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), reportKey(t, &out, "doctor", "q"), ovKeys(t, &out, "doctor: 2 warnings, 1 failure (see report)", 1, "q"))
 		errs, code := runHomeWith(t, probeDeps(e, hosting.ErrGHNotFound), in, &out)
 		o := out.String()
 		if code != 0 || !strings.Contains(errs, "sheaf: doctor found problems (FAIL)") {
@@ -1004,7 +1033,7 @@ func TestHomeDoctorShowsReportView(t *testing.T) {
 		}
 		// The report, then the error, are in the report view (before the
 		// overview with the failure as message).
-		report := o[strings.Index(o, "sheaf doctor: "):strings.Index(o, "doctor failed: doctor found problems (FAIL)")]
+		report := o[strings.Index(o, "sheaf doctor: "):strings.Index(o, "doctor: 2 warnings, 1 failure (see report)")]
 		if i, j, k := strings.Index(report, "sheaf doctor: "), strings.Index(report, "FAIL  beta: "), strings.Index(report, "sheaf: doctor found problems (FAIL)"); i < 0 || j < i || k < j {
 			t.Fatalf("report view lacks the title, the report or the error:\n%s", o)
 		}
@@ -1015,11 +1044,11 @@ func TestHomeDoctorShowsReportView(t *testing.T) {
 		var out syncBuffer
 		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), []key{{keys: "\x03", wait: waitOutput(t, &out, "sheaf doctor: ")}})
 		errs, code := runHomeWith(t, probeDeps(e, nil), in, &out)
-		if code != 130 || !strings.Contains(errs, "interrupted") || strings.Contains(out.String(), "doctor: done") {
+		if code != 130 || !strings.Contains(errs, "interrupted") || strings.Contains(out.String(), "doctor: 2 warnings") {
 			t.Fatalf("ctrl+c in the report: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 		}
 		out = syncBuffer{}
-		in = newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), keys(), ovKeys(t, &out, "doctor: done", 1, "q"))
+		in = newScript(t, false, ovKeys(t, &out, "STATE", 1, "d"), keys(), ovKeys(t, &out, "doctor: 2 warnings", 1, "q"))
 		errs, code = runHomeWith(t, probeDeps(e, nil), in, &out)
 		if code != 0 || !strings.Contains(out.String(), "sheaf doctor: ") {
 			t.Fatalf("input ending in the report: exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -1123,7 +1152,7 @@ func TestHomePruneDoctorAndSync(t *testing.T) {
 	in := newScript(t, false,
 		ovKeys(t, &out, "STATE", 1, "p"), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "prune", "q"),
 		ovKeys(t, &out, "prune: 1 removed", 1, "d"), reportKey(t, &out, "doctor", "q"),
-		ovKeys(t, &out, "doctor: done", 1, "s"), keys(" ", "\r"), keys("\r"), keys(), reportKey(t, &out, "sync", "q"),
+		ovKeys(t, &out, "doctor: 2 warnings", 1, "s"), keys(" ", "\r"), keys("\r"), keys(), reportKey(t, &out, "sync", "q"),
 		ovKeys(t, &out, "sync: 1 added", 1, "q"))
 	errs, code := runHomeWith(t, d, in, &out)
 	if code != 0 {
@@ -1135,7 +1164,7 @@ func TestHomePruneDoctorAndSync(t *testing.T) {
 	if !exists(filepath.Join(root, "b", "main")) {
 		t.Errorf("sync did not add b:\n%s", out.String())
 	}
-	for _, want := range []string{"1 removed, 0 kept, 0 failed", "prune: 1 removed", "OK", "doctor: done", "sync: 1 added"} {
+	for _, want := range []string{"1 removed, 0 kept, 0 failed", "prune: 1 removed", "OK", "doctor: 2 warnings", "sync: 1 added"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out.String())
 		}
@@ -1269,7 +1298,7 @@ func TestHomeRemovesSelectedWorktreesAfterOneConfirmation(t *testing.T) {
 	e, feat, x, y := multiRemoveBundle(t)
 	var out syncBuffer
 	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "q"),
-		ovKeys(t, &out, "wt rm: 2 removed, 1 failed", 1, "q"))
+		ovKeys(t, &out, "wt rm: 2 removed, 1 refused", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || exists(x) || exists(y) || !exists(filepath.Join(feat, "new.txt")) {
 		t.Fatalf("exit %d, x %v, y %v, feat %v\nstdout:\n%s\nstderr:\n%s", code, exists(x), exists(y), exists(feat), out.String(), errs)
@@ -1339,7 +1368,7 @@ func TestHomeMultiRemoveHintsNameTheGivenBundle(t *testing.T) {
 	e, _, _, _ := multiRemoveBundle(t)
 	var out syncBuffer
 	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "q"),
-		ovKeys(t, &out, "wt rm: 2 removed, 1 failed", 1, "q"))
+		ovKeys(t, &out, "wt rm: 2 removed, 1 refused", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out, "--bundle", e.cwd)
 	// The complete line on standard error, where the refusal is printed
 	// whole (the report view, which shows it too, wraps long lines at its
@@ -1357,7 +1386,7 @@ func TestHomeMultiRemoveDialogListsTheRefusedWorktree(t *testing.T) {
 	e, _, _, _ := multiRemoveBundle(t)
 	var out syncBuffer
 	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "q"),
-		ovKeys(t, &out, "wt rm: 2 removed, 1 failed", 1, "q"))
+		ovKeys(t, &out, "wt rm: 2 removed, 1 refused", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	o := ansi.Strip(out.String())
 	answered := strings.Index(o, "Removing 3 worktrees")
@@ -1378,7 +1407,7 @@ func TestHomeMultiRemoveRefusesTheWorkingDirectory(t *testing.T) {
 	d.Getwd = func() (string, error) { return x, nil }
 	var out syncBuffer
 	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "q"),
-		ovKeys(t, &out, "wt rm: 2 removed, 1 failed", 1, "q"))
+		ovKeys(t, &out, "wt rm: 2 removed, 1 refused", 1, "q"))
 	errs, code := runHomeWith(t, d, in, &out)
 	if code != 0 || !exists(x) || exists(y) || exists(feat) || !strings.Contains(ansi.Strip(out.String()), "it contains the current working directory") {
 		t.Fatalf("exit %d, x %v, y %v, feat %v\nstdout:\n%s\nstderr:\n%s", code, exists(x), exists(y), exists(feat), out.String(), errs)

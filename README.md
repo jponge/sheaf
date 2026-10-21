@@ -345,7 +345,9 @@ pressed during the first quarter second of the view (e.g. typed while
 the action ran) are ignored, so the report is not skipped unseen. The
 overview then shows the outcome: the counts of the command's summary,
 without the zero ones (e.g. `update: 1 fast-forwarded, 1 skipped
-(diverged)`, `wt rm: 2 removed`, `prune: 1 removed`, `sync: 1 added`),
+(diverged)`, `wt rm: 2 removed, 1 refused`, `prune: 1 removed`,
+`sync: 1 added`, `doctor: 2 warnings` or `doctor: all OK`), followed by
+`(see report)` when some failed (`sync: 2 added, 1 failed (see report)`),
 `prune: nothing to prune` when nothing changed, `add failed: ...`,
 `<action>: done` for the others; quitting afterwards still exits with
 0. The selection is kept, except after an update, fetch or removal of the

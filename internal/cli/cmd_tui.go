@@ -285,20 +285,23 @@ func tuiWorktreeRemoveMany(c *cobra.Command, d Deps, w *ops.Workspace, items []o
 		return []error{errCancelled}
 	}
 	var errs []error
-	var removed, failed, interrupted int
+	var removed, refused, failed, interrupted int
 	for _, r := range results {
+		var re *ops.WorktreeRefusedError
 		switch {
 		case r.Err == nil:
 			removed++
 			fmt.Fprintln(c.OutOrStdout(), r.Message)
 		case interruptedErr(r.Err):
 			interrupted++
+		case errors.As(r.Err, &re):
+			refused++ // data at risk: kept, as asked by the checks (not a failure of git)
 		default:
 			failed++
 		}
 		errs = append(errs, r.Err)
 	}
-	d.reportCounts(countParts(count{removed, "removed"}, count{failed, "failed"}, count{interrupted, "interrupted"}))
+	d.reportCounts(countParts(count{removed, "removed"}, count{refused, "refused"}, count{failed, "failed"}, count{interrupted, "interrupted"}))
 	return errs
 }
 

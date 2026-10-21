@@ -345,6 +345,32 @@ type doctorJSON struct {
 	Checks  []ops.Check `json:"checks"`
 }
 
+// doctorCounts returns the counts of the findings of doctor (see
+// Deps.counts): its warnings and failures ("2 warnings, 1 failure"), or
+// "all OK" without any (INFO checks are not findings to fix).
+func doctorCounts(checks []ops.Check) []string {
+	var warns, fails int
+	for _, ch := range checks {
+		switch ch.Level {
+		case ops.CheckWarn:
+			warns++
+		case ops.CheckFail:
+			fails++
+		}
+	}
+	if warns+fails == 0 {
+		return []string{"all OK"}
+	}
+	var parts []string
+	if warns > 0 {
+		parts = append(parts, countOf(warns, "warning", "warnings"))
+	}
+	if fails > 0 {
+		parts = append(parts, countOf(fails, "failure", "failures"))
+	}
+	return parts
+}
+
 // errDoctorFailed makes doctor exit with status 1 after printing its report.
 var errDoctorFailed = errors.New("doctor found problems (FAIL)")
 
@@ -402,6 +428,7 @@ func newDoctorCmd(d Deps) *cobra.Command {
 			if c.Context().Err() != nil {
 				return c.Context().Err()
 			}
+			d.reportCounts(doctorCounts(checks))
 			if failed {
 				return errDoctorFailed
 			}

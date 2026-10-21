@@ -838,7 +838,9 @@ func (h *home) commandIn(dir string, args ...string) error {
 // "<command>: <counts>" with the counts the command told (see
 // Deps.counts; e.g. "update: 1 skipped (diverged)"), else "<command>:
 // done", "<command>: <note>" when the command changed nothing (e.g.
-// "prune: nothing to prune"), "<command>: cancelled", "<command> failed:
+// "prune: nothing to prune"), "<command>: cancelled", "<command>:
+// <counts> (see report)" for a failure the counts tell (see failureCount,
+// e.g. "sync: 2 added, 1 failed (see report)"), else "<command> failed:
 // <error>" (the error on one line, see errorLine, followed by "(see
 // report)" when the report has more), or the counts when the action ran
 // several times (those the command told, else those of its runs), the
@@ -883,6 +885,8 @@ func (h *home) outcome(name string, errs []error) string {
 		return name + ": " + strings.Join(h.counts, ", ")
 	case len(errs) > 1:
 		return name + ": " + strings.Join(countParts(count{done, "done"}, count{cancelled, "cancelled"}, count{failed, "failed"}), ", ")
+	case failed > 0 && slices.ContainsFunc(h.counts, failureCount):
+		return name + ": " + strings.Join(h.counts, ", ") + " (see report)"
 	case failed > 0:
 		msg, more := errorLine(last)
 		if more {
@@ -897,6 +901,13 @@ func (h *home) outcome(name string, errs []error) string {
 		return name + ": " + strings.Join(h.counts, ", ")
 	}
 	return name + ": done"
+}
+
+// failureCount reports whether part, one of the counts of a command (see
+// Deps.counts), counts failures ("1 failed", "2 failures"): the counts then
+// tell the failure of the command.
+func failureCount(part string) bool {
+	return strings.HasSuffix(part, " failed") || strings.HasSuffix(part, " failure") || strings.HasSuffix(part, " failures")
 }
 
 // homeReport returns the report view of the action name on the bundle
