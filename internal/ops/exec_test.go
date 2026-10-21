@@ -280,3 +280,25 @@ func TestExecuteRecoversPanics(t *testing.T) {
 		t.Fatalf("b = %+v", s.Results[1])
 	}
 }
+
+// The error of a summary carries the errors of its failed results, so that
+// a CleanupError among them is found (errors.As): an interrupted command
+// whose cleanup failed is a failure (B62 H4 review). Its message is
+// unchanged.
+func TestSummaryErrCarriesResultErrors(t *testing.T) {
+	t.Parallel()
+	ce := &CleanupError{Err: context.Canceled, Msg: "clone interrupted (cleaning up x also failed: boom)"}
+	s := Summary{Results: []Result{
+		{Repo: "a", Status: StatusFailed, Err: ce},
+		{Repo: "b", Status: StatusFailed, Err: context.Canceled},
+		{Repo: "c", Status: StatusDone},
+	}}
+	err := s.Err()
+	var got *CleanupError
+	if err == nil || err.Error() != "2 of 3 repositories failed" || !errors.As(err, &got) || got != ce {
+		t.Fatalf("Err() = %v (CleanupError found: %v), want \"2 of 3 repositories failed\" carrying the CleanupError", err, got != nil)
+	}
+	if err := (Summary{Results: []Result{{Repo: "c", Status: StatusDone}}}).Err(); err != nil {
+		t.Fatalf("no failure: Err() = %v", err)
+	}
+}

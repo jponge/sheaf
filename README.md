@@ -801,6 +801,11 @@ the other commands with `-j 1`. In TUI mode git never gets the terminal.
   (its progress views say `^C cancel`); a SIGINT sent with `kill -INT`
   cannot be told apart from Ctrl-C and does the same. SIGTERM and SIGHUP
   end sheaf (exit status 130), action or not.
+- When the cleanup of interrupted work fails too (e.g. a partial clone
+  that cannot be deleted, an adopt that cannot be rolled back), this is
+  a failure: sheaf prints the error and exits with 1 rather than
+  `interrupted` and 130; the home screen reports the action as failed
+  (`<action> failed: ...`) rather than interrupted.
 - `update` lets a running fast-forward merge finish after the first Ctrl-C
   (interrupting it would leave a half-updated work tree) and starts no new
   one.

@@ -815,15 +815,19 @@ func (h *home) commandIn(dir string, args ...string) error {
 // "(see report)" when the report has more), or the counts when the action
 // ran several times. An action that failed or was cancelled once
 // interrupted (its context cancelled, see act; e.g. a question answered
-// with ctrl+c) is "<command>: interrupted", whatever the errors,
-// which are not printed (as execute prints "interrupted" instead), and
+// with ctrl+c) is "<command>: interrupted", or "<command>: <n> done, <m>
+// interrupted" when it ran several times and some runs finished; its
+// errors are not printed (as execute prints "interrupted" instead), and it
 // counts as cancelled for the report view (see loop): what the action
-// printed tells what happened.
+// printed tells what happened. A cleanup or rollback that failed (see
+// cleanupFailed) is a failure, never just "interrupted": the errors are
+// then printed (those of work stopped by the interruption excepted) and
+// reported as without interruption.
 func (h *home) outcome(name string, errs []error) string {
 	name = homeCommand(name)
 	var done, cancelled, failed int
 	var last error
-	interrupted := h.actx.Err() != nil
+	interrupted := h.actx.Err() != nil && !slices.ContainsFunc(errs, cleanupFailed)
 	for _, err := range errs {
 		switch {
 		case err == nil:
@@ -833,7 +837,7 @@ func (h *home) outcome(name string, errs []error) string {
 		default:
 			failed++
 			last = err
-			if !interrupted {
+			if !interrupted && (h.actx.Err() == nil || !ops.Interrupted(err)) {
 				fmt.Fprintln(io.MultiWriter(h.c.ErrOrStderr(), &h.output), "sheaf:", err)
 			}
 		}
@@ -842,6 +846,9 @@ func (h *home) outcome(name string, errs []error) string {
 	switch {
 	case interrupted && done < len(errs):
 		h.ran = false
+		if done > 0 {
+			return fmt.Sprintf("%s: %d done, %d interrupted", name, done, len(errs)-done)
+		}
 		return name + ": interrupted"
 	case len(errs) > 1:
 		return fmt.Sprintf("%s: %d done, %d cancelled, %d failed", name, done, cancelled, failed)

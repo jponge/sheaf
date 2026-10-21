@@ -168,13 +168,30 @@ func (s Summary) Count(st Status) int {
 }
 
 // Err returns nil when no task failed, and an error counting the failures
-// otherwise.
+// otherwise, which wraps their errors (see summaryError).
 func (s Summary) Err() error {
 	if n := s.Count(StatusFailed); n > 0 {
-		return fmt.Errorf("%d of %d repositories failed", n, len(s.Results))
+		e := &summaryError{msg: fmt.Sprintf("%d of %d repositories failed", n, len(s.Results))}
+		for _, r := range s.Results {
+			if r.Status == StatusFailed && r.Err != nil {
+				e.errs = append(e.errs, r.Err)
+			}
+		}
+		return e
 	}
 	return nil
 }
+
+// summaryError is the error of a Summary: its message counts the failures,
+// and it wraps their errors, so that callers find a CleanupError among
+// them (errors.As).
+type summaryError struct {
+	msg  string
+	errs []error
+}
+
+func (e *summaryError) Error() string   { return e.msg }
+func (e *summaryError) Unwrap() []error { return e.errs }
 
 // runRecovering runs t, turning a panic into an error carrying the panic
 // value and the stack, so one task cannot crash the process.

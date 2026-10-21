@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/testutil"
 	"github.com/spf13/cobra"
 )
@@ -72,6 +73,30 @@ func TestInterruptedCommandExits130(t *testing.T) {
 	}})
 	if code := execute(root, nil, []string{"probe"}); code != 130 || !strings.Contains(errb.String(), "interrupted") {
 		t.Fatalf("exit %d, stderr %q; want 130 and \"interrupted\"", code, errb.String())
+	}
+}
+
+// A command interrupted whose error carries a CleanupError (a cleanup or
+// rollback that failed) failed: execute prints the error and exits with 1,
+// not "interrupted" and 130 (B62 H4 review).
+func TestInterruptedCommandWithCleanupErrorFails(t *testing.T) {
+	net := make(chan os.Signal, 1)
+	signal.Notify(net, syscall.SIGINT)
+	defer signal.Stop(net)
+	ce := &ops.CleanupError{Err: context.Canceled, Msg: "clone interrupted (cleaning up /b/x also failed: boom)"}
+	var errb bytes.Buffer
+	root := NewRootCmd(Streams{Out: &bytes.Buffer{}, Err: &errb})
+	root.AddCommand(&cobra.Command{Use: "probe", RunE: func(c *cobra.Command, _ []string) error {
+		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+		select {
+		case <-c.Context().Done():
+			return ops.Summary{Results: []ops.Result{{Repo: "x", Status: ops.StatusFailed, Err: ce}}}.Err()
+		case <-time.After(5 * time.Second):
+			return errors.New("not cancelled")
+		}
+	}})
+	if code := execute(root, nil, []string{"probe"}); code != 1 || errb.String() != "sheaf: 1 of 1 repositories failed\n" {
+		t.Fatalf("exit %d, stderr %q; want 1 and the error", code, errb.String())
 	}
 }
 

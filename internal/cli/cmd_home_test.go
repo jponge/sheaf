@@ -15,6 +15,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/spf13/cobra"
 
 	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/hosting"
@@ -462,6 +463,53 @@ func TestHomeCtrlCInActionPromptReturnsToOverview(t *testing.T) {
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || strings.Contains(errs, "interrupted") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+}
+
+// The outcome of an interrupted action (its context cancelled): an error
+// carrying a CleanupError is a failure (message, error printed, report
+// view), never just "interrupted" (B62 H4 review); other errors after the
+// interruption are "interrupted", not printed, and the report view depends
+// on the output alone; an action that ran several times counts the runs
+// that finished.
+func TestHomeOutcomeAfterInterruption(t *testing.T) {
+	t.Parallel()
+	ce := &ops.CleanupError{Err: context.Canceled, Msg: "clone interrupted (cleaning up /b/x also failed: boom)"}
+	cleanup := ops.Summary{Results: []ops.Result{{Repo: "x", Status: ops.StatusFailed, Err: ce}, {Repo: "y", Status: ops.StatusFailed, Err: context.Canceled}}}.Err()
+	interrupted := ops.Summary{Results: []ops.Result{{Repo: "y", Status: ops.StatusFailed, Err: context.Canceled}}}.Err()
+	for _, c := range []struct {
+		name, action string
+		errs         []error
+		msg, printed string // printed: "" for nothing
+		ran          bool
+	}{
+		{"cleanup failed", "sync", []error{cleanup}, "sync failed: 2 of 2 repositories failed", "sheaf: 2 of 2 repositories failed\n", true},
+		{"cleanup failed, wrapped", "sync", []error{errors.Join(errors.New("sync: 1 failed"), ce)}, "sync failed: sync: 1 failed (see report)", "sheaf: sync: 1 failed\n" + ce.Msg + "\n", true},
+		{"interrupted", "fetch", []error{interrupted}, "fetch: interrupted", "", false},
+		{"interrupted, untyped", "update", []error{errors.New("update: 2 interrupted")}, "update: interrupted", "", false},
+		{"interrupted question", "remove", []error{errCancelled}, "wt rm: interrupted", "", false},
+		{"several, some done", "remove", []error{nil, nil, context.Canceled}, "wt rm: 2 done, 1 interrupted", "", false},
+		{"several, none done", "remove", []error{context.Canceled, errCancelled}, "wt rm: interrupted", "", false},
+		{"several, cleanup failed", "remove", []error{nil, ce}, "wt rm: 1 done, 0 cancelled, 1 failed", "sheaf: " + ce.Msg + "\n", true},
+		{"several, cleanup failed, one interrupted", "remove", []error{context.Canceled, ce}, "wt rm: 0 done, 0 cancelled, 2 failed", "sheaf: " + ce.Msg + "\n", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			actx, cancel := context.WithCancel(context.Background())
+			cancel()
+			var errb bytes.Buffer
+			cmd := &cobra.Command{}
+			cmd.SetErr(&errb)
+			h := &home{c: cmd, s: &tuiSession{ctx: context.Background()}, actx: actx}
+			if got := h.outcome(c.action, c.errs); got != c.msg {
+				t.Errorf("message %q, want %q", got, c.msg)
+			}
+			if errb.String() != c.printed || h.output.String() != c.printed {
+				t.Errorf("printed %q, captured %q; want %q", errb.String(), h.output.String(), c.printed)
+			}
+			if h.ran != c.ran || h.succeeded {
+				t.Errorf("ran %v, succeeded %v; want ran %v, not succeeded", h.ran, h.succeeded, c.ran)
+			}
+		})
 	}
 }
 

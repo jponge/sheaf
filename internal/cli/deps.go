@@ -356,7 +356,8 @@ var cancelSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
 
 // execute runs cmd with args under a context cancelled by the first of
 // cancelSignals, and returns the exit code: 130 with "interrupted" when the
-// command failed after such a signal; during an action of the home screen,
+// command failed after such a signal (1 with the error when a cleanup or
+// rollback failed too, see cleanupFailed); during an action of the home screen,
 // SIGINT (ctrl+c outside the raw mode of a TUI program, or `kill -INT`,
 // which sheaf cannot tell apart) cancels the action only (see
 // interruptCtl.beginAction). A second signal (or TUI ctrl+c, see
@@ -412,7 +413,7 @@ func execute(cmd *cobra.Command, ctl *interruptCtl, args []string) int {
 		return 141
 	}
 	if err != nil {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil && !cleanupFailed(err) {
 			fmt.Fprintln(cmd.ErrOrStderr(), "sheaf: interrupted")
 			return 130
 		}
@@ -420,6 +421,14 @@ func execute(cmd *cobra.Command, ctl *interruptCtl, args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// cleanupFailed reports whether err carries an ops.CleanupError: work
+// stopped (e.g. by an interruption) whose cleanup or rollback failed too,
+// which is a failure, never just an interruption.
+func cleanupFailed(err error) bool {
+	var c *ops.CleanupError
+	return errors.As(err, &c)
 }
 
 // UseTUI reports whether a command should run its TUI: only when both in
