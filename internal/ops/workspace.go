@@ -32,10 +32,20 @@ func FindBundle(flag, cwd string) (string, error) {
 	}
 	fi, err := os.Stat(filepath.Join(root, bundle.FileName))
 	if err != nil || !fi.Mode().IsRegular() {
-		return "", fmt.Errorf("%s is not a bundle: no %s in it", flag, bundle.FileName)
+		return "", notABundleError{flag}
 	}
 	return root, nil
 }
+
+// notABundleError is the error of FindBundle for a --bundle directory
+// without sheaf.yaml: it matches bundle.ErrNotFound.
+type notABundleError struct{ dir string }
+
+func (e notABundleError) Error() string {
+	return fmt.Sprintf("%s is not a bundle: no %s in it", e.dir, bundle.FileName)
+}
+
+func (e notABundleError) Unwrap() error { return bundle.ErrNotFound }
 
 // Workspace is an open bundle: its resolved root and its metadata. Metadata
 // changes go through update, which serializes them (within the process and,

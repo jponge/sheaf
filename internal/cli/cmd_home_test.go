@@ -129,9 +129,17 @@ func TestBareSheafPlainBehavesAsANonRunnableRoot(t *testing.T) {
 func TestBareSheafOutsideABundlePrintsHint(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t) // the working directory is not in a bundle
+	// The hint lines fit 80 columns (V3 review: one line of 94 columns
+	// wrapped inside a word).
+	hint := "hint: create one with `sheaf create [dir]`\n" +
+		"hint: or adopt existing checkouts with `sheaf init [dir]`\n"
 	want := "sheaf: not in a bundle: no sheaf.yaml found in " + e.cwd + " or any parent directory\n" +
-		"hint: create one with `sheaf create [dir]`, or `sheaf init [dir]` to adopt existing checkouts\n" +
-		"hint: `sheaf --help` lists the commands\n"
+		hint + "hint: `sheaf --help` lists the commands\n"
+	for _, l := range strings.Split(hint, "\n") {
+		if len(l) > 80 {
+			t.Errorf("hint line of %d columns: %q", len(l), l)
+		}
+	}
 	var out syncBuffer
 	errs, code := runHomeWith(t, e.deps(), newScript(t, false), &out)
 	if code != 0 || errs != "" {
@@ -146,13 +154,18 @@ func TestBareSheafOutsideABundlePrintsHint(t *testing.T) {
 		}
 	}
 	if out, errs, code := e.run(t, "status"); code != 1 || out != "" ||
-		errs != "sheaf: no sheaf.yaml found in "+e.cwd+" or any parent directory\nhint: create one with `sheaf create [dir]`, or `sheaf init [dir]` to adopt existing checkouts\n" {
+		errs != "sheaf: no sheaf.yaml found in "+e.cwd+" or any parent directory\n"+hint {
 		t.Fatalf("status: exit %d\nstdout:\n%s\nstderr:\n%s", code, out, errs)
 	}
-	// An explicit --bundle that is not a bundle is an error, as for every command.
-	_, code = runHomeWith(t, e.deps(), newScript(t, false), &out, "--bundle", e.cwd)
-	if code != 1 {
-		t.Fatalf("--bundle on a non-bundle: exit %d", code)
+	// An explicit --bundle that is not a bundle is an error, as for every
+	// command, with the same hint.
+	if out, errs, code := e.run(t, "--bundle", e.cwd, "status"); code != 1 || out != "" ||
+		errs != "sheaf: "+e.cwd+" is not a bundle: no sheaf.yaml in it\n"+hint {
+		t.Fatalf("status --bundle: exit %d\nstdout:\n%s\nstderr:\n%s", code, out, errs)
+	}
+	errs, code = runHomeWith(t, e.deps(), newScript(t, false), &out, "--bundle", e.cwd)
+	if code != 1 || !strings.HasSuffix(errs, " is not a bundle: no sheaf.yaml in it\n"+hint) {
+		t.Fatalf("--bundle on a non-bundle: exit %d, stderr %q", code, errs)
 	}
 }
 

@@ -25,8 +25,9 @@ import (
 
 // notInBundleHint follows the errors that say no bundle was found (see
 // bundle.ErrNotFound): what bare sheaf prints outside a bundle, and every
-// command needing a bundle that ran outside one (see execute).
-const notInBundleHint = "hint: create one with `sheaf create [dir]`, or `sheaf init [dir]` to adopt existing checkouts"
+// command needing a bundle that ran outside one or with a --bundle that is
+// not one (see execute). Its lines fit 80 columns.
+const notInBundleHint = "hint: create one with `sheaf create [dir]`\nhint: or adopt existing checkouts with `sheaf init [dir]`"
 
 // cdFileVar names the file in which the shell function defined by
 // shell-init expects the directory to change to (see runHome).
@@ -85,7 +86,7 @@ func runHome(c *cobra.Command, d Deps) error {
 		return err
 	}
 	root, err := ops.FindBundle(o.Bundle, wd)
-	if errors.Is(err, bundle.ErrNotFound) {
+	if errors.Is(err, bundle.ErrNotFound) && o.Bundle == "" {
 		fmt.Fprintf(c.OutOrStdout(), "sheaf: not in a bundle: %v\n%s\nhint: `sheaf --help` lists the commands\n", err, notInBundleHint)
 		return nil
 	}

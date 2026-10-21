@@ -373,16 +373,19 @@ zsh or fish); the key help then says `enter path` rather than
 the processes it starts (git, hooks, `sheaf run` commands) never see it.
 
 Outside a bundle (no `sheaf.yaml` in the working directory or a parent),
-bare `sheaf`, with a terminal or not, prints three lines and exits with 0:
+bare `sheaf`, with a terminal or not, prints four lines and exits with 0:
 
 ```
 sheaf: not in a bundle: no sheaf.yaml found in /home/me/src or any parent directory
-hint: create one with `sheaf create [dir]`, or `sheaf init [dir]` to adopt existing checkouts
+hint: create one with `sheaf create [dir]`
+hint: or adopt existing checkouts with `sheaf init [dir]`
 hint: `sheaf --help` lists the commands
 ```
 
-A command that needs a bundle fails there with its error and the same
-`hint: create one ...` line. Inside a bundle, with `--no-tui` or without
+A command that needs a bundle fails there, or with a `--bundle` directory
+without `sheaf.yaml`, with its error and the same two `hint: ...create
+one` / `...adopt` lines on standard error (`doctor` runs anyway and gives
+its own hint). Inside a bundle, with `--no-tui` or without
 a terminal, bare `sheaf` prints the help.
 
 ## Command reference
