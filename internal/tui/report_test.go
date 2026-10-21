@@ -146,7 +146,8 @@ func TestReportWrapsAndFitsSmallWindows(t *testing.T) {
 // to its text column (B52 E2: they started at column 0, under the level
 // words): after the level word marked by WithLevels and its padding, else
 // after the line's indentation and a first word ending with ":" (a label,
-// e.g. "hint:" or "sheaf:") or followed by two spaces or more (a padded
+// e.g. "hint:" or "sheaf:", at most 12 columns wide and without "/", not a
+// path) or followed by two spaces or more (a padded
 // column), and at least 2 columns; at most half the width. Lines break at
 // spaces only, never inside a token (paths and options contain "-"), unless
 // a token is wider than the room, which is then broken at the width;
@@ -180,6 +181,13 @@ func TestReportIndentsContinuationLines(t *testing.T) {
 		{"      hint: cd " + path + " && gh repo set-default acme/web", len("      hint: ")},
 		{"failed   web/main  " + path + "      ", len("failed   ")},                  // trailing spaces
 		{strings.ReplaceAll(words("INFO  delta: note"), " w", "  w"), len("INFO  ")}, // double spaces
+		// A first word ending with ":" is a label only if at most 12
+		// columns wide and without "/" (B62 M1: sync's refusal line, a path
+		// ending with ":", indented its continuation lines under the path).
+		{"  " + path + "/main: the GitHub API cannot see acme/old but its remote still answers: check gh authentication scope (not removed)", 2},
+		{words("thirteen-col: x"), 2},
+		{words("api/main: z"), 2},
+		{words("twelve-cols: y"), len("twelve-cols: ")},
 	}
 	var lines []string
 	for _, c := range cases {

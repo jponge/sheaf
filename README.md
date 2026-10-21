@@ -318,9 +318,9 @@ again (except for `b`, whose outcome fits in the overview's message) in a
 report view on the alternate screen, titled
 `sheaf <action>: <bundle>`, whether the action succeeded, failed or changed
 nothing. Lines wider than the terminal wrap, their continuation lines
-indented under the text (after the level word or label, e.g. `OK`, `done`,
-`hint:`). Up/down (k/j) and the mouse wheel scroll it, pgup/pgdown
-(b/space) by a page, home/end (g/G) jump to the top or the bottom; q, esc or
+indented under the text (after the level word or a short label, e.g. `OK`,
+`done`, `hint:`; by 2 columns after a path). Up/down (k/j) and the mouse
+wheel scroll it, pgup/pgdown (b/space) by a page, home/end (g/G) jump to the top or the bottom; q, esc or
 enter returns to the overview (other keys are ignored), ctrl+c exits with
 130. An action cancelled in its
 dialog, menu or prompt (enter in the `sync` menu with nothing selected

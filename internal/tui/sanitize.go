@@ -39,8 +39,9 @@ func deleteLastWord(s string) string {
 }
 
 // wrap splits s into lines at most width cells wide, breaking at spaces
-// and, for words longer than width, inside words. width <= 0 disables
-// wrapping. Trailing spaces of the lines are removed.
+// and, for words longer than width (than the room after the indentation of
+// s on the first line), inside words. width <= 0 disables wrapping.
+// Trailing spaces of the lines are removed.
 func wrap(s string, width int) []string {
 	if width <= 0 || lipgloss.Width(s) <= width {
 		return []string{s}
@@ -51,14 +52,23 @@ func wrap(s string, width int) []string {
 		out = append(out, strings.TrimRight(line, " "))
 		line = ""
 	}
+	// lead returns the indentation of s while the first line holds nothing
+	// else, if it leaves room for a character: it is kept before a word
+	// broken there instead of making a blank first line.
+	lead := func() string {
+		if len(out) == 0 && strings.TrimLeft(line, " ") == "" && lipgloss.Width(line) < width {
+			return line
+		}
+		return ""
+	}
 	for _, word := range strings.SplitAfter(s, " ") {
-		for lipgloss.Width(strings.TrimRight(word, " ")) > width {
-			if line != "" {
+		for pad := lead(); lipgloss.Width(pad+strings.TrimRight(word, " ")) > width; pad = lead() {
+			if line != "" && pad == "" {
 				flush()
 			}
-			head, rest := splitAtWidth(word, width)
-			out = append(out, head)
-			word = rest
+			head, rest := splitAtWidth(word, width-lipgloss.Width(pad))
+			out = append(out, pad+head)
+			line, word = "", rest
 		}
 		if line != "" && lipgloss.Width(line+strings.TrimRight(word, " ")) > width {
 			flush()

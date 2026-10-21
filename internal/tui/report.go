@@ -127,14 +127,23 @@ func (m Report) styled(i int, s string) string {
 	return s[:k.Start] + m.styles.Level(k.Level).Render(s[k.Start:end]) + s[end:]
 }
 
+// maxLabelWidth is the width of the widest first word ending with ":" that
+// textColumn takes for a label.
+const maxLabelWidth = 12
+
 // textColumn returns the column at which the text of line l starts: after
-// its indentation and, when its first word ends with ":" (a label, e.g.
-// "hint:" or "sheaf:") or is followed by at least two spaces (a padded
-// column, e.g. "OK    "), after that word and the spaces following it.
+// its indentation and, when its first word is a label (ends with ":", is
+// at most maxLabelWidth columns wide and has no "/", e.g. "hint:" or
+// "sheaf:", not a path such as "/x/main:") or is followed by at least two
+// spaces (a padded column, e.g. "OK    "), after that word and the spaces
+// following it.
 func textColumn(l string) int {
 	rest := strings.TrimLeft(l, " ")
 	col := len(l) - len(rest)
-	if word, _, ok := strings.Cut(rest, " "); ok && (strings.HasSuffix(word, ":") || strings.HasPrefix(rest[len(word):], "  ")) {
+	label := func(word string) bool {
+		return strings.HasSuffix(word, ":") && ansi.StringWidth(word) <= maxLabelWidth && !strings.Contains(word, "/")
+	}
+	if word, _, ok := strings.Cut(rest, " "); ok && (label(word) || strings.HasPrefix(rest[len(word):], "  ")) {
 		after := strings.TrimLeft(rest[len(word):], " ")
 		col += ansi.StringWidth(rest[:len(rest)-len(after)])
 	}
@@ -251,7 +260,7 @@ func (m Report) wrapped() []string {
 		head := wrap(l, m.width)[0]
 		out = append(out, m.styled(i, head))
 		indent := min(max(m.indents[i], 2), m.width/2)
-		for _, c := range wrap(l[len(head):], m.width-indent) {
+		for _, c := range wrap(strings.TrimLeft(l[len(head):], " "), m.width-indent) {
 			// Spaces at a break (e.g. trailing spaces) are not shown, nor
 			// is a line of spaces only.
 			if c = strings.TrimLeft(c, " "); c != "" {
