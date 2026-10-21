@@ -213,11 +213,11 @@ func pruneCommand(ctx context.Context, root string, opts ops.PruneOptions) strin
 }
 
 // printPrune prints the plan and results of prune; a dry run ends with
-// rerun, the command line that prunes.
+// rerun, the command line that prunes. Worktrees pinned at a tag, never
+// candidates, are left out of its skips (--json lists them).
 func printPrune(out io.Writer, plan ops.PrunePlan, results []ops.PruneResult, dryRun bool, rerun string) {
 	for _, s := range plan.Skipped {
 		if s.Tag != "" {
-			fmt.Fprintf(out, "skipped %s (tag %s): %s\n", s.Repo, s.Tag, s.Reason)
 			continue
 		}
 		fmt.Fprintf(out, "skipped %s/%s: %s\n", s.Repo, s.Branch, s.Reason)

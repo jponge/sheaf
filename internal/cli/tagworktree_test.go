@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
@@ -102,9 +103,19 @@ func TestWorktreeAddTagCLI(t *testing.T) {
 		t.Errorf("update --strict:\n%s", up)
 	}
 
-	// prune lists it as skipped.
-	if pr := e.mustRun(t, "prune"); !strings.Contains(pr, "skipped a (tag release/1.0): pinned at tag release/1.0") {
+	// prune never proposes it: its text output does not mention it (B62
+	// M9: a line on every prune), --json lists it as skipped.
+	if pr := e.mustRun(t, "prune"); pr != "nothing to prune\n" {
 		t.Errorf("prune:\n%s", pr)
+	}
+	var pdoc struct {
+		Skipped []ops.PruneSkip `json:"skipped"`
+	}
+	if err := json.Unmarshal([]byte(e.mustRun(t, "prune", "--json")), &pdoc); err != nil {
+		t.Fatal(err)
+	}
+	if len(pdoc.Skipped) != 2 || pdoc.Skipped[0].Tag != "release/1.0" || !strings.HasPrefix(pdoc.Skipped[0].Reason, "pinned at tag release/1.0") || pdoc.Skipped[1].Tag != "v1" {
+		t.Errorf("prune --json skipped: %+v", pdoc.Skipped)
 	}
 
 	// path by tag and by directory.

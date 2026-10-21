@@ -665,7 +665,8 @@ names the bundle only when `--bundle` was given. That is the
 case in TUI mode, without `--yes`, and always for the `--offline` hints
 (offline, the stale remote-tracking refs that the failed fetch could not
 refresh count, so the plan must be confirmed again), the hints about pull
-request and tag worktrees that `prune` skips, the `sheaf remove` hints of
+request worktrees that `prune` skips (and about tag worktrees, in its
+`--json` skips), the `sheaf remove` hints of
 `sync --remove-gone` (its `--yes` confirms removing gone repositories, not
 forcing past their risks) and the `sheaf remove` that `wt rm` suggests for
 a primary checkout.
@@ -753,9 +754,11 @@ never the branch. Tags of tag worktrees are always kept.
 **`prune`** has no `--force`: a worktree with uncommitted changes or
 untracked files is kept (ignored files do not block it). It never touches
 the primary checkout, worktrees outside the repository directory (not a
-direct child of it, see above), locked worktrees, tag worktrees, or `wt pr`
-branches. A branch without commits of its own is never considered merged; a
-branch being rebased or bisected counts as in use.
+direct child of it, see above), locked worktrees, tag worktrees (never
+candidates, so its text output does not mention them; `--json` lists them
+in `skipped`), or `wt pr` branches. A branch without commits of its own
+is never considered merged; a branch being rebased or bisected counts as in
+use.
 
 ## TUI and plain mode
 
