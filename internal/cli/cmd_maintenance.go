@@ -261,6 +261,21 @@ func printPrune(out io.Writer, plan ops.PrunePlan, results []ops.PruneResult, dr
 	fmt.Fprintln(out)
 }
 
+// pruneCounts returns the counts of results as printPrune counts them, the
+// zero ones left out (see countParts).
+func pruneCounts(results []ops.PruneResult) []string {
+	n := map[ops.PruneOutcome]int{}
+	interrupted := 0
+	for _, r := range results {
+		n[r.Outcome]++
+		if r.Outcome == ops.PruneFailed && interruptedErr(r.Err) {
+			interrupted++
+		}
+	}
+	return countParts(count{n[ops.PruneRemoved], "removed"}, count{n[ops.PruneKept], "kept"},
+		count{n[ops.PruneFailed] - interrupted, "failed"}, count{interrupted, "interrupted"})
+}
+
 // pruneCandidateLines describes what pruning c would do (a dry run), or
 // will do (a confirmation), with its notes. A branch without worktree, or
 // the branch of a worktree with deleteBranches (--delete-branches), is

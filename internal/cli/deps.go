@@ -53,6 +53,11 @@ type Deps struct {
 	// and the command ended without error (sync): the home screen counts
 	// that as a cancellation.
 	cancelled func()
+	// counts, if set, is told the counts of what a command did, as its
+	// summary counts them, the zero ones left out (e.g. "1 fast-forwarded",
+	// "1 skipped (diverged)"; see countParts): the home screen reports them
+	// rather than "done".
+	counts func(parts []string)
 	// term, if set, replaces standard output as the terminal on which TUI
 	// programs render and which decides the TUI mode (see tuiMode): the
 	// home screen captures what its actions print for its report view.
@@ -87,6 +92,14 @@ type Deps struct {
 func (d Deps) reportUnchanged(note string) {
 	if d.unchanged != nil {
 		d.unchanged(note)
+	}
+}
+
+// reportCounts tells d.counts, if set, the counts of what the command did
+// (see countParts), if any.
+func (d Deps) reportCounts(parts []string) {
+	if d.counts != nil && len(parts) > 0 {
+		d.counts(parts)
 	}
 }
 

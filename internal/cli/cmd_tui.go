@@ -100,6 +100,7 @@ func tuiUpdate(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.UpdateOption
 	if uerr != nil {
 		return uerr
 	}
+	d.reportCounts(updateCounts(r))
 	out := d.leveled(c, c.OutOrStdout())
 	defer flush(out)
 	return printUpdateSummary(out, r, strict)
@@ -254,6 +255,7 @@ func tuiWorktreeRemove(c *cobra.Command, d Deps, w *ops.Workspace, repo string, 
 	if rerr != nil {
 		return rerr
 	}
+	d.reportCounts(countParts(count{1, "removed"}))
 	fmt.Fprintln(c.OutOrStdout(), msg)
 	return nil
 }
@@ -283,12 +285,20 @@ func tuiWorktreeRemoveMany(c *cobra.Command, d Deps, w *ops.Workspace, items []o
 		return []error{errCancelled}
 	}
 	var errs []error
+	var removed, failed, interrupted int
 	for _, r := range results {
-		if r.Err == nil {
+		switch {
+		case r.Err == nil:
+			removed++
 			fmt.Fprintln(c.OutOrStdout(), r.Message)
+		case interruptedErr(r.Err):
+			interrupted++
+		default:
+			failed++
 		}
 		errs = append(errs, r.Err)
 	}
+	d.reportCounts(countParts(count{removed, "removed"}, count{failed, "failed"}, count{interrupted, "interrupted"}))
 	return errs
 }
 
@@ -358,6 +368,7 @@ func tuiPrune(c *cobra.Command, d Deps, w *ops.Workspace, opts ops.PruneOptions,
 	if len(plan.Candidates) == 0 {
 		d.reportUnchanged("nothing to prune")
 	}
+	d.reportCounts(pruneCounts(results))
 	out := d.leveled(c, c.OutOrStdout())
 	defer flush(out)
 	printPrune(out, plan, results, false, "")
@@ -452,5 +463,18 @@ func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noF
 		printFailureDetails(c.ErrOrStderr(), rmSum)
 		errs = append(errs, printSummary(out, rmSum))
 	}
+	var skipped, failed, interrupted int
+	for _, r := range slices.Concat(addSum.Results, rmSum.Results) {
+		switch {
+		case r.Status == ops.StatusSkipped:
+			skipped++
+		case r.Status == ops.StatusFailed && interruptedErr(r.Err):
+			interrupted++
+		case r.Status == ops.StatusFailed:
+			failed++
+		}
+	}
+	d.reportCounts(countParts(count{addSum.Count(ops.StatusDone), "added"}, count{rmSum.Count(ops.StatusDone), "removed"},
+		count{skipped, "skipped"}, count{failed, "failed"}, count{interrupted, "interrupted"}))
 	return errors.Join(errs...)
 }

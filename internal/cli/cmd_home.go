@@ -171,6 +171,9 @@ type home struct {
 	// (see command); both reset before each action.
 	unchanged string
 	output    bytes.Buffer
+	// counts are the counts of what the last command did (see
+	// Deps.counts), reset before each action.
+	counts []string
 }
 
 // homeRow is what a row of the overview shows: a checkout, or a problem.
@@ -606,7 +609,7 @@ func (h *home) act(name string, targets []string) string {
 	actx, end := h.s.ctl.beginAction(h.s.ctx)
 	defer end()
 	h.action, h.actx = name, actx
-	h.unchanged = ""
+	h.unchanged, h.counts = "", nil
 	h.output.Reset()
 	if !skipsProblems(name) {
 		return h.run(name, targets)
@@ -675,6 +678,7 @@ func (h *home) inline(name string) (*cobra.Command, Deps) {
 	c.SetContext(h.actx)
 	d := h.d
 	d.ctl, d.term, d.windowTitle = h.s.ctl, h.s.out, homeTitle(name, h.root)
+	d.counts = func(parts []string) { h.counts = parts }
 	return c, d
 }
 
@@ -793,6 +797,7 @@ func (h *home) commandIn(dir string, args ...string) error {
 	d.term = h.s.out
 	d.windowTitle = homeTitle(h.action, h.root)
 	d.unchanged = func(note string) { h.unchanged = note }
+	d.counts = func(parts []string) { h.counts = parts }
 	cancelled := false
 	d.cancelled = func() { cancelled = true }
 	out := teeWriter{io.MultiWriter(h.c.OutOrStdout(), &h.output), h.c.OutOrStdout()}
@@ -809,11 +814,14 @@ func (h *home) commandIn(dir string, args ...string) error {
 // outcome prints the errors of an action to standard error and h.output
 // like execute does (cancellations excepted) and returns the message for
 // the overview, with the command the action ran (see homeCommand):
-// "<command>: done", "<command>: <note>" when the command changed nothing
-// (e.g. "prune: nothing to prune"), "<command>: cancelled", "<command>
-// failed: <error>" (the error on one line, see errorLine, followed by
-// "(see report)" when the report has more), or the counts when the action
-// ran several times. An action that failed or was cancelled once
+// "<command>: <counts>" with the counts the command told (see
+// Deps.counts; e.g. "update: 1 skipped (diverged)"), else "<command>:
+// done", "<command>: <note>" when the command changed nothing (e.g.
+// "prune: nothing to prune"), "<command>: cancelled", "<command> failed:
+// <error>" (the error on one line, see errorLine, followed by "(see
+// report)" when the report has more), or the counts when the action ran
+// several times (those the command told, else those of its runs), the
+// zero ones left out. An action that failed or was cancelled once
 // interrupted (its context cancelled, see act; e.g. a question answered
 // with ctrl+c) is "<command>: interrupted", or "<command>: <n> done, <m>
 // interrupted" when it ran several times and some runs finished; its
@@ -850,8 +858,10 @@ func (h *home) outcome(name string, errs []error) string {
 			return fmt.Sprintf("%s: %d done, %d interrupted", name, done, len(errs)-done)
 		}
 		return name + ": interrupted"
+	case len(errs) > 1 && len(h.counts) > 0:
+		return name + ": " + strings.Join(h.counts, ", ")
 	case len(errs) > 1:
-		return fmt.Sprintf("%s: %d done, %d cancelled, %d failed", name, done, cancelled, failed)
+		return name + ": " + strings.Join(countParts(count{done, "done"}, count{cancelled, "cancelled"}, count{failed, "failed"}), ", ")
 	case failed > 0:
 		msg, more := errorLine(last)
 		if more {
@@ -862,6 +872,8 @@ func (h *home) outcome(name string, errs []error) string {
 		return name + ": cancelled"
 	case h.unchanged != "":
 		return name + ": " + h.unchanged
+	case len(h.counts) > 0:
+		return name + ": " + strings.Join(h.counts, ", ")
 	}
 	return name + ": done"
 }

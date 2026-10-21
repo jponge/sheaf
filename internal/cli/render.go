@@ -93,6 +93,25 @@ func printSummary(w io.Writer, s ops.Summary) error {
 	return s.Err()
 }
 
+// count is a number of things that ended the same way, and how they ended
+// (e.g. "fast-forwarded").
+type count struct {
+	n     int
+	label string
+}
+
+// countParts returns "<n> <label>" for each of counts that is not zero, in
+// order (see Deps.counts).
+func countParts(counts ...count) []string {
+	var parts []string
+	for _, c := range counts {
+		if c.n != 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", c.n, c.label))
+		}
+	}
+	return parts
+}
+
 // interruptedErr reports whether err is the failure of work stopped by an
 // interruption (see ops.Interrupted; the command's context is cancelled by
 // interruptCtl, and by pipeWatch for a closed standard output).

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -479,6 +480,58 @@ func newUpdateCmd(d Deps) *cobra.Command {
 	addFilterFlags(cmd, &opts.Filter, true)
 	cmd.Flags().BoolVar(&strict, "strict", false, "exit with 1 when a checkout was skipped")
 	return cmd
+}
+
+// updateCounts returns the counts of r as printUpdateSummary counts them,
+// the zero ones left out (see countParts), the skips followed by their
+// reasons in brief (see skipReason), each once, in the order of the
+// checkouts: "1 fast-forwarded", "2 skipped (diverged, dirty)".
+func updateCounts(r ops.UpdateReport) []string {
+	var ff, upToDate, pinned, skipped, failed, interrupted int
+	var reasons []string
+	for _, u := range r.Checkouts {
+		switch {
+		case u.Outcome == gitx.PullFastForwarded:
+			ff++
+		case u.Outcome == gitx.PullUpToDate:
+			upToDate++
+		case u.Pinned:
+			pinned++
+		case u.Skipped():
+			skipped++
+			if why := skipReason(u); !slices.Contains(reasons, why) {
+				reasons = append(reasons, why)
+			}
+		case interruptedErr(u.Err):
+			interrupted++
+		default:
+			failed++
+		}
+	}
+	skips := "skipped"
+	if len(reasons) > 0 {
+		skips += " (" + strings.Join(reasons, ", ") + ")"
+	}
+	return countParts(count{ff, "fast-forwarded"}, count{upToDate, "up to date"}, count{pinned, "pinned"},
+		count{skipped, skips}, count{failed, "failed"}, count{interrupted, "interrupted"})
+}
+
+// skipReason returns why update skipped u, in brief, in the words of the
+// overview's STATE where they exist ("dirty", "upstream gone").
+func skipReason(u ops.CheckoutUpdate) string {
+	switch {
+	case len(u.UntrackedInTheWay) > 0:
+		return "untracked files"
+	case u.Outcome == gitx.PullSkippedDirty:
+		return "dirty"
+	case u.Outcome == gitx.PullSkippedDetached:
+		return "detached"
+	case u.Outcome == gitx.PullSkippedDiverged:
+		return "diverged"
+	case strings.HasPrefix(u.Reason, "upstream "): // see ops.classifyUpdate
+		return "upstream gone"
+	}
+	return "no upstream"
 }
 
 func printUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error {

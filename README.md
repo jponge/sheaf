@@ -328,8 +328,11 @@ counts as cancelled) shows no report view, unless it printed something
 (e.g. the warnings of `sync` before its menu). q, esc and enter
 pressed during the first quarter second of the view (e.g. typed while
 the action ran) are ignored, so the report is not skipped unseen. The
-overview then shows the outcome (e.g. `prune: nothing to prune` when
-nothing changed, `add failed: ...`); quitting afterwards still exits with
+overview then shows the outcome: the counts of the command's summary,
+without the zero ones (e.g. `update: 1 fast-forwarded, 1 skipped
+(diverged)`, `wt rm: 2 removed`, `prune: 1 removed`, `sync: 1 added`),
+`prune: nothing to prune` when nothing changed, `add failed: ...`,
+`<action>: done` for the others; quitting afterwards still exits with
 0. The selection is kept, except after an update, fetch or removal of the
 selected rows that succeeded.
 

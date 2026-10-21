@@ -490,8 +490,8 @@ func TestHomeOutcomeAfterInterruption(t *testing.T) {
 		{"interrupted question", "remove", []error{errCancelled}, "wt rm: interrupted", "", false},
 		{"several, some done", "remove", []error{nil, nil, context.Canceled}, "wt rm: 2 done, 1 interrupted", "", false},
 		{"several, none done", "remove", []error{context.Canceled, errCancelled}, "wt rm: interrupted", "", false},
-		{"several, cleanup failed", "remove", []error{nil, ce}, "wt rm: 1 done, 0 cancelled, 1 failed", "sheaf: " + ce.Msg + "\n", true},
-		{"several, cleanup failed, one interrupted", "remove", []error{context.Canceled, ce}, "wt rm: 0 done, 0 cancelled, 2 failed", "sheaf: " + ce.Msg + "\n", true},
+		{"several, cleanup failed", "remove", []error{nil, ce}, "wt rm: 1 done, 1 failed", "sheaf: " + ce.Msg + "\n", true},
+		{"several, cleanup failed, one interrupted", "remove", []error{context.Canceled, ce}, "wt rm: 2 failed", "sheaf: " + ce.Msg + "\n", true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			actx, cancel := context.WithCancel(context.Background())
@@ -510,6 +510,96 @@ func TestHomeOutcomeAfterInterruption(t *testing.T) {
 				t.Errorf("ran %v, succeeded %v; want ran %v, not succeeded", h.ran, h.succeeded, c.ran)
 			}
 		})
+	}
+}
+
+// The message of an action that changed something says its counts, as
+// the command told them (Deps.counts), rather than "done" (B62 M2:
+// "update: done" when the only target was skipped); a note of a command
+// that changed nothing, a failure, a cancellation and an interruption say
+// what they said before. An action that ran several times without counts
+// says the counts of its runs, without the zero ones.
+func TestHomeOutcomeFromCounts(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name, action string
+		counts       []string
+		unchanged    string
+		errs         []error
+		msg          string
+	}{
+		{"skipped", "update", []string{"1 skipped (diverged)"}, "", []error{nil}, "update: 1 skipped (diverged)"},
+		{"several counts", "update", []string{"1 fast-forwarded", "2 up to date"}, "", []error{nil}, "update: 1 fast-forwarded, 2 up to date"},
+		{"no counts", "doctor", nil, "", []error{nil}, "doctor: done"},
+		{"unchanged", "prune", nil, "nothing to prune", []error{nil}, "prune: nothing to prune"},
+		{"failed", "update", []string{"1 failed"}, "", []error{errors.New("1 of 1 checkouts failed")}, "update failed: 1 of 1 checkouts failed"},
+		{"cancelled", "remove", nil, "", []error{errCancelled}, "wt rm: cancelled"},
+		{"several runs, counts", "remove", []string{"2 removed", "1 failed"}, "", []error{nil, nil, errors.New("refused")}, "wt rm: 2 removed, 1 failed"},
+		{"several runs, no counts", "remove", nil, "", []error{nil, nil}, "wt rm: 2 done"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cmd := &cobra.Command{}
+			cmd.SetErr(io.Discard)
+			h := &home{c: cmd, s: &tuiSession{ctx: context.Background()}, actx: context.Background(), counts: c.counts, unchanged: c.unchanged}
+			if got := h.outcome(c.action, c.errs); got != c.msg {
+				t.Errorf("message %q, want %q", got, c.msg)
+			}
+		})
+	}
+}
+
+// The counts of update and prune are those of their summary lines, the
+// zero ones left out; update's skips say why, briefly (the reasons in the
+// order of the checkouts, each once).
+func TestUpdateAndPruneCounts(t *testing.T) {
+	t.Parallel()
+	co := func(dir string) ops.Checkout { return ops.Checkout{Repo: "a", Branch: dir, Dir: dir} }
+	r := ops.UpdateReport{Checkouts: []ops.CheckoutUpdate{
+		{Checkout: co("ff"), Outcome: gitx.PullFastForwarded},
+		{Checkout: co("div"), Outcome: gitx.PullSkippedDiverged, Reason: "diverged from origin/div (1 ahead, 1 behind): merge or rebase manually"},
+		{Checkout: co("dirty"), Outcome: gitx.PullSkippedDirty, Reason: "uncommitted changes"},
+		{Checkout: co("div2"), Outcome: gitx.PullSkippedDiverged, Reason: "diverged"},
+		{Checkout: co("gone"), Outcome: gitx.PullSkippedNoUpstream, Reason: "upstream origin/gone is gone (deleted on the remote)"},
+		{Checkout: co("none"), Outcome: gitx.PullSkippedNoUpstream, Reason: "no upstream branch configured"},
+		{Checkout: co("det"), Outcome: gitx.PullSkippedDetached, Reason: "detached HEAD"},
+		{Checkout: co("untracked"), Outcome: gitx.PullFailed, UntrackedInTheWay: []string{"x"}, Err: errors.New("x")},
+		{Checkout: co("tag"), Outcome: gitx.PullSkippedDetached, Pinned: true},
+		{Checkout: co("failed"), Outcome: gitx.PullFailed, Err: errors.New("boom")},
+		{Checkout: co("stopped"), Outcome: gitx.PullFailed, Err: context.Canceled},
+	}}
+	want := []string{"1 fast-forwarded", "1 pinned", "7 skipped (diverged, dirty, upstream gone, no upstream, detached, untracked files)", "1 failed", "1 interrupted"}
+	if got := updateCounts(r); !slices.Equal(got, want) {
+		t.Errorf("update counts %q, want %q", got, want)
+	}
+	if got := updateCounts(ops.UpdateReport{Checkouts: []ops.CheckoutUpdate{{Checkout: co("a"), Outcome: gitx.PullUpToDate}}}); !slices.Equal(got, []string{"1 up to date"}) {
+		t.Errorf("update counts %q", got)
+	}
+	c := ops.PruneCandidate{Repo: "a", Branch: "feat", Worktree: true, Dir: "feat"}
+	got := pruneCounts([]ops.PruneResult{
+		{PruneCandidate: c, Outcome: ops.PruneRemoved},
+		{PruneCandidate: c, Outcome: ops.PruneRemoved},
+		{PruneCandidate: c, Outcome: ops.PruneFailed, Err: context.Canceled},
+	})
+	if want := []string{"2 removed", "1 interrupted"}; !slices.Equal(got, want) {
+		t.Errorf("prune counts %q, want %q", got, want)
+	}
+	if got := pruneCounts([]ops.PruneResult{{PruneCandidate: c, Outcome: ops.PruneKept}, {PruneCandidate: c, Outcome: ops.PruneFailed, Err: errors.New("x")}}); !slices.Equal(got, []string{"1 kept", "1 failed"}) {
+		t.Errorf("prune counts %q", got)
+	}
+}
+
+// An update whose only target was skipped says so, and why, in the
+// overview's message (B62 M2): the counts go from the command to the home
+// screen.
+func TestHomeUpdateSkippedSaysWhy(t *testing.T) {
+	t.Parallel()
+	e, _, feat, _, _ := homeBundle(t)
+	writeFile(t, filepath.Join(feat, "branch-feat.txt"), "changed\n") // a tracked file: dirty
+	var out syncBuffer
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", "u"), keys(), reportKey(t, &out, "update", "q"), ovKeys(t, &out, "update: 1 skipped (dirty)", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 || !strings.Contains(out.String(), "update: 1 skipped (dirty)") {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 }
 
@@ -600,7 +690,7 @@ func TestHomeUpdateSelectedCheckoutThenReturns(t *testing.T) {
 	writeFile(t, filepath.Join(feat, "new.txt"), "") // untracked files do not block update
 	oldMain := testutil.Git(t, alpha, "rev-parse", "HEAD")
 	var out syncBuffer
-	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", " ", "u"), keys(), reportKey(t, &out, "update", "q"), ovKeys(t, &out, "update: done", 1, "q"))
+	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", " ", "u"), keys(), reportKey(t, &out, "update", "q"), ovKeys(t, &out, "update: 1 fast-forwarded", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -612,7 +702,7 @@ func TestHomeUpdateSelectedCheckoutThenReturns(t *testing.T) {
 		t.Error("alpha/main was updated although not selected")
 	}
 	o2 := out.String()
-	for _, want := range []string{"fast-forwarded  alpha/feat", "1 fast-forwarded, 0 up to date, 0 skipped, 0 failed", "update: done"} {
+	for _, want := range []string{"fast-forwarded  alpha/feat", "1 fast-forwarded, 0 up to date, 0 skipped, 0 failed", "update: 1 fast-forwarded"} {
 		if !strings.Contains(o2, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, o2)
 		}
@@ -623,7 +713,7 @@ func TestHomeUpdateSelectedCheckoutThenReturns(t *testing.T) {
 	}
 	// The summary is printed as update runs, and the report view shows it
 	// again, but not the progress view, which renders on the terminal only.
-	view, done := strings.Index(o2, "sheaf update: "), strings.Index(o2, "update: done")
+	view, done := strings.Index(o2, "sheaf update: "), strings.Index(o2, "update: 1 fast-forwarded")
 	if i := strings.Index(o2, "1 fast-forwarded"); i < 0 || i > view {
 		t.Errorf("the summary was not printed before the report view:\n%s", o2)
 	}
@@ -947,7 +1037,7 @@ func TestHomeRemoveWorktreeConfirmsAndRefusesPrimary(t *testing.T) {
 	}
 	var out syncBuffer
 	// r on the primary is refused in the overview; then r on feat, confirmed.
-	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "r"), key{keys: "j", wait: waitOutput(t, &out, "primary checkout")}, key{keys: "r"}), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "wt rm", "q"), ovKeys(t, &out, "wt rm: done", 1, "q"))
+	in := newScript(t, false, append(ovKeys(t, &out, "STATE", 1, "r"), key{keys: "j", wait: waitOutput(t, &out, "primary checkout")}, key{keys: "r"}), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "wt rm", "q"), ovKeys(t, &out, "wt rm: 1 removed", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -955,7 +1045,7 @@ func TestHomeRemoveWorktreeConfirmsAndRefusesPrimary(t *testing.T) {
 	if exists(feat) || !exists(alpha) {
 		t.Fatalf("feat not removed or primary removed\nstdout:\n%s\nstderr:\n%s", out.String(), errs)
 	}
-	for _, want := range []string{"primary checkout, not a worktree; run: sheaf remove -- alpha", "Remove worktree feat of alpha?", "wt rm: done"} {
+	for _, want := range []string{"primary checkout, not a worktree; run: sheaf remove -- alpha", "Remove worktree feat of alpha?", "wt rm: 1 removed"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out.String())
 		}
@@ -998,9 +1088,9 @@ func TestHomePruneDoctorAndSync(t *testing.T) {
 	var out syncBuffer
 	in := newScript(t, false,
 		ovKeys(t, &out, "STATE", 1, "p"), []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "prune", "q"),
-		ovKeys(t, &out, "prune: done", 1, "d"), reportKey(t, &out, "doctor", "q"),
+		ovKeys(t, &out, "prune: 1 removed", 1, "d"), reportKey(t, &out, "doctor", "q"),
 		ovKeys(t, &out, "doctor: done", 1, "s"), keys(" ", "\r"), keys("\r"), keys(), reportKey(t, &out, "sync", "q"),
-		ovKeys(t, &out, "sync: done", 1, "q"))
+		ovKeys(t, &out, "sync: 1 added", 1, "q"))
 	errs, code := runHomeWith(t, d, in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -1011,7 +1101,7 @@ func TestHomePruneDoctorAndSync(t *testing.T) {
 	if !exists(filepath.Join(root, "b", "main")) {
 		t.Errorf("sync did not add b:\n%s", out.String())
 	}
-	for _, want := range []string{"1 removed, 0 kept, 0 failed", "prune: done", "OK", "doctor: done", "sync: done"} {
+	for _, want := range []string{"1 removed, 0 kept, 0 failed", "prune: 1 removed", "OK", "doctor: done", "sync: 1 added"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out.String())
 		}
@@ -1080,7 +1170,7 @@ func TestHomeUpdateSkipsSelectedProblemRows(t *testing.T) {
 	}
 	var out syncBuffer
 	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "a", "u"), keys(), reportKey(t, &out, "update", "q"),
-		ovKeys(t, &out, "update: done · skipped 1 problem row (alpha/feat)", 1, "q"))
+		ovKeys(t, &out, "update: 1 fast-forwarded, 1 up to date · skipped 1 problem row (alpha/feat)", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -1104,7 +1194,7 @@ func TestHomeRemoveSkipsSelectedProblemRows(t *testing.T) {
 	var out syncBuffer
 	in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "j", " ", "j", " ", "r"),
 		[]key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}}, reportKey(t, &out, "wt rm", "q"),
-		ovKeys(t, &out, "wt rm: done · skipped 1 problem row (alpha/feat)", 1, "q"))
+		ovKeys(t, &out, "wt rm: 1 removed · skipped 1 problem row (alpha/feat)", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || exists(other) {
 		t.Fatalf("exit %d, other exists: %v\nstdout:\n%s\nstderr:\n%s", code, exists(other), out.String(), errs)
@@ -1145,7 +1235,7 @@ func TestHomeRemovesSelectedWorktreesAfterOneConfirmation(t *testing.T) {
 	e, feat, x, y := multiRemoveBundle(t)
 	var out syncBuffer
 	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "q"),
-		ovKeys(t, &out, "wt rm: 2 done, 0 cancelled, 1 failed", 1, "q"))
+		ovKeys(t, &out, "wt rm: 2 removed, 1 failed", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || exists(x) || exists(y) || !exists(filepath.Join(feat, "new.txt")) {
 		t.Fatalf("exit %d, x %v, y %v, feat %v\nstdout:\n%s\nstderr:\n%s", code, exists(x), exists(y), exists(feat), out.String(), errs)
@@ -1215,7 +1305,7 @@ func TestHomeMultiRemoveHintsNameTheGivenBundle(t *testing.T) {
 	e, _, _, _ := multiRemoveBundle(t)
 	var out syncBuffer
 	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "q"),
-		ovKeys(t, &out, "wt rm: 2 done, 0 cancelled, 1 failed", 1, "q"))
+		ovKeys(t, &out, "wt rm: 2 removed, 1 failed", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out, "--bundle", e.cwd)
 	// The complete line on standard error, where the refusal is printed
 	// whole (the report view, which shows it too, wraps long lines at its
@@ -1233,7 +1323,7 @@ func TestHomeMultiRemoveDialogListsTheRefusedWorktree(t *testing.T) {
 	e, _, _, _ := multiRemoveBundle(t)
 	var out syncBuffer
 	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "q"),
-		ovKeys(t, &out, "wt rm: 2 done, 0 cancelled, 1 failed", 1, "q"))
+		ovKeys(t, &out, "wt rm: 2 removed, 1 failed", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	o := ansi.Strip(out.String())
 	answered := strings.Index(o, "Removing 3 worktrees")
@@ -1254,7 +1344,7 @@ func TestHomeMultiRemoveRefusesTheWorkingDirectory(t *testing.T) {
 	d.Getwd = func() (string, error) { return x, nil }
 	var out syncBuffer
 	in := newScript(t, false, selectFeatXY(t, &out), acceptRemoval(t, &out), reportKey(t, &out, "wt rm", "q"),
-		ovKeys(t, &out, "wt rm: 2 done, 0 cancelled, 1 failed", 1, "q"))
+		ovKeys(t, &out, "wt rm: 2 removed, 1 failed", 1, "q"))
 	errs, code := runHomeWith(t, d, in, &out)
 	if code != 0 || !exists(x) || exists(y) || exists(feat) || !strings.Contains(ansi.Strip(out.String()), "it contains the current working directory") {
 		t.Fatalf("exit %d, x %v, y %v, feat %v\nstdout:\n%s\nstderr:\n%s", code, exists(x), exists(y), exists(feat), out.String(), errs)
@@ -1398,7 +1488,7 @@ func TestHomeKeepsSelectionAfterCancelledRemoval(t *testing.T) {
 	in := newScript(t, false,
 		ovKeys(t, &out, "STATE", 1, "j", " ", "r"), declineRemoval(t, &out),
 		ovKeys(t, &out, "wt rm: cancelled", 1, "r"), ovKeys(t, &out, "[y/N]", 2, "y"), reportKey(t, &out, "wt rm", "q"),
-		ovKeys(t, &out, "wt rm: done", 1, "q"))
+		ovKeys(t, &out, "wt rm: 1 removed", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 || exists(feat) {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
