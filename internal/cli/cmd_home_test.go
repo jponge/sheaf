@@ -483,7 +483,7 @@ func TestHomeOutcomeAfterInterruption(t *testing.T) {
 		msg, printed string // printed: "" for nothing
 		ran          bool
 	}{
-		{"cleanup failed", "sync", []error{cleanup}, "sync failed: 2 of 2 repositories failed", "sheaf: 2 of 2 repositories failed\n", true},
+		{"cleanup failed", "sync", []error{cleanup}, "sync failed: 2 of 2 repositories failed (see report)", "sheaf: 2 of 2 repositories failed\n", true},
 		{"cleanup failed, wrapped", "sync", []error{errors.Join(errors.New("sync: 1 failed"), ce)}, "sync failed: sync: 1 failed (see report)", "sheaf: sync: 1 failed\n" + ce.Msg + "\n", true},
 		{"interrupted", "fetch", []error{interrupted}, "fetch: interrupted", "", false},
 		{"interrupted, untyped", "update", []error{errors.New("update: 2 interrupted")}, "update: interrupted", "", false},

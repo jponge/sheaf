@@ -184,13 +184,16 @@ func (s Summary) Err() error {
 
 // summaryError is the error of a Summary: its message counts the failures,
 // and it wraps their errors, so that callers find a CleanupError among
-// them (errors.As).
+// them (errors.As). Its Summary, the message, is what the places showing
+// an error on one line show, rather than the Summary of one of its errors
+// (e.g. a RisksError).
 type summaryError struct {
 	msg  string
 	errs []error
 }
 
 func (e *summaryError) Error() string   { return e.msg }
+func (e *summaryError) Summary() string { return e.msg }
 func (e *summaryError) Unwrap() []error { return e.errs }
 
 // runRecovering runs t, turning a panic into an error carrying the panic

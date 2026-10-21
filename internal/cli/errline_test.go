@@ -37,6 +37,12 @@ func TestErrorLine(t *testing.T) {
 		{"several lines", errors.New("2 problem(s):\n  a\n  b"), "2 problem(s)", true},
 		{"refusal", risksError(), "refusing to remove old: 1 untracked file", true},
 		{"wrapped refusal", fmt.Errorf("sync: %w", risksError()), "refusing to remove old: 1 untracked file", true},
+		// The error of a summary wraps those of its rows (a CleanupError is
+		// found among them) but keeps its count, the rows being in the
+		// report (B62 H4 re-review).
+		{"summary with a refused row", ops.Summary{Results: []ops.Result{
+			{Repo: "new", Status: ops.StatusDone}, {Repo: "old", Status: ops.StatusFailed, Err: risksError()}}}.Err(),
+			"1 of 2 repositories failed", true},
 	} {
 		line, more := errorLine(tc.err)
 		if line != tc.line || more != tc.more {
