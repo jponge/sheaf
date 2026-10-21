@@ -147,7 +147,7 @@ func runSync(c *cobra.Command, d Deps, fl syncFlags) error {
 	}
 	if menu && len(orgs) > 0 {
 		// The listing may take a while before the menu: say so, as add --org.
-		fmt.Fprintf(c.ErrOrStderr(), "listing repositories of %s...\n", strings.Join(orgs, ", "))
+		fmt.Fprintf(liveOnly(c.ErrOrStderr()), "listing repositories of %s...\n", strings.Join(orgs, ", "))
 	}
 	label := "listing repositories"
 	switch {

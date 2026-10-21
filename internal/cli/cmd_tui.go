@@ -27,7 +27,7 @@ func tuiAdd(c *cobra.Command, d Deps, w *ops.Workspace, h hosting.Hosting, req o
 	out := d.leveled(c, c.OutOrStdout())
 	defer flush(out)
 	if req.Org != "" && !req.All && len(req.Repos) == 0 {
-		fmt.Fprintf(c.ErrOrStderr(), "listing repositories of %s...\n", req.Org)
+		fmt.Fprintf(liveOnly(c.ErrOrStderr()), "listing repositories of %s...\n", req.Org)
 		stop := d.spin.start("") // the line above names the phase
 		_, err := ops.Add(s.ctx, w, h, req, jobs, ops.Discard)
 		stop()
@@ -437,7 +437,7 @@ func tuiSync(c *cobra.Command, d Deps, w *ops.Workspace, rep ops.SyncReport, noF
 		}
 	}
 	if len(add) == 0 && len(gone) == 0 {
-		fmt.Fprintln(out, "nothing selected; nothing changed")
+		fmt.Fprintln(liveOnly(c.OutOrStdout()), "nothing selected; nothing changed")
 		d.reportUnchanged("nothing selected; nothing changed")
 		d.reportCancelled()
 		return syncErr(rep)

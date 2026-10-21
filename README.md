@@ -325,7 +325,8 @@ enter returns to the overview (other keys are ignored), ctrl+c exits with
 130. An action cancelled in its
 dialog, menu or prompt (enter in the `sync` menu with nothing selected
 counts as cancelled) shows no report view, unless it printed something
-(e.g. the warnings of `sync` before its menu). q, esc and enter
+(e.g. the warnings of `sync` before its menu; progress lines such as
+`listing repositories of acme...` do not count). q, esc and enter
 pressed during the first quarter second of the view (e.g. typed while
 the action ran) are ignored, so the report is not skipped unseen. The
 overview then shows the outcome: the counts of the command's summary,

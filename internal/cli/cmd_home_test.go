@@ -1452,11 +1452,11 @@ func TestHomeReportsActionsThatChangedNothing(t *testing.T) {
 	e, _ := syncBundle(t) // a tracked; b and c proposed by sync
 	var out syncBuffer
 	// "prune: " is in the title of the report view, then in the message
-	// of the overview; likewise for sync.
+	// of the overview; a cancelled sync shows no report view.
 	in := newScript(t, false,
 		ovKeys(t, &out, "STATE", 1, "p"), []key{{keys: "x", wait: waitOutput(t, &out, "nothing to prune")}}, reportKey(t, &out, "prune", "q"),
-		ovKeys(t, &out, "prune: ", 2, "s"), keys("\r"), reportKey(t, &out, "sync", "q"),
-		ovKeys(t, &out, "sync: ", 2, "q"))
+		ovKeys(t, &out, "prune: ", 2, "s"), keys("\r"),
+		ovKeys(t, &out, "sync: cancelled", 1, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -1546,25 +1546,26 @@ func TestHomeReportLines(t *testing.T) {
 	}
 }
 
-// What an action prints is written live to the terminal (here the line
-// sync prints before listing, on standard error) and shown in the report
-// view. Enter in the sync menu with nothing selected counts as a
-// cancellation, as esc does; the report view is shown all the same, as the
-// action printed something.
-func TestHomeSyncOutputIsLiveAndInReport(t *testing.T) {
+// What an action prints is written live to the terminal and shown in the
+// report view, but not its progress lines (here the line sync prints
+// before listing, on standard error), which are written live only. Enter
+// in the sync menu with nothing selected counts as a cancellation, as esc
+// does; with nothing else printed (the line saying nothing was selected
+// is the outcome, in the overview's message), no report view is shown
+// (B62 M10: a report of these two lines).
+func TestHomeSyncProgressIsLiveOnly(t *testing.T) {
 	t.Parallel()
 	for _, k := range []string{"\r", "\x1b"} {
 		e, _ := syncBundle(t)
 		var out syncBuffer
-		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "s"), keys(k), reportKey(t, &out, "sync", "q"), ovKeys(t, &out, "sync: cancelled", 1, "q"))
+		in := newScript(t, false, ovKeys(t, &out, "STATE", 1, "s"), keys(k), ovKeys(t, &out, "sync: cancelled", 1, "q"))
 		errs, code := runHomeWith(t, e.deps(), in, &out)
 		o := out.String()
 		if code != 0 || !strings.Contains(errs, "listing repositories of ") {
 			t.Fatalf("%q: exit %d, the listing line is not on stderr\nstdout:\n%s\nstderr:\n%s", k, code, o, errs)
 		}
-		view, msg := strings.Index(o, "sheaf sync: "), strings.Index(o, "sync: cancelled")
-		if view < 0 || msg < view || !strings.Contains(o[view:msg], "listing repositories of ") {
-			t.Fatalf("%q: no report view with the listing line before the overview\nstdout:\n%s", k, o)
+		if strings.Contains(o, "sheaf sync: ") {
+			t.Fatalf("%q: a report view after a cancelled sync that printed only progress\nstdout:\n%s", k, o)
 		}
 	}
 }

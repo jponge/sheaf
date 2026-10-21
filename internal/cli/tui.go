@@ -641,6 +641,18 @@ type teeWriter struct {
 	term io.Writer
 }
 
+// liveOnly returns the stream for the lines written to w that are not
+// part of a command's result: progress (e.g. "listing repositories of
+// acme...") and the outcome of a cancellation, which the home screen's
+// message tells. They go to the terminal only, not to the copy the home
+// screen captures for its report view (see teeWriter).
+func liveOnly(w io.Writer) io.Writer {
+	if t, ok := w.(teeWriter); ok {
+		return t.term
+	}
+	return w
+}
+
 // terminalOf returns the stream behind w (standard output watched for
 // EPIPE, the terminal of a teeWriter), which may be a terminal.
 func terminalOf(w io.Writer) io.Writer {
