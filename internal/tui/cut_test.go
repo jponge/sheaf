@@ -18,6 +18,36 @@ func longText(prefix string, n int) string {
 	return s
 }
 
+// wrap never makes a line wider than the width, wide characters included:
+// the indentation of the first line is kept before a broken word only if
+// the word's first character fits after it (V3 review: "   日" at width
+// 4), and the text is kept, in order, as a prefix-preserving split.
+func TestWrapFitsWideCharactersAfterTheIndentation(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		s     string
+		width int
+	}{
+		{"   日本語のテキスト", 4},
+		{"      " + strings.Repeat("長", 10), 7},
+		{"  " + strings.Repeat("長", 10) + " x", 3},
+		{"  abcdefghij", 3},
+	} {
+		lines := wrap(c.s, c.width)
+		for _, l := range lines {
+			if lipgloss.Width(l) > c.width {
+				t.Errorf("wrap(%q, %d): line %q of width %d", c.s, c.width, l, lipgloss.Width(l))
+			}
+		}
+		if got := strings.Join(strings.Fields(strings.Join(lines, " ")), ""); got != strings.Join(strings.Fields(c.s), "") {
+			t.Errorf("wrap(%q, %d) = %q: text not kept", c.s, c.width, lines)
+		}
+		if !strings.HasPrefix(c.s, lines[0]) {
+			t.Errorf("wrap(%q, %d): first line %q is not a prefix", c.s, c.width, lines[0])
+		}
+	}
+}
+
 // A line of a view wider than the window is cut at its width and ends with
 // "…" (B52 E2: the title, the overview message and STATE were cut without
 // it), at every width from 20 to 200 columns, in every view. The overview

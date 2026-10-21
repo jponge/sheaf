@@ -53,16 +53,17 @@ func wrap(s string, width int) []string {
 		line = ""
 	}
 	// lead returns the indentation of s while the first line holds nothing
-	// else, if it leaves room for a character: it is kept before a word
-	// broken there instead of making a blank first line.
-	lead := func() string {
-		if len(out) == 0 && strings.TrimLeft(line, " ") == "" && lipgloss.Width(line) < width {
+	// else, if the first character of word fits after it: it is kept before
+	// word broken there instead of making a blank first line.
+	lead := func(word string) string {
+		first, _ := splitAtWidth(word, 1)
+		if len(out) == 0 && strings.TrimLeft(line, " ") == "" && lipgloss.Width(line+first) <= width {
 			return line
 		}
 		return ""
 	}
 	for _, word := range strings.SplitAfter(s, " ") {
-		for pad := lead(); lipgloss.Width(pad+strings.TrimRight(word, " ")) > width; pad = lead() {
+		for pad := lead(word); lipgloss.Width(pad+strings.TrimRight(word, " ")) > width; pad = lead(word) {
 			if line != "" && pad == "" {
 				flush()
 			}
