@@ -12,6 +12,7 @@ import (
 
 	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/hosting"
+	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
@@ -290,5 +291,31 @@ func TestPruneListsNotes(t *testing.T) {
 	out = e.mustRun(t, "prune", "--yes")
 	if !strings.Contains(out, "  note: 2 ignored files (deleted with the worktree)") {
 		t.Fatalf("--yes:\n%s", out)
+	}
+}
+
+// prune names a worktree candidate repo/dir in its results, as its dialog
+// and its progress rows do, not repo/branch (B62 L4); a branch without
+// worktree stays repo/branch.
+func TestPrintPruneNamesWorktreesByDirectory(t *testing.T) {
+	t.Parallel()
+	wt := ops.PruneCandidate{Repo: "web", Branch: "feat/done", Worktree: true, Dir: "feat-done", Path: "/b/web/feat-done"}
+	br := ops.PruneCandidate{Repo: "web", Branch: "old/x"}
+	var b bytes.Buffer
+	printPrune(&b, ops.PrunePlan{Candidates: []ops.PruneCandidate{wt, wt, wt, br}}, []ops.PruneResult{
+		{PruneCandidate: wt, Outcome: ops.PruneRemoved, Message: "removed worktree feat-done [feat/done] at /b/web/feat-done"},
+		{PruneCandidate: wt, Outcome: ops.PruneKept, Message: "kept: why"},
+		{PruneCandidate: wt, Outcome: ops.PruneFailed, Message: "not started (interrupted)", Err: context.Canceled},
+		{PruneCandidate: br, Outcome: ops.PruneRemoved, Message: "deleted branch old/x (merged into origin/main)"},
+	}, false, "")
+	for _, want := range []string{
+		"web/feat-done: removed worktree feat-done [feat/done] at /b/web/feat-done\n",
+		"web/feat-done: kept: kept: why\n",
+		"web/feat-done: interrupted: not started\n",
+		"web/old/x: deleted branch old/x (merged into origin/main)\n",
+	} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("printPrune lacks %q:\n%s", want, b.String())
+		}
 	}
 }

@@ -218,6 +218,7 @@ func tuiWorktreeRemove(c *cobra.Command, d Deps, w *ops.Workspace, repo string, 
 	s := newTUISession(c, d)
 	var msg string
 	var rerr error
+	name := repo + "/" + target.Name // repo/dir once planned
 	removing := "Removing worktree " + target.Name + " of " + repo
 	title := "Checking worktree " + target.Name + " of " + repo + " for removal"
 	if yes {
@@ -237,6 +238,7 @@ func tuiWorktreeRemove(c *cobra.Command, d Deps, w *ops.Workspace, repo string, 
 			rep.Report(e)
 		}
 		opts.Confirm = func(p ops.WorktreeRemovePlan) bool {
+			name = repo + "/" + p.Worktree.Dir
 			lines := worktreeRemovePlanLines(p, opts.Force)
 			if yes {
 				for _, l := range lines {
@@ -256,7 +258,7 @@ func tuiWorktreeRemove(c *cobra.Command, d Deps, w *ops.Workspace, repo string, 
 		return rerr
 	}
 	d.reportCounts(countParts(count{1, "removed"}))
-	fmt.Fprintln(c.OutOrStdout(), msg)
+	fmt.Fprintln(c.OutOrStdout(), name+": "+msg)
 	return nil
 }
 
@@ -291,7 +293,7 @@ func tuiWorktreeRemoveMany(c *cobra.Command, d Deps, w *ops.Workspace, items []o
 		switch {
 		case r.Err == nil:
 			removed++
-			fmt.Fprintln(c.OutOrStdout(), r.Message)
+			fmt.Fprintln(c.OutOrStdout(), r.Repo+"/"+r.Plan.Worktree.Dir+": "+r.Message)
 		case interruptedErr(r.Err):
 			interrupted++
 		case errors.As(r.Err, &re):
@@ -317,7 +319,7 @@ func worktreeRemovalsLines(rs []ops.WorktreeRemovalResult, force bool) (lines []
 		case r.Err == nil:
 			removable++
 			p := *r.Plan
-			lines = append(lines, fmt.Sprintf("will remove worktree %s/%s [%s] at %s", p.Repo, p.Worktree.Dir, branchLabel(p.Worktree), p.Worktree.Path))
+			lines = append(lines, worktreeRemoveLine(p))
 			for _, l := range worktreeRemovePlanLines(p, force) {
 				if l != worktreeRemoveLine(p) {
 					lines = append(lines, "  "+l)

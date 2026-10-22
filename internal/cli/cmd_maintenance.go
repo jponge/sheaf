@@ -241,16 +241,16 @@ func printPrune(out io.Writer, plan ops.PrunePlan, results []ops.PruneResult, dr
 		n[r.Outcome]++
 		switch {
 		case r.Outcome == ops.PruneRemoved:
-			fmt.Fprintf(out, "%s/%s: %s\n", r.Repo, r.Branch, r.Message)
+			fmt.Fprintf(out, "%s: %s\n", pruneName(r.PruneCandidate), r.Message)
 		case r.Outcome == ops.PruneFailed && interruptedErr(r.Err):
 			interrupted++
-			line := r.Repo + "/" + r.Branch + ": interrupted"
+			line := pruneName(r.PruneCandidate) + ": interrupted"
 			if note := interruptedNote(r.Message); note != "" {
 				line += ": " + note
 			}
 			fmt.Fprintln(out, line)
 		default:
-			fmt.Fprintf(out, "%s/%s: %s: %s\n", r.Repo, r.Branch, pruneOutcome(r.Outcome), r.Message)
+			fmt.Fprintf(out, "%s: %s: %s\n", pruneName(r.PruneCandidate), pruneOutcome(r.Outcome), r.Message)
 		}
 		printNotes(out, r.Notes)
 	}
@@ -259,6 +259,15 @@ func printPrune(out io.Writer, plan ops.PrunePlan, results []ops.PruneResult, dr
 		fmt.Fprintf(out, ", %d interrupted", interrupted)
 	}
 	fmt.Fprintln(out)
+}
+
+// pruneName names c in the results of prune: repo/dir for a worktree, as
+// its dialog and progress rows do, repo/branch for a branch.
+func pruneName(c ops.PruneCandidate) string {
+	if c.Worktree {
+		return c.Repo + "/" + c.Dir
+	}
+	return c.Repo + "/" + c.Branch
 }
 
 // pruneCounts returns the counts of results as printPrune counts them, the

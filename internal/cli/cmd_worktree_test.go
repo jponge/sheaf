@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
@@ -275,5 +276,22 @@ func TestWorktreeListErrorHeader(t *testing.T) {
 	}
 	if _, errs, _ := e.run(t, "wt", "list"); !strings.Contains(errs, "1 repository and 1 worktree could not be listed:") {
 		t.Fatalf("stderr:\n%s", errs)
+	}
+}
+
+// wt rm names the worktree repo/dir, in its plan as prune and the removal
+// of several worktrees do, and on the line of its outcome (B62 L4).
+func TestWorktreeRemoveNamesTheRepository(t *testing.T) {
+	t.Parallel()
+	p := ops.WorktreeRemovePlan{Repo: "alpha", Worktree: ops.WorktreeInfo{Repo: "alpha", Dir: "x", Branch: "feat/x", Path: "/b/alpha/x"}}
+	if got, want := worktreeRemoveLine(p), "will remove worktree alpha/x [feat/x] at /b/alpha/x"; got != want {
+		t.Errorf("worktreeRemoveLine = %q, want %q", got, want)
+	}
+	e, root := worktreeBundle(t)
+	p1 := filepath.Join(root, "a", "feat-x")
+	e.mustRun(t, "wt", "add", "a", "feat/x", "--no-fetch")
+	out := e.mustRun(t, "wt", "rm", "a", "feat/x", "--yes")
+	if want := "a/feat-x: removed worktree feat-x [feat/x] at " + p1 + "\n"; out != want || exists(p1) {
+		t.Errorf("wt rm: stdout %q, want %q", out, want)
 	}
 }

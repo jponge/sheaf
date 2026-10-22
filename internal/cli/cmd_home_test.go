@@ -1337,7 +1337,7 @@ func TestHomeRemovesSelectedWorktreesAfterOneConfirmation(t *testing.T) {
 		t.Errorf("stderr lacks %q:\n%s", want, errs)
 	}
 	report := o[strings.Index(o, "sheaf wt rm: "):]
-	for _, want := range []string{"removed worktree x [x] at ", "removed worktree y [y] at ", "refusing to remove worktree feat [feat] of alpha:"} {
+	for _, want := range []string{"alpha/x: removed worktree x [x] at ", "beta/y: removed worktree y [y] at ", "refusing to remove worktree feat [feat] of alpha:"} {
 		if !strings.Contains(report, want) {
 			t.Errorf("the report lacks %q:\n%s", want, report)
 		}
