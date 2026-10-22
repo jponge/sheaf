@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -499,11 +501,37 @@ func TestFishCompletion(t *testing.T) {
 			t.Errorf("complete -C %q in %s:\ngot:\n%s\nwant:\n%s", c.line, c.dir, got, c.want)
 		}
 	}
-	// ~ in previous words is expanded (HOME is the shell's own)
-	got := runFish(t, bin, parent, `ln -s "`+root+`" ~/b; t 'sheaf --bundle ~/b path a '; t 'scd --bundle ~/b a '`)
-	if got != all+all {
-		t.Errorf("--bundle ~/b:\ngot:\n%s\nwant:\n%s", got, all+all)
+	// ~ in previous words is expanded (HOME is the shell's own): by scd's
+	// completion on every fish, by the sheaf completion through `commandline
+	// -x`, which fish has since 4.0 (older fish: a limit the README states).
+	sheafTilde, want := ` t 'sheaf --bundle ~/b path a ';`, all+all
+	if major, minor := fishVersion(t, bin); major < 4 {
+		t.Logf("fish %d.%d has no `commandline -x` (fish >= 4.0): the expansion of ~ by the sheaf completion is NOT tested (documented limit); scd's is", major, minor)
+		sheafTilde, want = "", all
 	}
+	got := runFish(t, bin, parent, `ln -s "`+root+`" ~/b;`+sheafTilde+` t 'scd --bundle ~/b a '`)
+	if got != want {
+		t.Errorf("--bundle ~/b:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// fishVersion is the version of the fish used by the tests, from `fish
+// --version` ("fish, version 3.7.0"); output it can't read fails the test.
+func fishVersion(t *testing.T, binDir string) (major, minor int) {
+	t.Helper()
+	cmd := exec.Command(shellBinary(t, "fish"), "--version")
+	cmd.Env = shellEnv(t, binDir)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fish --version: %v\n%s", err, out)
+	}
+	m := regexp.MustCompile(`\bversion (\d+)\.(\d+)`).FindStringSubmatch(string(out))
+	if m == nil {
+		t.Fatalf("fish --version: no version in %q", out)
+	}
+	major, _ = strconv.Atoi(m[1])
+	minor, _ = strconv.Atoi(m[2])
+	return major, minor
 }
 
 // TestFishCompletionDoesNotEvaluateWords: completing must not run code in

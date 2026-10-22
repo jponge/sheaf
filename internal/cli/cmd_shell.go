@@ -77,8 +77,9 @@ func newCompletionCmd() *cobra.Command {
 // come unescaped from `commandline -opc`, so eval splits words with spaces and
 // runs a quoted "(cmd)" on TAB, and the current token is escaped as typed, so
 // q\& reaches sheaf as q\&. The fix escapes the expanded words (`commandline
-// -x` expands ~ and variables but not command substitutions, fish >= 3.7; older
-// fish falls back to -o, without expansion) and unquotes the current token.
+// -x` expands ~ and variables but not command substitutions, fish >= 4.0; older
+// fish falls back to -o, without expansion: a limit the README states) and
+// unquotes the current token.
 var fishCompletionFixes = []struct{ old, new string }{
 	{"    set -l args (commandline -opc)\n",
 		"    set -l args (string escape -- (commandline -xpc 2>/dev/null; or commandline -opc))\n"},

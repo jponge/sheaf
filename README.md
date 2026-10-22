@@ -661,6 +661,11 @@ names, worktree branches and directories, branches for `wt add`, and
 organizations, read from the bundle (`--bundle` on the command line is
 honoured). It never uses the network.
 
+The fish completion needs fish 3.1 or later. With fish older than 4.0,
+`~` in a previous word is not expanded: `sheaf --bundle ~/b path <TAB>`
+completes nothing. Give the bundle as a full path there, or use `scd`,
+whose completion expands `~` on every supported fish.
+
 ## Safety model
 
 sheaf deletes data in `remove`, `wt rm`, `prune` and `sync --remove-gone`.
