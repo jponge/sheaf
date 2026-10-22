@@ -87,7 +87,7 @@ func TestSyncEmptyListingNeedsAllowMassRemoval(t *testing.T) {
 		t.Fatalf("dry run: exit %d\nstdout:\n%s\nstderr:\n%s", code, out, errs)
 	}
 	out, errs, code = e.run(t, "sync", "--remove-gone", "--yes")
-	if code != 1 || !strings.Contains(out, "0 done, 0 skipped, 3 failed") || !strings.Contains(errs, "--allow-mass-removal") {
+	if code != 1 || !hasSummary(out, "3 failed") || !strings.Contains(errs, "--allow-mass-removal") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out, errs)
 	}
 	if got := names(load(t, root)); len(got) != 3 {
@@ -96,7 +96,7 @@ func TestSyncEmptyListingNeedsAllowMassRemoval(t *testing.T) {
 	// The remotes still answer: the listing, not the repositories, is
 	// wrong (token scope), so --allow-mass-removal alone does not remove.
 	out, errs, code = e.run(t, "sync", "--remove-gone", "--yes", "--allow-mass-removal")
-	if code != 1 || !strings.Contains(out, "0 done, 0 skipped, 3 failed") || !strings.Contains(errs, "the GitHub API cannot see o/a but its remote still answers") {
+	if code != 1 || !hasSummary(out, "3 failed") || !strings.Contains(errs, "the GitHub API cannot see o/a but its remote still answers") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out, errs)
 	}
 	if got := names(load(t, root)); len(got) != 3 {
@@ -114,7 +114,7 @@ func TestSyncAddNewSkipsEmptyRepository(t *testing.T) {
 	e, root := syncBundle(t)
 	e.fake.AddRepo(hosting.Repo{Owner: "o", Name: "empty", CloneURL: "file:///nowhere"})
 	out, errs, code := e.run(t, "sync", "--exclude", "b", "--exclude", "c", "--add-new")
-	if code != 0 || !strings.Contains(out, "skipped  empty") || !strings.Contains(out, "0 done, 1 skipped, 0 failed") {
+	if code != 0 || !strings.Contains(out, "skipped  empty") || !hasSummary(out, "1 skipped") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out, errs)
 	}
 	if exists(filepath.Join(root, "empty")) {
@@ -197,7 +197,7 @@ func TestSyncAddNewSameNameInTwoOrgs(t *testing.T) {
 	t.Parallel()
 	e, root := twoOrgs(t)
 	out, errs, code := e.run(t, "sync", "--add-new")
-	if code != 1 || !strings.Contains(out, "1 done, 0 skipped, 1 failed") || !strings.Contains(errs, "--as <dir>") {
+	if code != 1 || !hasSummary(out, "1 done, 1 failed") || !strings.Contains(errs, "--as <dir>") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out, errs)
 	}
 	if got := names(load(t, root)); !slices.Equal(got, []string{"a", "x", "y"}) {
@@ -304,7 +304,7 @@ func TestSyncSingleOrgPossiblyMoved(t *testing.T) {
 	e.mustRun(t, "add", "--org", "p", "--repo", "z")
 	e.fake.AddRepo(hosting.Repo{Owner: "p", Name: "a", CloneURL: a.URL, DefaultBranch: "main"})
 	out, errs, code := e.run(t, "sync", "--org", "p", "--add-new")
-	if code != 0 || !strings.Contains(out, "new      p/a: possibly moved from o/a; run sync for that org too") || !strings.Contains(out, "0 done, 1 skipped, 0 failed") {
+	if code != 0 || !strings.Contains(out, "new      p/a: possibly moved from o/a; run sync for that org too") || !hasSummary(out, "1 skipped") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out, errs)
 	}
 	out = e.mustRun(t, "sync", "--org", "p", "--json")

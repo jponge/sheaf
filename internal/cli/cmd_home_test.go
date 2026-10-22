@@ -778,10 +778,13 @@ func TestHomeUpdateSelectedCheckoutThenReturns(t *testing.T) {
 		t.Error("alpha/main was updated although not selected")
 	}
 	o2 := out.String()
-	for _, want := range []string{"fast-forwarded  alpha/feat", "1 fast-forwarded, 0 up to date, 0 skipped, 0 failed", "update: 1 fast-forwarded"} {
+	for _, want := range []string{"fast-forwarded  alpha/feat", "update: 1 fast-forwarded"} {
 		if !strings.Contains(o2, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, o2)
 		}
+	}
+	if !hasSummary(o2, "1 fast-forwarded") {
+		t.Errorf("stdout lacks the summary line:\n%s", o2)
 	}
 	// The overview was opened again, after the summary, refreshed.
 	if i, j := strings.Index(o2, "1 fast-forwarded"), strings.LastIndex(o2, "STATE"); j < i {
@@ -814,7 +817,7 @@ func TestHomeFetchCurrentRepository(t *testing.T) {
 	if got := testutil.Git(t, beta, "rev-parse", "origin/main"); got != before {
 		t.Error("beta changed")
 	}
-	if !strings.Contains(out.String(), "1 done, 0 skipped, 0 failed") || !strings.Contains(out.String(), "fetch: done") {
+	if !hasSummary(out.String(), "1 done") || !strings.Contains(out.String(), "fetch: done") {
 		t.Errorf("summary or message missing:\n%s", out.String())
 	}
 	// After the fetch, the refreshed overview shows alpha/main behind.
@@ -946,8 +949,8 @@ func TestHomeSelectAllAndNoneAndAddWithW(t *testing.T) {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 	o := out.String()
-	all := strings.Index(o, "2 done, 0 skipped, 0 failed")
-	none := strings.Index(o, "1 done, 0 skipped, 0 failed")
+	all := summaryIndex(o, "2 done")
+	none := summaryIndex(o, "1 done")
 	prompt := strings.Index(o, "New worktree of alpha")
 	if all < 0 || none < all || prompt < none {
 		t.Fatalf("a/n did not select all/no rows, or w did not open the prompt after them\nstdout:\n%s\nstderr:\n%s", o, errs)
@@ -1177,7 +1180,7 @@ func TestHomePruneDoctorAndSync(t *testing.T) {
 	if !exists(filepath.Join(root, "b", "main")) {
 		t.Errorf("sync did not add b:\n%s", out.String())
 	}
-	for _, want := range []string{"1 removed, 0 kept, 0 failed", "prune: 1 removed", "OK", "doctor: 2 warnings", "sync: 1 added"} {
+	for _, want := range []string{"prune: 1 removed", "OK", "doctor: 2 warnings", "sync: 1 added"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out.String())
 		}

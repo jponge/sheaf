@@ -99,7 +99,7 @@ func TestWorktreeAddTagCLI(t *testing.T) {
 
 	// update: pinned, not a skip for --strict.
 	up := e.mustRun(t, "update", "--strict")
-	if !strings.Contains(up, "pinned at tag release/1.0") || !strings.Contains(up, "2 pinned") || !strings.Contains(up, "0 skipped") {
+	if !strings.Contains(up, "pinned at tag release/1.0") || !hasSummary(up, "2 up to date, 2 pinned") {
 		t.Errorf("update --strict:\n%s", up)
 	}
 

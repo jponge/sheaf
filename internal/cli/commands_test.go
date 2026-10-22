@@ -116,7 +116,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	out = e.mustRun(t, "add", "--org", "o", "--all")
-	if !strings.Contains(out, "1 done, 2 skipped, 0 failed") {
+	if !hasSummary(out, "1 done, 2 skipped") {
 		t.Fatalf("add --org summary:\n%s", out)
 	}
 	b := load(t, root)
@@ -230,7 +230,7 @@ func TestAddReportsFailuresWithExitCode(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("exit 0 although o/missing failed\n%s\n%s", out, errs)
 	}
-	if !strings.Contains(out, "1 done, 0 skipped, 1 failed") || !strings.Contains(out, "o/missing") {
+	if !hasSummary(out, "1 done, 1 failed") || !strings.Contains(out, "o/missing") {
 		t.Fatalf("summary:\n%s", out)
 	}
 	// One line per event on stderr.

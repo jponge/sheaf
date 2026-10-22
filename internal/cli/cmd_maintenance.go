@@ -254,11 +254,8 @@ func printPrune(out io.Writer, plan ops.PrunePlan, results []ops.PruneResult, dr
 		}
 		printNotes(out, r.Notes)
 	}
-	fmt.Fprintf(out, "%d removed, %d kept, %d failed", n[ops.PruneRemoved], n[ops.PruneKept], n[ops.PruneFailed]-interrupted)
-	if interrupted > 0 {
-		fmt.Fprintf(out, ", %d interrupted", interrupted)
-	}
-	fmt.Fprintln(out)
+	fmt.Fprintln(out, summaryLine(count{n[ops.PruneRemoved], "removed"}, count{n[ops.PruneKept], "kept"},
+		count{n[ops.PruneFailed] - interrupted, "failed"}, count{interrupted, "interrupted"}))
 }
 
 // pruneName names c in the results of prune: repo/dir for a worktree, as

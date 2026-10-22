@@ -260,10 +260,13 @@ func TestTUIAddOrgMenuSelectsTwoOfThree(t *testing.T) {
 		t.Fatalf("sources = %+v", b.Sources)
 	}
 	o := out.String()
-	for _, want := range []string{"Add repositories of o", "2 done, 0 skipped, 0 failed"} {
+	for _, want := range []string{"Add repositories of o"} {
 		if !strings.Contains(o, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, o)
 		}
+	}
+	if !hasSummary(o, "2 done") {
+		t.Errorf("stdout lacks the summary line %q:\n%s", "2 done", o)
 	}
 	if exists(filepath.Join(e.cwd, "c")) {
 		t.Error("c cloned although not selected")
@@ -327,10 +330,13 @@ func TestTUISyncAddsSelectedWithoutExclusionStep(t *testing.T) {
 	if strings.Contains(o, "Exclude") {
 		t.Errorf("an exclusion step was shown:\n%s", o)
 	}
-	for _, want := range []string{"done     b", "1 done, 0 skipped, 0 failed"} {
+	for _, want := range []string{"done     b"} {
 		if !strings.Contains(o, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, o)
 		}
+	}
+	if !hasSummary(o, "1 done") {
+		t.Errorf("stdout lacks the summary line %q:\n%s", "1 done", o)
 	}
 }
 
@@ -455,10 +461,13 @@ func TestTUISyncGoneRemovalRefusalIsDisplayed(t *testing.T) {
 		t.Fatal("b removed without --force")
 	}
 	o := out.String()
-	for _, want := range []string{"Remove 1 repository gone from its organization?", "failed   b", "0 done, 0 skipped, 1 failed"} {
+	for _, want := range []string{"Remove 1 repository gone from its organization?", "failed   b"} {
 		if !strings.Contains(o, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, o)
 		}
+	}
+	if !hasSummary(o, "1 failed") {
+		t.Errorf("stdout lacks the summary line %q:\n%s", "1 failed", o)
 	}
 	if !strings.Contains(errs, "authentication scope") {
 		t.Errorf("stderr lacks the refusal details:\n%s", errs)
@@ -592,10 +601,13 @@ func TestTUIPruneConfirms(t *testing.T) {
 	if asking := out.String()[:strings.Index(out.String(), "[y/N]")]; !strings.Contains(asking, "Checking prune candidates ·") || strings.Contains(asking, "Pruning") {
 		t.Errorf("title while asking:\n%s", asking)
 	}
-	for _, want := range []string{"Prune 1 candidate?", "will remove worktree alpha/feat", "1 removed, 0 kept, 0 failed"} {
+	for _, want := range []string{"Prune 1 candidate?", "will remove worktree alpha/feat"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out.String())
 		}
+	}
+	if !hasSummary(out.String(), "1 removed") {
+		t.Errorf("stdout lacks the summary line %q:\n%s", "1 removed", out.String())
 	}
 }
 
@@ -613,15 +625,15 @@ func TestTUIProgressFinalLineHasNoCounts(t *testing.T) {
 		args        []string
 		final, sums string
 	}{
-		{[]string{"fetch"}, "Fetching: finished in ", "1 done, 0 skipped, 0 failed"},
-		{[]string{"update"}, "Updating: finished in ", "1 fast-forwarded, 0 up to date, 1 pinned, 0 skipped, 0 failed"},
+		{[]string{"fetch"}, "Fetching: finished in ", "1 done"},
+		{[]string{"update"}, "Updating: finished in ", "1 fast-forwarded, 1 pinned"},
 	} {
 		var out syncBuffer
 		errs, code := e.runTUI(t, newScript(t, true), &out, tc.args...)
 		o := out.String()
 		// From the final line on (earlier frames of the view have counts).
 		final := o[max(0, strings.Index(o, tc.final)):]
-		if code != 0 || !strings.Contains(o, tc.final) || !strings.Contains(final, tc.sums) || strings.Count(final, " failed") != 1 {
+		if code != 0 || !strings.Contains(o, tc.final) || len(summaryLines(final, tc.sums)) != 1 {
 			t.Errorf("%v: exit %d, want the final line %q and one count line %q\nstdout:\n%s\nstderr:\n%s", tc.args, code, tc.final, tc.sums, o, errs)
 		}
 	}
@@ -691,10 +703,13 @@ func TestTUIUpdateProgressAndSummary(t *testing.T) {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
 	}
 	o2 := out.String()
-	for _, want := range []string{"Updating", "fast-forwarded  alpha/main", "1 fast-forwarded, 0 up to date, 0 skipped, 0 failed"} {
+	for _, want := range []string{"Updating", "fast-forwarded  alpha/main"} {
 		if !strings.Contains(o2, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, o2)
 		}
+	}
+	if !hasSummary(o2, "1 fast-forwarded") {
+		t.Errorf("stdout lacks the summary line %q:\n%s", "1 fast-forwarded", o2)
 	}
 	if strings.Contains(errs, "started") {
 		t.Errorf("plain progress lines on stderr in TUI mode:\n%s", errs)

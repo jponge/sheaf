@@ -108,7 +108,7 @@ func TestHomeOnPTYActionReturnsToOverview(t *testing.T) {
 	s.write("q")
 	wantTerminalRestored(t, s, "0")
 	out := s.output()
-	if i, j := strings.Index(out, "1 done, 0 skipped, 0 failed"), strings.LastIndex(out, "↓2"); i < 0 || j < i {
+	if i, j := summaryIndex(out, "1 done"), strings.LastIndex(out, "↓2"); i < 0 || j < i {
 		t.Errorf("summary, then the refreshed overview expected:\n%q", out)
 	}
 }
@@ -599,7 +599,7 @@ func TestHomeOnPTYInterruptedActionLeavesItsOutput(t *testing.T) {
 	normal := vt.normalLines()
 	n := 0
 	for _, l := range normal {
-		if l == "0 done, 0 skipped, 0 failed, 2 interrupted" {
+		if l == "2 interrupted" {
 			n++
 		}
 	}
@@ -1205,8 +1205,8 @@ func TestHomeOnPTYCtrlCCancelsTheAction(t *testing.T) {
 	for _, c := range []struct {
 		key, name, summary string // summary: regular expression of the summary line
 	}{
-		{"f", "fetch", `^0 done, 0 skipped, 0 failed, 2 interrupted$`}, // a command (see home.command)
-		{"u", "update", `, \d+ interrupted$`},                          // inline (see home.inline)
+		{"f", "fetch", `^2 interrupted$`},         // a command (see home.command)
+		{"u", "update", `(^|, )\d+ interrupted$`}, // inline (see home.inline)
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e, _, _, _, _ := homeBundle(t)

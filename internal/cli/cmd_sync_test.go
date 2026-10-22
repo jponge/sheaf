@@ -107,7 +107,7 @@ func TestSyncAddNewWithExclude(t *testing.T) {
 		t.Fatalf("--exclude nope: exit %d, stderr %s", code, errs)
 	}
 	out := e.mustRun(t, "sync", "--exclude", "o/C", "--add-new")
-	if !strings.Contains(out, "1 done, 0 skipped, 0 failed") {
+	if !hasSummary(out, "1 done") {
 		t.Fatalf("summary:\n%s", out)
 	}
 	b := load(t, root)

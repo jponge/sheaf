@@ -587,21 +587,23 @@ func printUpdateSummary(out io.Writer, r ops.UpdateReport, strict bool) error {
 		fmt.Fprintln(out, d)
 	}
 	writeProblems(out, r.Problems, nil)
-	fmt.Fprintf(out, "%d fast-forwarded, %d up to date, ", ff, upToDate)
-	if pinned > 0 {
-		fmt.Fprintf(out, "%d pinned, ", pinned)
-	}
-	fmt.Fprintf(out, "%d skipped, %d failed", skipped, failed)
-	if interrupted > 0 {
-		fmt.Fprintf(out, ", %d interrupted", interrupted)
-	}
+	// As summaryLine, with the problems (plural forms).
+	parts := countParts(count{ff, "fast-forwarded"}, count{upToDate, "up to date"}, count{pinned, "pinned"},
+		count{skipped, "skipped"}, count{failed, "failed"}, count{interrupted, "interrupted"})
 	if n := len(r.Problems); n > 0 {
-		fmt.Fprintf(out, ", %s", plural(n, "problem"))
+		parts = append(parts, plural(n, "problem"))
 	}
-	fmt.Fprintln(out)
+	if len(parts) == 0 {
+		parts = []string{"0 fast-forwarded"}
+	}
+	fmt.Fprintln(out, strings.Join(parts, ", "))
 	switch {
 	case failed > 0 || len(r.Problems) > 0:
-		return fmt.Errorf("update: %d failed, %s", failed, plural(len(r.Problems), "problem"))
+		what := countParts(count{failed, "failed"})
+		if n := len(r.Problems); n > 0 {
+			what = append(what, plural(n, "problem"))
+		}
+		return errors.New("update: " + strings.Join(what, ", "))
 	case interrupted > 0:
 		return fmt.Errorf("update: %d interrupted", interrupted)
 	case strict && skipped > 0:
@@ -716,11 +718,7 @@ func printRunSummary(out io.Writer, r ops.RunReport) error {
 			failed = append(failed, res)
 		}
 	}
-	fmt.Fprintf(out, "%d succeeded, %d failed", len(r.Results)-len(failed)-len(interrupted), len(failed))
-	if len(interrupted) > 0 {
-		fmt.Fprintf(out, ", %d interrupted", len(interrupted))
-	}
-	fmt.Fprintln(out)
+	fmt.Fprintln(out, summaryLine(count{len(r.Results) - len(failed) - len(interrupted), "succeeded"}, count{len(failed), "failed"}, count{len(interrupted), "interrupted"}))
 	for _, res := range failed {
 		fmt.Fprintf(out, "failed: %s (%s)\n", displayName(res.Checkout), runFailure(res))
 	}

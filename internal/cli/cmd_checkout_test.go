@@ -290,7 +290,7 @@ func TestFetchCommand(t *testing.T) {
 	e.addRepo(t, "beta")
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	out, errs, code := e.run(t, "fetch")
-	if code != 0 || !strings.Contains(out, "2 done, 0 skipped, 0 failed") {
+	if code != 0 || !hasSummary(out, "2 done") {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out, errs)
 	}
 	if got, want := testutil.Git(t, alpha, "rev-parse", "origin/main"), testutil.Git(t, o.Path, "rev-parse", "main"); got != want {
@@ -318,7 +318,7 @@ func TestUpdateCommand(t *testing.T) {
 	if !regexp.MustCompile(`skipped\s+alpha/dirty\s+uncommitted changes \(1 staged, 0 unstaged\)`).MatchString(out) {
 		t.Errorf("no dirty notice with counts:\n%s", out)
 	}
-	if !strings.Contains(out, "1 fast-forwarded, 0 up to date, 1 skipped, 0 failed") {
+	if !hasSummary(out, "1 fast-forwarded, 1 skipped") {
 		t.Errorf("no summary line:\n%s", out)
 	}
 	if !strings.Contains(errs, "alpha/dirty: update skipped") {
@@ -355,7 +355,7 @@ func TestRunCommandBlocksAndSummary(t *testing.T) {
 
 	// No "--" needed: flags after the command belong to it.
 	out := e.mustRun(t, "run", "-j", "4", "git", "rev-parse", "--abbrev-ref", "HEAD")
-	want := "==> alpha/main <==\nmain\n\n==> alpha/feat <==\nfeat\n\n==> beta/main <==\nmain\n\n3 succeeded, 0 failed\n"
+	want := "==> alpha/main <==\nmain\n\n==> alpha/feat <==\nfeat\n\n==> beta/main <==\nmain\n\n3 succeeded\n"
 	if out != want {
 		t.Errorf("output:\n%s\nwant:\n%s", out, want)
 	}

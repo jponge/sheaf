@@ -85,11 +85,8 @@ func printSummary(w io.Writer, s ops.Summary) error {
 		}
 		fmt.Fprintln(w)
 	}
-	fmt.Fprintf(w, "%d done, %d skipped, %d failed", s.Count(ops.StatusDone), s.Count(ops.StatusSkipped), s.Count(ops.StatusFailed)-interrupted)
-	if interrupted > 0 {
-		fmt.Fprintf(w, ", %d interrupted", interrupted)
-	}
-	fmt.Fprintln(w)
+	fmt.Fprintln(w, summaryLine(count{s.Count(ops.StatusDone), "done"}, count{s.Count(ops.StatusSkipped), "skipped"},
+		count{s.Count(ops.StatusFailed) - interrupted, "failed"}, count{interrupted, "interrupted"}))
 	return s.Err()
 }
 
@@ -110,6 +107,16 @@ func countParts(counts ...count) []string {
 		}
 	}
 	return parts
+}
+
+// summaryLine returns the line of counts that ends the output of a
+// command: those that are not zero (see countParts), or the first one
+// alone when all are ("0 done").
+func summaryLine(counts ...count) string {
+	if parts := countParts(counts...); len(parts) > 0 {
+		return strings.Join(parts, ", ")
+	}
+	return fmt.Sprintf("0 %s", counts[0].label)
 }
 
 // interruptedErr reports whether err is the failure of work stopped by an
