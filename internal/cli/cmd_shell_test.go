@@ -343,14 +343,18 @@ func TestScdBashCompletionInteractive(t *testing.T) {
 	dir := t.TempDir()
 	rc := filepath.Join(dir, "rc")
 	script := filepath.Join(dir, "drive.py")
+	dump := filepath.Join(dir, "dump")
 	// args stands for scd and shows the arguments it receives
-	rcText := "eval \"$(sheaf shell-init bash)\"\nargs() { printf '<%s>' \"$@\"; echo; }\ncomplete -F _sheaf_scd args\n"
+	const bash = "/bin/bash"
+	rcText := "eval \"$(sheaf shell-init bash)\"\nargs() { printf '<%s>' \"$@\"; echo; }\ncomplete -F _sheaf_scd args\n" +
+		scdCompletionDumpRC(bash, dump)
 	for f, c := range map[string]string{rc: rcText, script: ptyDriver} {
 		if err := os.WriteFile(f, []byte(c), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	out, err := exec.Command(py, "-I", script, "/bin/bash", bin, root, rc, "args a w\\\\&\\t", "\\n", "args a x\\\\$\\t", "\\n").CombinedOutput()
+	defer logScdCompletionDiagnostics(t, bin, root, dump, "w&", "x$")
+	out, err := exec.Command(py, "-I", script, bash, bin, root, rc, "args a w\\\\&\\t", "\\n", "args a x\\\\$\\t", "\\n").CombinedOutput()
 	if err != nil {
 		t.Fatalf("driver: %v\n%s", err, out)
 	}
@@ -359,6 +363,65 @@ func TestScdBashCompletionInteractive(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
+}
+
+// scdCompletionDumpRC is bash rc code, loaded after shell-init, for the
+// diagnostics of a failed interactive completion test (B65: it fails with
+// macOS's /bin/bash 3.2 only): it appends to the file dump the version of the
+// shell (bash, its binary: bash 3.2 sets $BASH by a PATH lookup of its argv[0])
+// and its readline settings, then, after each call of _sheaf_scd (wrapped, its
+// status and COMPREPLY kept), the completion variables, the dequoted current
+// word and COMPREPLY. It writes only to dump.
+func scdCompletionDumpRC(bash, dump string) string {
+	return "_sheaf_dump=" + shellQuote(dump) + `
+{
+  echo "BASH_VERSION=$BASH_VERSION MACHTYPE=$MACHTYPE BASH=$BASH"
+  ` + shellQuote(bash) + ` --version
+  printf 'COMP_WORDBREAKS=[%s]\n' "$COMP_WORDBREAKS"
+  complete -p args
+  bind -v
+} >> "$_sheaf_dump" 2>&1
+_sheaf_f=$(declare -f _sheaf_scd)
+eval "_sheaf_scd_orig${_sheaf_f#_sheaf_scd}"
+_sheaf_scd() {
+  local rc dq dq_quote dq_head
+  _sheaf_scd_orig "$@"
+  rc=$?
+  {
+    printf -- '--- _sheaf_scd %s (status %s)\n' "$*" "$rc"
+    printf 'COMP_LINE=[%s] COMP_POINT=%s COMP_CWORD=%s\n' "$COMP_LINE" "$COMP_POINT" "$COMP_CWORD"
+    printf 'COMP_WORDS(%s):' "${#COMP_WORDS[@]}"; printf ' [%s]' "${COMP_WORDS[@]}"; echo
+    _sheaf_scd_dequote "${COMP_WORDS[COMP_CWORD]}"
+    printf 'current word dequoted=[%s] open quote=[%s] head=[%s]\n' "$dq" "$dq_quote" "$dq_head"
+    printf 'COMPREPLY(%s):' "${#COMPREPLY[@]}"; printf ' [%s]' "${COMPREPLY[@]}"; echo
+  } >> "$_sheaf_dump" 2>&1
+  return $rc
+}
+`
+}
+
+// logScdCompletionDiagnostics logs, when the test failed, the dump written by
+// scdCompletionDumpRC and the output of `sheaf __complete path a <word>` for
+// each word, run from root with the environment of the pty driver.
+func logScdCompletionDiagnostics(t *testing.T, binDir, root, dump string, words ...string) {
+	t.Helper()
+	if !t.Failed() {
+		return
+	}
+	b, err := os.ReadFile(dump)
+	t.Logf("diagnostics: the shell's dump (%v):\n%s", err, b)
+	for _, w := range words {
+		cmd := exec.Command(filepath.Join(binDir, "sheaf"), "__complete", "path", "a", w)
+		cmd.Dir = root
+		cmd.Env = []string{"PATH=" + binDir + ":/usr/bin:/bin", "HOME=" + root, "TERM=dumb", "LC_ALL=C"}
+		out, err := cmd.CombinedOutput()
+		t.Logf("diagnostics: sheaf __complete path a %q from %s (%v):\n%s", w, root, err, out)
+	}
+}
+
+// shellQuote quotes s for sh as one word.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // shellBinary returns the fish or zsh binary used by the shell tests: the
