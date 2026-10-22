@@ -277,7 +277,7 @@ func (h *home) overview() (tui.Overview, error) {
 	// rows of a repository go after its checkouts, so that the rows of a
 	// repository are contiguous for the grouping.
 	slices.SortStableFunc(rows, func(a, b tui.Row) int { return strings.Compare(a.Cells[0], b.Cells[0]) })
-	ov := tui.NewOverview("sheaf: "+h.displayRoot(), []string{"REPO", "DIR", "BRANCH", "AGE", "STATE"}, rows, h.actions())
+	ov := tui.NewOverview("sheaf: "+h.displayRoot(), []string{"REPO", "DIR", "BRANCH", "AGE", "STATE"}, rows, h.actions()).WithTitlePath(h.displayRoot())
 	ov = ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithFullHelp(h.fullHelp).WithAltScreen().WithGrouping().WithShrinkable(2, 1)
 	if len(h.bundle.Repositories) == 0 {
 		ov = ov.WithEmpty(h.emptyHint())
@@ -917,7 +917,7 @@ func failureCount(part string) bool {
 // of its lines colored (see levelMark): the output is captured without
 // escape sequences.
 func homeReport(name, root, output, message string) tui.Report {
-	return tui.NewReport("sheaf "+homeCommand(name)+": "+root, homeReportLines(output, message), "back to the overview").WithLevels(levelMark)
+	return tui.NewReport("sheaf "+homeCommand(name)+": "+root, homeReportLines(output, message), "back to the overview").WithTitlePath(root).WithLevels(levelMark)
 }
 
 // homeReportLines returns the lines of the report view of an action: those

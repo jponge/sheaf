@@ -1656,3 +1656,26 @@ func TestHomeSyncProgressIsLiveOnly(t *testing.T) {
 		}
 	}
 }
+
+// The titles of the home screen, too wide for the window, lose the start
+// of the bundle root, not its name (B62 L3).
+func TestHomeTitlesCutTheRootFromTheLeft(t *testing.T) {
+	t.Parallel()
+	e := newBundleEnv(t)
+	h := &home{d: e.deps(), s: &tuiSession{ctx: context.Background()}, root: e.cwd, jobs: 4}
+	ov, err := h.overview()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Base(h.displayRoot())
+	for _, c := range []struct {
+		m    tea.Model
+		head string
+	}{{ov, "sheaf: "}, {homeReport("doctor", h.displayRoot(), "OK", "doctor: done"), "sheaf doctor: "}} {
+		want := c.head + "…/" + base
+		m, _ := c.m.Update(tea.WindowSizeMsg{Width: len(want) + 1, Height: 40})
+		if got := strings.Split(ansi.Strip(m.View().Content), "\n")[0]; got != want {
+			t.Errorf("title %q, want %q", got, want)
+		}
+	}
+}

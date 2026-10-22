@@ -89,6 +89,7 @@ const noRowMessage = "no row to act on"
 // leaves nothing in the terminal.
 type Overview struct {
 	title   string
+	path    string // see WithTitlePath
 	header  []string
 	rows    []Row
 	actions []OverviewAction
@@ -150,6 +151,14 @@ func NewOverview(title string, header []string, rows []Row, actions []OverviewAc
 // status line.
 func (m Overview) WithMessage(msg string) Overview {
 	m.message = msg
+	return m
+}
+
+// WithTitlePath returns a copy of m whose title ends with path (e.g. the
+// bundle root): a title too wide for the window loses the start of path
+// rather than its end (see cutTitle).
+func (m Overview) WithTitlePath(path string) Overview {
+	m.path = path
 	return m
 }
 
@@ -806,7 +815,7 @@ func (m Overview) View() tea.View {
 	widths := m.columnWidths()
 	var lines []string
 	if l.title {
-		lines = append(lines, st.Title.Render(cutTitle(sanitize(m.title), m.width)))
+		lines = append(lines, st.Title.Render(cutTitle(sanitize(m.title), sanitize(m.path), m.width)))
 		if titleGap {
 			lines = append(lines, "")
 		}

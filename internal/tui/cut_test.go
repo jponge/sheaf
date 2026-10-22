@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -105,14 +107,6 @@ func TestViewsEndCutLinesWithEllipsis(t *testing.T) {
 						continue
 					}
 					found = true
-					if what == "title" && (name == "overview" || name == "report") {
-						// Cut at the start of its path instead (B62 L3).
-						if !strings.HasPrefix(l, "sheaf: …") || strings.HasSuffix(l, "…") {
-							t.Errorf("%s, width %d: the title is not cut at the start of its path: %q", name, w, l)
-							break widths
-						}
-						continue
-					}
 					if lipgloss.Width(l) != w || !strings.HasSuffix(l, "…") {
 						t.Errorf("%s, width %d: the %s is cut without an ellipsis: %q", name, w, what, l)
 						break widths
@@ -127,10 +121,10 @@ func TestViewsEndCutLinesWithEllipsis(t *testing.T) {
 	}
 }
 
-// A title too wide for the window loses the start of its path (the text
-// after its last ": "), not its end, so that the bundle name stays shown
-// (B62 L3): at a separator when one fits ("sheaf: …/bundle/work"), else
-// within the last component; a title that fits is unchanged.
+// A title too wide for the window loses the start of its path (see
+// WithTitlePath), not its end, so that the bundle name stays shown (B62
+// L3): at a separator when one fits ("sheaf: …/bundle/work"), else within
+// the last component; a title that fits is unchanged.
 func TestTitlesCutTheirPathFromTheLeft(t *testing.T) {
 	t.Parallel()
 	const title = "sheaf: /tmp/claude/long/bundle/work"
@@ -146,12 +140,56 @@ func TestTitlesCutTheirPathFromTheLeft(t *testing.T) {
 		{13, "sheaf: …/work"},
 		{11, "sheaf: …ork"},
 	} {
-		ov := NewOverview(title, []string{"REPO"}, []Row{{Key: "a", Cells: []string{"a"}}}, nil)
-		rp := NewReport(title, []string{"x"}, "back")
-		for name, m := range map[string]tea.Model{"overview": ov, "report": rp} {
+		for name, m := range titleViews(title, "/tmp/claude/long/bundle/work") {
 			m, _ = m.Update(tea.WindowSizeMsg{Width: c.width, Height: 20})
 			if got := strings.Split(view(m), "\n")[0]; got != c.want {
 				t.Errorf("%s, width %d: title %q, want %q", name, c.width, got, c.want)
+			}
+		}
+	}
+}
+
+// titleViews returns an overview and a report titled title, ending with
+// path (see WithTitlePath).
+func titleViews(title, path string) map[string]tea.Model {
+	return map[string]tea.Model{
+		"overview": NewOverview(title, []string{"REPO"}, []Row{{Key: "a", Cells: []string{"a"}}}, nil).WithTitlePath(path),
+		"report":   NewReport(title, []string{"x"}, "back").WithTitlePath(path),
+	}
+}
+
+// The cut of a title path counts the width of grapheme clusters, as the
+// terminal does, and never splits one: an emoji with its variation
+// selector, a letter with its combining accent (V4 review: the title was
+// up to 13 columns too wide, then cut at its end, and could start with a
+// lone selector or accent). It splits the title before the path it was
+// given, even when the path contains ": ".
+func TestTitlePathCutKeepsGraphemeClusters(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ head, path string }{
+		{"sheaf: ", "/tmp/❤️❤️❤️❤️/❤️❤️❤️"},
+		{"sheaf: ", "/tmp/ééééé/éééé"},
+		{"sheaf wt rm: ", "/tmp/a: b/c: d/work"},
+	} {
+		title := c.head + c.path
+		for w := 1; w <= lipgloss.Width(title)+2; w++ {
+			for name, m := range titleViews(title, c.path) {
+				m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 20})
+				got := strings.Split(view(m), "\n")[0]
+				switch {
+				case lipgloss.Width(got) > w:
+					t.Errorf("%s, %q, width %d: title %q of width %d", name, title, w, got, lipgloss.Width(got))
+				case lipgloss.Width(title) <= w:
+					if got != title {
+						t.Errorf("%s, %q, width %d: title %q, want it whole", name, title, w, got)
+					}
+				case w >= lipgloss.Width(c.head)+3: // room for "…" and a cluster of 2 columns
+					tail, ok := strings.CutPrefix(got, c.head+"…")
+					first, _ := utf8.DecodeRuneInString(tail)
+					if !ok || tail == "" || !strings.HasSuffix(c.path, tail) || unicode.Is(unicode.Mn, first) {
+						t.Errorf("%s, %q, width %d: title %q, want %q, \"…\" and the end of the path, whole graphemes", name, title, w, got, c.head)
+					}
+				}
 			}
 		}
 	}

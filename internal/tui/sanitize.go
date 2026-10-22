@@ -3,7 +3,6 @@ package tui
 import (
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -97,36 +96,33 @@ func splitAtWidth(s string, width int) (string, string) {
 	return s, ""
 }
 
-// cutTitle returns title, the text of a title line, fitted to width (when
-// known, > 0) by cutting the start of its path, the text after its last
-// ": ", rather than its end: "sheaf: …/bundle/work", so that the bundle
-// name stays shown. The path keeps whole components after "…" when its
-// last one fits, else as many of its last characters as fit. A title that
-// fits, has no path or no room for "…" and one character of it is
-// returned unchanged (and cut at the end with the other lines, see
-// cutLines).
-func cutTitle(title string, width int) string {
-	i := strings.LastIndex(title, ": ")
-	if width <= 0 || lipgloss.Width(title) <= width || i < 0 {
+// cutTitle returns title, the text of a title line ending with path (see
+// Overview.WithTitlePath), fitted to width (when known, > 0) by cutting
+// the start of path rather than the end of the title: "sheaf:
+// …/bundle/work", so that the bundle name stays shown. The path keeps
+// whole components after "…" when its last one fits, else as many of its
+// last grapheme clusters as fit (widths as the terminal displays them,
+// never splitting a cluster, e.g. an emoji and its variation selector). A
+// title that fits, does not end with a non-empty path or leaves no room
+// for "…" and a column of the path is returned unchanged (and cut at the
+// end with the other lines, see cutLines); when no cluster of the path
+// fits after "…", the title ends with "…".
+func cutTitle(title, path string, width int) string {
+	head, ok := strings.CutSuffix(title, path)
+	if width <= 0 || lipgloss.Width(title) <= width || path == "" || !ok {
 		return title
 	}
-	head, path := title[:i+2], title[i+2:]
 	room := width - lipgloss.Width(head) - lipgloss.Width("…")
 	if room < 1 {
 		return title
 	}
-	// The longest suffix that fits, then the longest one of it starting at
-	// a separator.
-	start := len(path)
-	for j, w := len(path), 0; j > 0; {
-		r, size := utf8.DecodeLastRuneInString(path[:j])
-		if w += lipgloss.Width(string(r)); w > room {
-			break
-		}
-		j -= size
-		start = j
+	// The longest suffix that fits: TruncateLeft drops whole clusters, and
+	// keeps a wide one straddling the cut, dropped then.
+	tail := path
+	for drop := lipgloss.Width(path) - room; tail != "" && lipgloss.Width(tail) > room; drop++ {
+		tail = ansi.TruncateLeft(path, drop, "")
 	}
-	tail := path[start:]
+	// Then the longest one of it starting at a separator.
 	if k := strings.Index(tail, "/"); k >= 0 && k+1 < len(tail) {
 		tail = tail[k:]
 	}

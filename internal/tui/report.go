@@ -36,6 +36,7 @@ const ReportGrace = 250 * time.Millisecond
 // U+FFFD.
 type Report struct {
 	title string
+	path  string   // see WithTitlePath
 	lines []string // as displayed, without the styles of marks
 	// marks are the marks of lines (see WithLevels), styled once wrapped,
 	// and indents their text columns, to which their continuation lines
@@ -96,6 +97,13 @@ func NewReport(title string, lines []string, back string) Report {
 type Mark struct {
 	Start, End int
 	Level      Level
+}
+
+// WithTitlePath returns a copy of m whose title ends with path, cut from
+// its start when the title is too wide (see Overview.WithTitlePath).
+func (m Report) WithTitlePath(path string) Report {
+	m.path = path
+	return m
 }
 
 // WithLevels returns a copy of m in which the part of each line that
@@ -354,7 +362,7 @@ func (m Report) View() tea.View {
 	all := m.wrapped()
 	var lines []string
 	if l.title {
-		lines = append(lines, st.Title.Render(cutTitle(sanitize(m.title), m.width)))
+		lines = append(lines, st.Title.Render(cutTitle(sanitize(m.title), sanitize(m.path), m.width)))
 		if titleGap {
 			lines = append(lines, "")
 		}
