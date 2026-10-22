@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jponge/sheaf/internal/gitx"
@@ -52,9 +54,15 @@ func TestWorktreeSuggestions(t *testing.T) {
 	}
 	// Names that the prompt would display or accept changed (control
 	// characters, C1 included, or invalid UTF-8), i.e. another ref, are
-	// not suggested.
-	for _, ref := range []string{"refs/heads/caf\u0085e", "refs/heads/bad\xff", "refs/tags/t\u009b1", "refs/remotes/origin/x\u0085y"} {
-		testutil.Git(t, primary, "update-ref", ref, "HEAD")
+	// not suggested. They are written to packed-refs: APFS refuses the
+	// loose ref file of an invalid UTF-8 name ("Illegal byte sequence").
+	unsafe := []string{"refs/heads/caf\u0085e", "refs/heads/bad\xff", "refs/tags/t\u009b1", "refs/remotes/origin/x\u0085y"}
+	addPackedRefs(t, primary, testutil.Git(t, primary, "rev-parse", "HEAD"), unsafe...)
+	listed := strings.Split(testutil.Git(t, primary, "for-each-ref", "--format=%(refname)"), "\n")
+	for _, ref := range unsafe {
+		if !slices.Contains(listed, ref) {
+			t.Fatalf("git for-each-ref does not list %q: %q", ref, listed)
+		}
 	}
 	if got, err := SuggestWorktree(context.Background(), f.w, "plain"); err != nil || !reflect.DeepEqual(got, WorktreeSuggestions{Branches: []string{"feat", "local-only", "main"}, Tags: []string{"v1.0"}}) {
 		t.Errorf("with unsafe names: %+v, %v", got, err)
@@ -70,5 +78,49 @@ func TestWorktreeSuggestions(t *testing.T) {
 		if got, err := SuggestWorktree(ctx, f.w, repo); err == nil || got.Branches != nil || got.Tags != nil || len(counter.Calls()) > 0 {
 			t.Errorf("%s: %+v, error %v, %d git processes", repo, got, err, len(counter.Calls()))
 		}
+	}
+}
+
+// addPackedRefs makes refs point to oid in the repository of dir by writing
+// them to packed-refs, without loose ref files (which some file systems
+// refuse for some names). It packs the existing refs first and keeps the
+// file sorted, as its header says.
+func addPackedRefs(t *testing.T, dir, oid string, refs ...string) {
+	t.Helper()
+	gitDir := testutil.Git(t, dir, "rev-parse", "--absolute-git-dir")
+	if _, err := os.Stat(filepath.Join(gitDir, "reftable")); err == nil {
+		t.Fatalf("%s uses the reftable backend: no packed-refs file", gitDir)
+	}
+	testutil.Git(t, dir, "pack-refs", "--all")
+	path := filepath.Join(gitDir, "packed-refs")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A record is a "<oid> <ref>" line and the "^<oid>" line that may
+	// follow it (the peeled value of an annotated tag).
+	type record struct{ ref, lines string }
+	var recs []record
+	for line := range strings.Lines(string(data)) {
+		switch {
+		case strings.HasPrefix(line, "#"):
+		case strings.HasPrefix(line, "^"):
+			recs[len(recs)-1].lines += line
+		default:
+			_, ref, _ := strings.Cut(strings.TrimSuffix(line, "\n"), " ")
+			recs = append(recs, record{ref, line})
+		}
+	}
+	for _, ref := range refs {
+		recs = append(recs, record{ref, oid + " " + ref + "\n"})
+	}
+	slices.SortFunc(recs, func(a, b record) int { return strings.Compare(a.ref, b.ref) })
+	var b strings.Builder
+	b.WriteString("# pack-refs with: peeled fully-peeled sorted \n")
+	for _, r := range recs {
+		b.WriteString(r.lines)
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

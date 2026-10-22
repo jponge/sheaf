@@ -197,6 +197,12 @@ func TestHomeShowsLocalStateAndQuits(t *testing.T) {
 // suggested: it refuses a directory that already has a sheaf.yaml. adopt
 // takes a path from the current directory: outside the bundle root, the
 // hint gives it from the root.
+//
+// The screen of the home screen run here is a virtual one, which cuts the
+// lines wider than it (with a long TMPDIR, the adopt line naming the root
+// twice): there, each line must be shown whole or cut, and the overview of
+// the same home screen, rendered without a window size (lines not cut),
+// must show the lines whole.
 func TestHomeEmptyBundleSaysWhatToRun(t *testing.T) {
 	t.Parallel()
 	e := newBundleEnv(t)
@@ -217,10 +223,31 @@ func TestHomeEmptyBundleSaysWhatToRun(t *testing.T) {
 		o := ansi.Strip(out.String())
 		want := []string{"No repositories yet. Add some with:", "  " + c.cmd + "add owner/repo", "  " + c.cmd + "add --org <org>",
 			"  " + c.cmd + "adopt " + c.adopt + "  (clones already in the bundle)"}
-		for _, w := range want {
-			if code != 0 || !strings.Contains(o, w) || strings.Contains(o, "No rows.") {
-				t.Fatalf("%q from %s: exit %d, want %q\nstdout:\n%s\nstderr:\n%s", c.args, c.cwd, code, w, o, errs)
+		lines := strings.Split(o, "\n")
+		i := slices.Index(lines, want[0])
+		if code != 0 || i < 0 || len(lines) < i+len(want) || strings.Contains(o, "No rows.") {
+			t.Fatalf("%q from %s: exit %d, want the lines %q\nstdout:\n%s\nstderr:\n%s", c.args, c.cwd, code, want, o, errs)
+		}
+		for j, w := range want[1:] {
+			// Cut: at least 80 columns, less than any screen. The renderer
+			// ends a cut line with a carriage return.
+			if l := strings.TrimRight(lines[i+1+j], " \r"); l != w && (!strings.HasPrefix(w, l) || len(l) < 80) {
+				t.Fatalf("%q from %s: line %q, want %q (or cut, from 80 columns)\nstdout:\n%s", c.args, c.cwd, l, w, o)
 			}
+		}
+		// The overview of the same home screen, without a window size.
+		ctx := context.Background()
+		if c.args != nil {
+			ctx = ops.WithHintBundle(ctx, root)
+		}
+		h := &home{d: d, s: &tuiSession{ctx: ctx}, root: root, jobs: 4}
+		ov, err := h.overview()
+		if err != nil {
+			t.Fatal(err)
+		}
+		v := strings.Split(ansi.Strip(ov.View().Content), "\n")
+		if i := slices.Index(v, want[0]); i < 0 || len(v) < i+len(want) || !slices.Equal(v[i:i+len(want)], want) {
+			t.Fatalf("%q from %s: overview without a window size, want the lines %q:\n%s", c.args, c.cwd, want, strings.Join(v, "\n"))
 		}
 	}
 }

@@ -313,14 +313,20 @@ func TestRemoveRefsWrittenByACustomRefspecArePushed(t *testing.T) {
 }
 
 // A remote named origin/x has its refs under refs/remotes/origin/x/: they
-// are not origin's.
+// are not origin's. git 2.55 and later refuse `git remote add origin/x` next
+// to origin, but older git created such remotes and the config can still
+// hold them: write the config `git remote add origin/x` wrote (git 2.47).
 func TestRemoveOfflineRefsOfRemoteNamedLikeOriginSubdirAreNotPushed(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	primary, _ := f.clonedRepo(t, "a")
 	bare := filepath.Join(t.TempDir(), "x.git")
 	testutil.Git(t, primary, "init", "-q", "--bare", bare)
-	testutil.Git(t, primary, "remote", "add", "origin/x", "file://"+bare)
+	testutil.Git(t, primary, "config", "remote.origin/x.url", "file://"+bare)
+	testutil.Git(t, primary, "config", "remote.origin/x.fetch", "+refs/heads/*:refs/remotes/origin/x/*")
+	if got := strings.Fields(testutil.Git(t, primary, "remote")); !slices.Equal(got, []string{"origin", "origin/x"}) {
+		t.Fatalf("git remote = %q, want [origin origin/x]", got)
+	}
 	testutil.Git(t, primary, "update-ref", "refs/heads/work", localCommit(t, primary))
 	testutil.Git(t, primary, "update-ref", "refs/remotes/origin/x/work", "refs/heads/work")
 	_, err := f.removeOpts(t, "a", RemoveOptions{Offline: true, WorkingDir: f.w.Root, Confirm: yes})

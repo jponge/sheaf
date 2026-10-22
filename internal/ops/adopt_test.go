@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,6 +192,10 @@ func snapshotGitDir(d string) string {
 // A directory whose name is not a valid repository name, or differs only
 // by case from a registered one, is refused with a fix that adopt has:
 // rename the directory (adopt has no --as, B59). Nothing is moved.
+//
+// On a case-insensitive file system (macOS) there cannot be a directory API
+// next to api: API names the registered api itself (see
+// adoptCaseAliasOfRegistered).
 func TestAdoptNameRefusalsSuggestRenaming(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -198,7 +203,13 @@ func TestAdoptNameRefusalsSuggestRenaming(t *testing.T) {
 	if _, err := Adopt(context.Background(), f.w, filepath.Join(f.w.Root, "api"), AdoptOptions{}, noEmit); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"-x", "a+b", "API"} {
+	names := []string{"-x", "a+b"}
+	if caseSensitiveDir(t, t.TempDir()) {
+		names = append(names, "API")
+	} else {
+		adoptCaseAliasOfRegistered(t, f)
+	}
+	for _, name := range names {
 		d := filepath.Join(f.w.Root, name)
 		plainClone(t, testutil.NewOrigin(t, testutil.OriginOpts{}), d)
 		before := snapshotGitDir(d)
@@ -217,6 +228,55 @@ func TestAdoptNameRefusalsSuggestRenaming(t *testing.T) {
 	}
 	if got := repoNames(f.onDisk(t)); len(got) != 1 {
 		t.Fatalf("registered = %v, want only api", got)
+	}
+}
+
+// caseSensitiveDir reports whether the file system of dir, an empty
+// directory, tells names that differ only by case apart.
+func caseSensitiveDir(t *testing.T, dir string) bool {
+	t.Helper()
+	lower, upper := filepath.Join(dir, "x"), filepath.Join(dir, "X")
+	writeFile(t, lower, "")
+	fl, err := os.Stat(lower)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fu, err := os.Stat(upper)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return true
+	case err != nil:
+		t.Fatal(err)
+	case !os.SameFile(fl, fu):
+		t.Fatalf("%s and %s are different files", lower, upper)
+	}
+	return false
+}
+
+// adoptCaseAliasOfRegistered checks, on a case-insensitive file system, that
+// adopting the registered repository api spelled API (the same directory)
+// is refused, names api, and moves nothing.
+func adoptCaseAliasOfRegistered(t *testing.T, f *fixture) {
+	t.Helper()
+	api, alias := filepath.Join(f.w.Root, "api"), filepath.Join(f.w.Root, "API")
+	fa, err := os.Stat(api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fu, err := os.Stat(alias); err != nil || !os.SameFile(fa, fu) {
+		t.Fatalf("%s is not %s on this file system: %v", alias, api, err)
+	}
+	before := snapshotGitDir(api)
+	moved := false
+	_, err = Adopt(context.Background(), f.w, alias, AdoptOptions{afterMove: func() error { moved = true; return nil }}, noEmit)
+	if err == nil || !strings.Contains(err.Error(), `"api"`) {
+		t.Errorf("Adopt(%s) err = %v, want a refusal naming the registered \"api\"", alias, err)
+	}
+	if moved {
+		t.Errorf("%s: moved before being refused", alias)
+	}
+	if after := snapshotGitDir(api); after != before {
+		t.Errorf("%s: directory changed: %q -> %q", api, before, after)
 	}
 }
 
