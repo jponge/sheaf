@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -94,6 +95,42 @@ func splitAtWidth(s string, width int) (string, string) {
 		w += rw
 	}
 	return s, ""
+}
+
+// cutTitle returns title, the text of a title line, fitted to width (when
+// known, > 0) by cutting the start of its path, the text after its last
+// ": ", rather than its end: "sheaf: …/bundle/work", so that the bundle
+// name stays shown. The path keeps whole components after "…" when its
+// last one fits, else as many of its last characters as fit. A title that
+// fits, has no path or no room for "…" and one character of it is
+// returned unchanged (and cut at the end with the other lines, see
+// cutLines).
+func cutTitle(title string, width int) string {
+	i := strings.LastIndex(title, ": ")
+	if width <= 0 || lipgloss.Width(title) <= width || i < 0 {
+		return title
+	}
+	head, path := title[:i+2], title[i+2:]
+	room := width - lipgloss.Width(head) - lipgloss.Width("…")
+	if room < 1 {
+		return title
+	}
+	// The longest suffix that fits, then the longest one of it starting at
+	// a separator.
+	start := len(path)
+	for j, w := len(path), 0; j > 0; {
+		r, size := utf8.DecodeLastRuneInString(path[:j])
+		if w += lipgloss.Width(string(r)); w > room {
+			break
+		}
+		j -= size
+		start = j
+	}
+	tail := path[start:]
+	if k := strings.Index(tail, "/"); k >= 0 && k+1 < len(tail) {
+		tail = tail[k:]
+	}
+	return head + "…" + tail
 }
 
 // cutLines cuts the lines wider than width (when known, > 0) at the width,

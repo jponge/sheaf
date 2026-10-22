@@ -354,7 +354,7 @@ func (m Report) View() tea.View {
 	all := m.wrapped()
 	var lines []string
 	if l.title {
-		lines = append(lines, st.Title.Render(sanitize(m.title)))
+		lines = append(lines, st.Title.Render(cutTitle(sanitize(m.title), m.width)))
 		if titleGap {
 			lines = append(lines, "")
 		}

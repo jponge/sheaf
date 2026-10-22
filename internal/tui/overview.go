@@ -806,7 +806,7 @@ func (m Overview) View() tea.View {
 	widths := m.columnWidths()
 	var lines []string
 	if l.title {
-		lines = append(lines, st.Title.Render(sanitize(m.title)))
+		lines = append(lines, st.Title.Render(cutTitle(sanitize(m.title), m.width)))
 		if titleGap {
 			lines = append(lines, "")
 		}

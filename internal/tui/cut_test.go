@@ -105,6 +105,14 @@ func TestViewsEndCutLinesWithEllipsis(t *testing.T) {
 						continue
 					}
 					found = true
+					if what == "title" && (name == "overview" || name == "report") {
+						// Cut at the start of its path instead (B62 L3).
+						if !strings.HasPrefix(l, "sheaf: …") || strings.HasSuffix(l, "…") {
+							t.Errorf("%s, width %d: the title is not cut at the start of its path: %q", name, w, l)
+							break widths
+						}
+						continue
+					}
 					if lipgloss.Width(l) != w || !strings.HasSuffix(l, "…") {
 						t.Errorf("%s, width %d: the %s is cut without an ellipsis: %q", name, w, what, l)
 						break widths
@@ -114,6 +122,36 @@ func TestViewsEndCutLinesWithEllipsis(t *testing.T) {
 					t.Errorf("%s, width %d: no %s line:\n%s", name, w, what, view(m))
 					break widths
 				}
+			}
+		}
+	}
+}
+
+// A title too wide for the window loses the start of its path (the text
+// after its last ": "), not its end, so that the bundle name stays shown
+// (B62 L3): at a separator when one fits ("sheaf: …/bundle/work"), else
+// within the last component; a title that fits is unchanged.
+func TestTitlesCutTheirPathFromTheLeft(t *testing.T) {
+	t.Parallel()
+	const title = "sheaf: /tmp/claude/long/bundle/work"
+	for _, c := range []struct {
+		width int
+		want  string
+	}{
+		{80, title},
+		{len(title), title},
+		{len(title) - 1, "sheaf: …/claude/long/bundle/work"},
+		{20, "sheaf: …/bundle/work"},
+		{19, "sheaf: …/work"},
+		{13, "sheaf: …/work"},
+		{11, "sheaf: …ork"},
+	} {
+		ov := NewOverview(title, []string{"REPO"}, []Row{{Key: "a", Cells: []string{"a"}}}, nil)
+		rp := NewReport(title, []string{"x"}, "back")
+		for name, m := range map[string]tea.Model{"overview": ov, "report": rp} {
+			m, _ = m.Update(tea.WindowSizeMsg{Width: c.width, Height: 20})
+			if got := strings.Split(view(m), "\n")[0]; got != c.want {
+				t.Errorf("%s, width %d: title %q, want %q", name, c.width, got, c.want)
 			}
 		}
 	}
