@@ -916,3 +916,87 @@ func TestProgressFinalLineOmitsADurationUnderOneSecond(t *testing.T) {
 		t.Errorf("declined: final view %q, want %q", v, want)
 	}
 }
+
+// While a question is displayed, the work waits for the user: the header
+// shows no elapsed time (B64), and the time spent waiting does not count in
+// the elapsed time shown afterwards nor in the final line, whether the
+// question is answered (y, n, ctrl+c), followed by a queued one, or left
+// pending at the finish.
+func TestProgressElapsedExcludesQuestions(t *testing.T) {
+	t.Parallel()
+	const waiting = "t · 0 running, 1 done, 0 skipped, 0 failed  ^C cancel"
+	header := func(m tea.Model) string { return strings.Split(view(m), "\n")[0] }
+	ask := func() AskMsg { return AskMsg{Question: "Prune 1 candidate?", Reply: make(chan bool, 1)} }
+	for _, c := range []struct {
+		name    string
+		answer  []tea.Msg // after 10s of waiting
+		pending bool      // a question is still displayed after answer
+		want    string    // final line, 2s before the question and 1s after
+	}{
+		{"yes", []tea.Msg{keyMsg("y")}, false, "t: finished in 3s\n"},
+		{"no", []tea.Msg{keyMsg("n")}, false, "t: finished in 3s\n"},
+		{"ctrl+c", []tea.Msg{keyMsg("ctrl+c")}, false, "t: interrupted after 3s\n"},
+		{"queued", []tea.Msg{ask(), keyMsg("y")}, true, "t: finished in 2s\n"},
+		{"queued, both answered", []tea.Msg{ask(), keyMsg("y"), keyMsg("y")}, false, "t: finished in 3s\n"},
+		{"pending at the finish", nil, true, "t: finished in 2s\n"},
+	} {
+		p, clock := newTestProgress("t")
+		m, _ := feed(p.WithInterrupt(func() {}), RowUpdate{Key: "a", Label: "repo a", State: RowDone})
+		clock.t = clock.t.Add(2 * time.Second)
+		if h := header(m); !strings.HasSuffix(h, " · 2s  ^C cancel") {
+			t.Fatalf("%s: header before the question %q, want the elapsed time", c.name, h)
+		}
+		m, _ = feed(m, ask())
+		for range 2 {
+			if h := header(m); h != waiting {
+				t.Errorf("%s: header during the question %q, want %q", c.name, h, waiting)
+			}
+			clock.t = clock.t.Add(5 * time.Second)
+		}
+		m, _ = feed(m, c.answer...)
+		if c.pending {
+			if h := header(m); h != waiting {
+				t.Errorf("%s: header with a question still displayed %q, want %q", c.name, h, waiting)
+			}
+		} else {
+			if h := header(m); !strings.Contains(h, " · 2s") {
+				t.Errorf("%s: header after the question %q, want the elapsed time without the wait (2s)", c.name, h)
+			}
+			clock.t = clock.t.Add(time.Second)
+		}
+		m, _ = feed(m, FinishMsg{})
+		if v := view(m); v != c.want {
+			t.Errorf("%s: final view %q, want %q", c.name, v, c.want)
+		}
+	}
+}
+
+// While a question is displayed, the progress indicator of the terminal is
+// paused (the warning state, OSC 9;4;4) at the ratio of the header rather
+// than indeterminate or moving (B64), unless a row failed (error state); it
+// resumes once the question is answered.
+func TestProgressTerminalProgressPausedDuringQuestions(t *testing.T) {
+	t.Parallel()
+	bar := func(m tea.Model) *tea.ProgressBar { return m.View().ProgressBar }
+	for _, c := range []struct {
+		name         string
+		msgs         []tea.Msg
+		during, then *tea.ProgressBar
+	}{
+		{"unknown total", nil, &tea.ProgressBar{State: tea.ProgressBarWarning}, &tea.ProgressBar{State: tea.ProgressBarIndeterminate}},
+		{"planned", []tea.Msg{PlannedMsg{Units: 4}, RowUpdate{Key: "a", Label: "a", State: RowDone}},
+			&tea.ProgressBar{State: tea.ProgressBarWarning, Value: 25}, &tea.ProgressBar{State: tea.ProgressBarDefault, Value: 25}},
+		{"failed", []tea.Msg{PlannedMsg{Units: 4}, RowUpdate{Key: "a", Label: "a", State: RowFailed}},
+			&tea.ProgressBar{State: tea.ProgressBarError, Value: 25}, &tea.ProgressBar{State: tea.ProgressBarError, Value: 25}},
+	} {
+		p, _ := newTestProgress("t")
+		m, _ := feed(p.WithTerminalProgress(), append(c.msgs, AskMsg{Question: "Q?", Reply: make(chan bool, 1)})...)
+		if got := bar(m); got == nil || *got != *c.during {
+			t.Errorf("%s: during the question %+v, want %+v", c.name, got, c.during)
+		}
+		m, _ = feed(m, keyMsg("y"))
+		if got := bar(m); got == nil || *got != *c.then {
+			t.Errorf("%s: after the question %+v, want %+v", c.name, got, c.then)
+		}
+	}
+}

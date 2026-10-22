@@ -59,7 +59,8 @@ type RowUpdate struct {
 type TitleMsg struct{ Title string }
 
 // FinishMsg ends a Progress: it quits the program, and its final view is
-// the title only, with how it ended and the elapsed time frozen: "<title>:
+// the title only, with how it ended and the elapsed time frozen (the time
+// questions were displayed excluded, see AskMsg): "<title>:
 // finished in 1.2s", "interrupted after", or "cancelled after" when every
 // row was cancelled, or a question was answered no before any row (aside
 // rows apart) finished; without the elapsed time under a second
@@ -71,6 +72,9 @@ type FinishMsg struct{}
 // AskMsg makes a Progress display a yes/no question (see Confirm) below its
 // rows; the answer is sent on Reply, which must have room for one value.
 // Questions arriving while one is displayed are queued. ctrl+c answers no.
+// While one is displayed, the work waits for the user: the header shows no
+// elapsed time, which excludes that wait, and the progress indicator of
+// the terminal is paused (see WithTerminalProgress).
 type AskMsg struct {
 	Question string
 	Details  []string
@@ -147,6 +151,13 @@ type Progress struct {
 	declined     bool // a question was answered no (ctrl+c aside)
 	finished     bool
 
+	// asked is when the displayed question (or the first of a run of
+	// queued ones) appeared, zero without one (it is kept by FinishMsg);
+	// waited sums the time questions were displayed before: the work
+	// waited for the user, which the elapsed time excludes.
+	asked  time.Time
+	waited time.Duration
+
 	width, height    int
 	profile          colorprofile.Profile
 	terminalProgress bool
@@ -205,7 +216,8 @@ func (m Progress) WithForceHint(hint string) Progress {
 // WithTerminalProgress returns a copy of m driving the progress indicator
 // of the terminal (tab, taskbar; see tea.View.ProgressBar) too: the ratio
 // of the header bar, in the error state once a row failed, indeterminate
-// until rows are planned. The final view has none, which makes bubbletea
+// until rows are planned, paused (the warning state) while a question is
+// displayed. The final view has none, which makes bubbletea
 // reset it, as it does when the program is killed.
 func (m Progress) WithTerminalProgress() Progress {
 	m.terminalProgress = true
@@ -286,6 +298,7 @@ func (m Progress) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AskMsg:
 		m.asks = append(slices.Clip(m.asks), msg)
 		if len(m.asks) == 1 {
+			m.asked = m.now()
 			m.showAsk()
 		}
 	case FinishMsg:
@@ -304,6 +317,7 @@ func (m Progress) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.asks) > 0 {
 				m.showAsk()
 			}
+			m.answered()
 			m.interrupts++
 			f := m.interrupt
 			return m, func() tea.Msg {
@@ -372,7 +386,17 @@ func (m Progress) answer(k tea.KeyPressMsg) Progress {
 	if len(m.asks) > 0 {
 		m.showAsk()
 	}
+	m.answered()
 	return m
+}
+
+// answered adds the time the questions were displayed to waited once none
+// is left (see asked).
+func (m *Progress) answered() {
+	if len(m.asks) == 0 && !m.asked.IsZero() {
+		m.waited += m.now().Sub(m.asked)
+		m.asked = time.Time{}
+	}
 }
 
 func reply(a AskMsg, yes bool) {
@@ -382,12 +406,27 @@ func reply(a AskMsg, yes bool) {
 	}
 }
 
+// elapsed returns the time since the start, frozen at the finish, without
+// the time questions were displayed (the work waited for the user).
 func (m Progress) elapsed() time.Duration {
 	end := m.now()
 	if m.finished {
 		end = m.ended
 	}
-	return roundElapsed(end.Sub(m.start))
+	d := end.Sub(m.start) - m.waited
+	if !m.asked.IsZero() {
+		d -= end.Sub(m.asked)
+	}
+	return roundElapsed(d)
+}
+
+// elapsedText returns the elapsed time shown by the header while running:
+// none while a question is displayed, the work waiting for the user.
+func (m Progress) elapsedText() string {
+	if len(m.asks) > 0 {
+		return ""
+	}
+	return fmt.Sprint(m.elapsed())
 }
 
 // roundElapsed rounds d for display: tenths of seconds under a
@@ -401,7 +440,8 @@ func roundElapsed(d time.Duration) time.Duration {
 
 // header returns the header: the title, then while running the aside
 // counts (see WithAside) if aside, the counts of the other rows if counts,
-// and the elapsed time; once finished, how it ended (see FinishMsg).
+// and the elapsed time (none while a question is displayed, see
+// elapsedText); once finished, how it ended (see FinishMsg).
 func (m Progress) header(aside, counted bool) string {
 	running, done, skipped, failed := m.Counts()
 	counts := fmt.Sprintf("%d done, %d skipped, %d failed", done, skipped, failed)
@@ -443,7 +483,9 @@ func (m Progress) header(aside, counted bool) string {
 	if counted {
 		status += fmt.Sprintf("%d running, %s · ", running, counts)
 	}
-	return m.styles.Title.Render(sanitize(m.title)) + m.styles.Status.Render(status+fmt.Sprint(m.elapsed()))
+	status += m.elapsedText()
+	status = strings.TrimSuffix(status, " · ")
+	return m.styles.Title.Render(sanitize(m.title)) + m.styles.Status.Render(status)
 }
 
 // asideCounts returns the aside rows counted apart in the header, followed
@@ -491,9 +533,10 @@ func (m Progress) ratio() (float64, bool) {
 // the header itself is wider than the terminal, there is no bar, and its
 // hint is dropped, then its aside counts, then its other counts: the title
 // and the elapsed time stay (the title is cut last, see truncate). The
-// elapsed time counts as elapsedReserve columns in these decisions.
+// elapsed time counts as elapsedReserve columns in these decisions, even
+// while hidden by a question.
 func (m Progress) headerLine() string {
-	pad := max(0, elapsedReserve-lipgloss.Width(fmt.Sprint(m.elapsed())))
+	pad := max(0, elapsedReserve-lipgloss.Width(m.elapsedText()))
 	width := func(s string) int { return lipgloss.Width(s) + pad }
 	h := m.header(true, true)
 	hint := m.cancelHint()
@@ -570,14 +613,19 @@ func (m Progress) bar(w int, r float64) string {
 func (m Progress) View() tea.View {
 	v := tea.NewView(m.render())
 	if m.terminalProgress && !m.finished {
-		v.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, 0)
-		if r, ok := m.ratio(); ok {
-			state := tea.ProgressBarDefault
-			if _, _, _, failed := m.Counts(); failed > 0 {
-				state = tea.ProgressBarError
-			}
-			v.ProgressBar = tea.NewProgressBar(state, int(math.Round(r*100)))
+		r, planned := m.ratio()
+		state := tea.ProgressBarDefault
+		_, _, _, failed := m.Counts()
+		switch {
+		case failed > 0 && planned:
+			state = tea.ProgressBarError
+		case len(m.asks) > 0:
+			// Paused: the work waits for the user.
+			state = tea.ProgressBarWarning
+		case !planned:
+			state = tea.ProgressBarIndeterminate
 		}
+		v.ProgressBar = tea.NewProgressBar(state, int(math.Round(r*100)))
 	}
 	return v
 }

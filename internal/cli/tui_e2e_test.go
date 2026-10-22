@@ -884,3 +884,55 @@ func TestTUIRemovalRowWaitsForTheConfirmation(t *testing.T) {
 		}
 	}
 }
+
+// While the question of prune, remove or wt rm is open, nothing on the
+// screen counts time or looks busy (B64): the header has no elapsed time
+// and no row spins.
+func TestTUIDialogShowsNoTimer(t *testing.T) {
+	t.Parallel()
+	elapsed := regexp.MustCompile(`\b[0-9.]+(ms|s|m[0-9]+s)\b`)
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		header string
+	}{
+		{"prune", []string{"prune"}, "Checking prune candidates ·"},
+		{"remove", []string{"remove", "alpha"}, "Checking alpha for removal ·"},
+		{"wt rm", []string{"wt", "rm", "alpha", "feat"}, "Checking worktree feat of alpha for removal ·"},
+	} {
+		e := newBundleEnv(t)
+		if tc.name == "prune" {
+			o, primary := e.addRepo(t, "alpha", "feat")
+			addWorktree(t, primary, "feat", "feat")
+			testutil.Git(t, o.Path, "branch", "-D", "feat") // gone upstream: a candidate
+		} else {
+			_, primary := e.addRepo(t, "alpha")
+			testutil.Git(t, primary, "worktree", "add", "-q", "-b", "feat", filepath.Join(e.cwd, "alpha", "feat"))
+		}
+		var out syncBuffer
+		asking := ""
+		wait := func() {
+			waitScreen(t, &out, "[y/N]")()
+			// Past the frame of the question, so that a timer would have
+			// moved since.
+			time.Sleep(1100 * time.Millisecond)
+			asking = screenText(out.String())
+		}
+		in := newScript(t, true, []key{{keys: "n", wait: wait}, {keys: "x", wait: waitScreen(t, &out, ": cancelled")}})
+		if errs, code := e.runTUI(t, in, &out, tc.args...); code != 1 {
+			t.Fatalf("%s: exit %d\nstdout:\n%s\nstderr:\n%s", tc.name, code, out.String(), errs)
+		}
+		header := ""
+		for _, l := range strings.Split(asking, "\n") {
+			if strings.HasPrefix(l, tc.header) {
+				header = l
+			}
+		}
+		if header == "" || elapsed.MatchString(header) {
+			t.Errorf("%s: header while asking %q, want one without an elapsed time:\n%s", tc.name, header, asking)
+		}
+		if strings.ContainsAny(asking, "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏") {
+			t.Errorf("%s: a spinner while asking:\n%s", tc.name, asking)
+		}
+	}
+}
