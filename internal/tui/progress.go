@@ -32,7 +32,8 @@ const (
 	RowInterrupted
 	// RowWaiting means the work of the row waits (for a confirmation, or
 	// for its turn): a static marker instead of the spinner; not finished,
-	// it counts as running. An update without state makes it run again.
+	// Counts counts it as running, the header apart (as waiting, when there
+	// are some). An update without state makes it run again.
 	RowWaiting
 )
 
@@ -439,16 +440,19 @@ func roundElapsed(d time.Duration) time.Duration {
 }
 
 // header returns the header: the title, then while running the aside
-// counts (see WithAside) if aside, the counts of the other rows if counts,
+// counts (see WithAside) if aside, the counts of the other rows if counts
+// (the waiting ones apart from the running ones, when there are some),
 // and the elapsed time (none while a question is displayed, see
 // elapsedText); once finished, how it ended (see FinishMsg).
 func (m Progress) header(aside, counted bool) string {
 	running, done, skipped, failed := m.Counts()
 	counts := fmt.Sprintf("%d done, %d skipped, %d failed", done, skipped, failed)
-	cancelled, interrupted := 0, 0
+	waiting, cancelled, interrupted := 0, 0, 0
 	for _, r := range m.rows {
 		switch {
 		case r.aside:
+		case r.state == RowWaiting:
+			waiting++
 		case r.state == RowCancelled:
 			cancelled++
 		case r.state == RowInterrupted:
@@ -481,7 +485,10 @@ func (m Progress) header(aside, counted bool) string {
 		status += m.asideCounts()
 	}
 	if counted {
-		status += fmt.Sprintf("%d running, %s · ", running, counts)
+		if waiting > 0 {
+			status += fmt.Sprintf("%d waiting, ", waiting)
+		}
+		status += fmt.Sprintf("%d running, %s · ", running-waiting, counts)
 	}
 	status += m.elapsedText()
 	status = strings.TrimSuffix(status, " · ")

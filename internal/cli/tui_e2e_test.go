@@ -778,7 +778,8 @@ func TestTUIPruneConfirmationStatesBranchConditions(t *testing.T) {
 }
 
 // Until the removal is confirmed the progress view says it is checking,
-// not removing; declined, the operation is reported cancelled, not skipped.
+// not removing, its row counted as waiting; declined, the operation is
+// reported cancelled, not skipped.
 func TestTUIDeletionTitlesCheckingThenRemovingOrCancelled(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -806,7 +807,7 @@ func TestTUIDeletionTitlesCheckingThenRemovingOrCancelled(t *testing.T) {
 			}
 			o := out.String()
 			asking := o[:strings.Index(o, "[y/N]")]
-			if !strings.Contains(asking, tc.checking+" · 1 running") || strings.Contains(asking, tc.removing) {
+			if !strings.Contains(asking, tc.checking+" · 1 waiting, 0 running") || strings.Contains(asking, tc.removing) {
 				t.Errorf("%s %s: title while asking:\n%s", tc.name, answer, asking)
 			}
 			if !strings.Contains(screenText(o), final) {

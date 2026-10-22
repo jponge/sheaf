@@ -130,8 +130,9 @@ func TestProgressMessageOnlyUpdateKeepsFinalState(t *testing.T) {
 }
 
 // A waiting row (its work waits for a confirmation or its turn) has no
-// spinner but a static marker; it counts as running (not finished), and a
-// later update without state makes it run again.
+// spinner but a static marker; it is not finished (Counts counts it as
+// running) but the header counts it apart, as waiting, only when there are
+// some; a later update without state makes it run again.
 func TestProgressWaitingRow(t *testing.T) {
 	p, _ := newTestProgress("Removing")
 	m, _ := feed(p,
@@ -153,9 +154,15 @@ func TestProgressWaitingRow(t *testing.T) {
 	if r, _ := pr.ratio(); r != 0 {
 		t.Errorf("ratio %v, want 0 (nothing finished)", r)
 	}
+	if h := strings.Split(view(m), "\n")[0]; !strings.HasPrefix(h, "Removing · 1 waiting, 1 running, 0 done, 0 skipped, 0 failed · ") {
+		t.Errorf("header = %q, want the waiting row counted apart", h)
+	}
 	m, _ = feed(m, RowUpdate{Key: "a", Message: "removing"})
 	if l := strings.TrimSpace(rowLine(view(m), "removing")); strings.HasPrefix(l, "·") {
 		t.Errorf("row = %q, want running again", l)
+	}
+	if h := strings.Split(view(m), "\n")[0]; !strings.HasPrefix(h, "Removing · 2 running, 0 done, 0 skipped, 0 failed · ") {
+		t.Errorf("header = %q, want no waiting count", h)
 	}
 }
 
