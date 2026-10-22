@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -623,18 +624,31 @@ func TestTUIProgressFinalLineHasNoCounts(t *testing.T) {
 	testutil.AdvanceOrigin(t, o, "main", "r.txt", "r\n", "remote")
 	for _, tc := range []struct {
 		args        []string
-		final, sums string
+		title, sums string
 	}{
-		{[]string{"fetch"}, "Fetching: finished", "1 done"},
-		{[]string{"update"}, "Updating: finished", "1 fast-forwarded, 1 pinned"},
+		{[]string{"fetch"}, "Fetching", "1 done"},
+		{[]string{"update"}, "Updating", "1 fast-forwarded, 1 pinned"},
 	} {
 		var out syncBuffer
 		errs, code := e.runTUI(t, newScript(t, true), &out, tc.args...)
 		o := out.String()
-		// From the final line on (earlier frames of the view have counts).
-		final := o[max(0, strings.Index(o, tc.final)):]
-		if code != 0 || !strings.Contains(o, tc.final) || len(summaryLines(final, tc.sums)) != 1 {
-			t.Errorf("%v: exit %d, want the final line %q and one count line %q\nstdout:\n%s\nstderr:\n%s", tc.args, code, tc.final, tc.sums, o, errs)
+		// The final line of the progress view: its title, how it ended
+		// and the elapsed time from one second on (B62 L9), no counts.
+		finalLine := regexp.MustCompile(`^` + regexp.QuoteMeta(tc.title) + `: (finished|cancelled|interrupted)( (in|after) [0-9.hms]+)?$`)
+		lines := strings.Split(screenText(o), "\n")
+		last := -1
+		for i, l := range lines {
+			if strings.HasPrefix(l, tc.title) {
+				last = i
+			}
+		}
+		if code != 0 || last < 0 || !finalLine.MatchString(lines[last]) {
+			t.Errorf("%v: exit %d, want the final line of the view to match %s\nscreen:\n%s\nstderr:\n%s", tc.args, code, finalLine, screenText(o), errs)
+			continue
+		}
+		// One count line after it: the caller's summary.
+		if after := strings.Join(lines[last+1:], "\n"); len(summaryLines(after, tc.sums)) != 1 {
+			t.Errorf("%v: want one count line %q after the final line\nscreen:\n%s", tc.args, tc.sums, screenText(o))
 		}
 	}
 }

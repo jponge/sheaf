@@ -1185,6 +1185,9 @@ func TestHomePruneDoctorAndSync(t *testing.T) {
 			t.Errorf("stdout lacks %q:\n%s", want, out.String())
 		}
 	}
+	if !hasSummary(out.String(), "1 removed") {
+		t.Errorf("stdout lacks prune's count line %q:\n%s", "1 removed", out.String())
+	}
 	for _, name := range []string{"prune", "doctor", "sync"} {
 		if n := strings.Count(out.String(), "sheaf "+name+": "); n != 1 {
 			t.Errorf("%d report views of %s, want 1:\n%s", n, name, out.String())
