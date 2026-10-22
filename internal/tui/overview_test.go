@@ -490,7 +490,7 @@ func ovShape(m tea.Model) string {
 // it from the key help.
 func TestOverviewSpacesTheFooter(t *testing.T) {
 	t.Parallel()
-	for _, size := range []tea.Msg{nil, tea.WindowSizeMsg{Width: 80, Height: 24}} {
+	for _, size := range []tea.Msg{nil, tea.WindowSizeMsg{Width: 100, Height: 24}} {
 		for _, msg := range []string{"", "prune: nothing to prune"} {
 			var m tea.Model = newOv().WithFullHelp(true).WithMessage(msg)
 			if size != nil {
@@ -538,7 +538,7 @@ func TestOverviewShortTerminalDropsSpacingFirst(t *testing.T) {
 	}
 	for h := 1; h <= 10; h++ {
 		var m tea.Model = NewOverview("t", []string{"REPO", "DIR"}, rows, ovActions()).WithFullHelp(true).WithMessage("m")
-		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: h})
 		m, _ = press(m, "end")
 		v := view(m)
 		if got := ovShape(m); got != want[h] || lineCount(v) > h || !strings.Contains(v, "> [ ] r29") {
@@ -561,7 +561,7 @@ func TestOverviewDropsSpacingToFitWithoutScrolling(t *testing.T) {
 	}
 	for h := 7; h <= 11; h++ {
 		var m tea.Model = newOv().WithFullHelp(true).WithMessage("m")
-		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: h})
 		v := view(m)
 		if got := ovShape(m); got != want[h] || lineCount(v) > h {
 			t.Errorf("height %d: shape %q, want %q:\n%s", h, got, want[h], v)
@@ -644,7 +644,7 @@ func TestOverviewNarrowStatusPartsLeaveNoDanglingSeparator(t *testing.T) {
 // wrapped lines count in the layout: the view never exceeds the height.
 func TestOverviewKeyHelpWrapsToWidth(t *testing.T) {
 	t.Parallel()
-	list := []string{"↑/k up", "↓/j down", "space toggle", "a all", "n none", "/ filter", "esc/q quit"}
+	list := []string{"↑/k up", "↓/j down", "g/G top/bottom", "space toggle", "a all", "n none", "/ filter", "esc/q quit"}
 	filter := []string{"enter apply filter", "esc clear filter"}
 	for w := 18; w <= 80; w++ {
 		var m tea.Model = newOv().WithFullHelp(true)
@@ -1021,12 +1021,14 @@ func TestOverviewCompactHelpTogglesWithQuestionMark(t *testing.T) {
 	if got := helpOf(m); !slices.Equal(got, []string{short}) || asOv(t, m).FullHelp() {
 		t.Fatalf("compact help %q, want %q", got, short)
 	}
+	// The full help takes three lines at 80 columns since g/G (B62 L1).
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m, cmd := press(m, "?")
 	full := strings.Join(helpOf(m), "\n")
 	if isQuit(cmd) || !asOv(t, m).FullHelp() || len(helpOf(m)) != 2 {
 		t.Fatalf("full help (quit %v):\n%s", isQuit(cmd), full)
 	}
-	for _, want := range []string{"↑/k up", "↓/j down", "a all", "n none", "? less", "esc/q quit", "w add worktree", "p prune", "r remove worktree"} {
+	for _, want := range []string{"↑/k up", "↓/j down", "g/G top/bottom", "a all", "n none", "? less", "esc/q quit", "w add worktree", "p prune", "r remove worktree"} {
 		if !strings.Contains(full, want) {
 			t.Errorf("full help lacks %q:\n%s", want, full)
 		}
@@ -1294,5 +1296,38 @@ func TestCutLinesNoDoubleEllipsis(t *testing.T) {
 		if ansi.Strip(lines[i]) != ansi.Strip(want[i]) || lipgloss.Width(lines[i]) > 4 {
 			t.Errorf("line %d: %q, want %q", i, lines[i], want[i])
 		}
+	}
+}
+
+// g and G move to the first and last row, as home and end and as in the
+// report view (B62 L1); in filter mode they are typed into the filter. The
+// full key help lists them, the compact one does not.
+func TestOverviewGMovesToTheFirstAndLastRow(t *testing.T) {
+	t.Parallel()
+	var m tea.Model = newOv()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	for _, k := range []string{"G", "shift+g"} {
+		m, _ = press(m, "g")
+		if got := asOv(t, m).CurrentKey(); got != "/b/a/main" {
+			t.Fatalf("after g: CurrentKey() = %q", got)
+		}
+		m, _ = press(m, k)
+		if got := asOv(t, m).CurrentKey(); got != "/b/bravo/main" {
+			t.Fatalf("after %s: CurrentKey() = %q", k, got)
+		}
+	}
+	m, _ = press(m, "g")
+	if got := asOv(t, m).CurrentKey(); got != "/b/a/main" {
+		t.Fatalf("after g: CurrentKey() = %q", got)
+	}
+	if v := view(m); strings.Contains(v, "g/G") {
+		t.Errorf("compact help lists g/G:\n%s", v)
+	}
+	if v := view(asOv(t, m).WithFullHelp(true)); !strings.Contains(v, "g/G top/bottom") {
+		t.Errorf("full help lacks g/G:\n%s", v)
+	}
+	f, _ := press(m, "/", "g", "G")
+	if o := asOv(t, f); o.Filter() != "gG" || o.CurrentKey() != "" {
+		t.Errorf("filter mode: filter %q, current %q", o.Filter(), o.CurrentKey())
 	}
 }

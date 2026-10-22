@@ -70,7 +70,7 @@ const noRowMessage = "no row to act on"
 // a multi-selection and a filter, and quitting with the action chosen by
 // the user.
 //
-// Keys: up/down/k/j, pgup/pgdown, home/end (and the mouse wheel, see
+// Keys: up/down/k/j, pgup/pgdown, home/end/g/G (and the mouse wheel, see
 // WithMouse) move; space toggles the
 // selection of the current row; a selects and n deselects every visible
 // row (rows hidden by the filter keep their state, as in MultiSelect);
@@ -129,6 +129,9 @@ func NewOverview(title string, header []string, rows []Row, actions []OverviewAc
 	// The keys are those of MultiSelect, with the same help except that
 	// esc and q quit the program rather than cancel a menu.
 	keys.Cancel.SetHelp("esc/q", "quit")
+	// g and G also go to the first and last row, as in the report view.
+	keys.Home = key.NewBinding(key.WithKeys("home", "g"), key.WithHelp("g/G", "top/bottom"))
+	keys.End = key.NewBinding(key.WithKeys("end", "G", "shift+g"))
 	m := Overview{
 		title:    title,
 		header:   slices.Clone(header),
@@ -852,7 +855,8 @@ func (m Overview) View() tea.View {
 // helpLines renders the key help, wrapped to the width so that no key is
 // cut off: in filter mode the filter keys; otherwise the compact help
 // (toggle, a/n, the Short actions, ? more, quit), or with the full help
-// the movement keys and quit, then every action and ? less.
+// the movement keys (g/G for both ends) and quit, then every action and
+// ? less.
 func (m Overview) helpLines() []string {
 	if m.filtering {
 		return wrapHelp(m.help, m.width, []key.Binding{m.keys.ApplyFilter, m.keys.ClearFilter})
@@ -872,7 +876,7 @@ func (m Overview) helpLines() []string {
 		quit := key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit"))
 		return wrapHelp(m.help, m.width, append(short, m.keys.More, quit))
 	}
-	lines := wrapHelp(m.help, m.width, []key.Binding{m.keys.Up, m.keys.Down, m.keys.Toggle, m.keys.All, m.keys.None, m.keys.Filter, m.keys.Cancel})
+	lines := wrapHelp(m.help, m.width, []key.Binding{m.keys.Up, m.keys.Down, m.keys.Home, m.keys.Toggle, m.keys.All, m.keys.None, m.keys.Filter, m.keys.Cancel})
 	var actions []key.Binding
 	for _, a := range m.actions {
 		actions = append(actions, binding(a))

@@ -292,7 +292,7 @@ including SSH aliases of github.com, have no link.
 
 | Key | Action |
 |---|---|
-| up/down, k/j, pgup/pgdown, home/end, mouse wheel | move (the wheel by 3 rows) |
+| up/down, k/j, pgup/pgdown, home/end (g/G), mouse wheel | move (the wheel by 3 rows) |
 | space | toggle the selection of the current row |
 | a, n | select / deselect every visible row (rows hidden by the filter keep their selection) |
 | / | filter (case-insensitive substring over the cells; enter keeps it, esc clears it) |
