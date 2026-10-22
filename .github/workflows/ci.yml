@@ -48,7 +48,11 @@ jobs:
       - name: Test
         run: make test
 
+      # macOS's TMPDIR is already reached through a symbolic link (/var ->
+      # /private/var), so make test covers this case there; the second full
+      # run would only add time on the slowest runner.
       - name: Test with TMPDIR through a symbolic link
+        if: runner.os == 'Linux'
         run: make test-symlinked-tmp
 
       - name: Test with fish and zsh required

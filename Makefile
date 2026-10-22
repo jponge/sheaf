@@ -7,6 +7,10 @@ LDFLAGS := -X github.com/jponge/sheaf/internal/cli.Version=$(VERSION)
 # module cache on first use): it is a tool, not a dependency of the module.
 STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.2
 
+# go test's per-package timeout (Go's default is 10m): the suite runs real git
+# and pty sessions, and slow machines (e.g. CI's macOS runners) exceed 10m.
+TEST_TIMEOUT ?= 30m
+
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/sheaf ./cmd/sheaf
 
@@ -20,7 +24,7 @@ clean:
 	rm -rf bin
 
 test:
-	go test -race ./...
+	go test -race -timeout $(TEST_TIMEOUT) ./...
 
 # Runs the suite with TMPDIR reached through a symbolic link, like macOS's
 # /var -> /private/var: tests must expect the resolved paths that git and
@@ -29,7 +33,7 @@ test-symlinked-tmp:
 	@base=$$(mktemp -d) && trap 'chmod -R u+w "$$base" 2>/dev/null; rm -rf "$$base"' EXIT && \
 	mkdir "$$base/real" && ln -s "$$base/real" "$$base/link" && \
 	echo "TMPDIR=$$base/link" && \
-	TMPDIR="$$base/link" go test -race -count=1 ./...
+	TMPDIR="$$base/link" go test -race -count=1 -timeout $(TEST_TIMEOUT) ./...
 
 # Runs the cli tests with fish and zsh required: `make test` skips the fish and
 # zsh tests when the shells are missing. The shells are the ones on PATH, or
@@ -57,7 +61,7 @@ test-shells:
 	  "$$SHEAF_TEST_FISH" --no-config -c 'echo "fish $$version, data: $$__fish_data_dir"'; \
 	  "$$SHEAF_TEST_ZSH" -fc 'echo "zsh $$ZSH_VERSION"'; \
 	fi; \
-	SHEAF_TEST_REQUIRE_SHELLS=1 go test -race -count=1 ./internal/cli/
+	SHEAF_TEST_REQUIRE_SHELLS=1 go test -race -count=1 -timeout $(TEST_TIMEOUT) ./internal/cli/
 
 vet:
 	go vet ./...
