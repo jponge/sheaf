@@ -56,15 +56,20 @@ func TestProposalItems(t *testing.T) {
 	}
 }
 
+// The detail of a candidate is its primary checkout relative to the
+// directory the menu names (B62 L7: the absolute paths repeated the same
+// prefix, cut, on every row), left out when it is the label.
 func TestCandidateItems(t *testing.T) {
 	t.Parallel()
 	cs := []ops.Candidate{
 		{Name: "alpha", Path: "/b/alpha", Kind: ops.CandidatePlainClone, Primary: "/b/alpha"},
 		{Name: "beta", Path: "/b/beta", Kind: ops.CandidateLaidOut, Primary: "/b/beta/main"},
+		{Name: "gamma", Path: "/b/gamma", Kind: ops.CandidateLaidOut, Primary: "/elsewhere/gamma"}, // not found by init
 	}
 	want := []tui.Item{
-		{Key: "/b/alpha", Label: "alpha", Detail: "/b/alpha", Tags: []string{"plain clone"}, Selected: true},
-		{Key: "/b/beta", Label: "beta", Detail: "/b/beta/main", Tags: []string{"laid out"}, Selected: true},
+		{Key: "/b/alpha", Label: "alpha", Tags: []string{"plain clone"}, Selected: true},
+		{Key: "/b/beta", Label: "beta", Detail: "beta/main", Tags: []string{"laid out"}, Selected: true},
+		{Key: "/b/gamma", Label: "gamma", Detail: "/elsewhere/gamma", Tags: []string{"laid out"}, Selected: true},
 	}
 	if got := candidateItems(cs); !reflect.DeepEqual(got, want) {
 		t.Fatalf("candidateItems = %+v, want %+v", got, want)

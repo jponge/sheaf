@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -78,11 +79,20 @@ func proposalItems(ps []ops.Proposal) []tui.Item {
 }
 
 // candidateItems maps the checkouts found by init to menu items keyed by
-// path, all preselected.
+// path, all preselected. The detail is the primary checkout relative to
+// the directory searched (the parent of the candidate, named by the menu's
+// title), e.g. beta/main, left out when it is the label (a plain clone).
 func candidateItems(cs []ops.Candidate) []tui.Item {
 	items := make([]tui.Item, 0, len(cs))
 	for _, c := range cs {
-		items = append(items, tui.Item{Key: c.Path, Label: c.Name, Detail: c.Primary, Tags: []string{c.Kind.String()}, Selected: true})
+		detail := c.Primary
+		if rel, err := filepath.Rel(filepath.Dir(c.Path), c.Primary); err == nil && filepath.IsLocal(rel) {
+			detail = rel
+		}
+		if detail == c.Name {
+			detail = ""
+		}
+		items = append(items, tui.Item{Key: c.Path, Label: c.Name, Detail: detail, Tags: []string{c.Kind.String()}, Selected: true})
 	}
 	return items
 }
