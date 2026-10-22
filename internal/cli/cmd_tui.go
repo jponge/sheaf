@@ -183,6 +183,8 @@ func tuiRemove(c *cobra.Command, d Deps, w *ops.Workspace, name string, opts ops
 				}
 				return true
 			}
+			// The row waits while the question is open (see ops.PhaseWait).
+			emit(ops.Event{Phase: ops.PhaseWait, Message: "waiting for the confirmation"})
 			return ask("Remove "+name+"?", lines)
 		}
 		msg, rerr = ops.Remove(ctx, w, name, opts, emit)
@@ -246,6 +248,7 @@ func tuiWorktreeRemove(c *cobra.Command, d Deps, w *ops.Workspace, repo string, 
 				}
 				return true
 			}
+			emit(ops.Event{Worktree: p.Worktree.Dir, Phase: ops.PhaseWait, Message: "waiting for the confirmation"})
 			return ask(fmt.Sprintf("Remove worktree %s of %s?", p.Worktree.Dir, repo), lines)
 		}
 		msg, rerr = ops.RemoveWorktree(ctx, w, repo, target, opts, emit)

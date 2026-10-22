@@ -832,3 +832,41 @@ func TestTUIPruneConfirmationStatesWorktreeBranchFate(t *testing.T) {
 		}
 	}
 }
+
+// While its question is open, the row of remove or wt rm waits, as those
+// of the removal of several worktrees do, rather than spin on "checking
+// for data at risk" (B62 L8).
+func TestTUIRemovalRowWaitsForTheConfirmation(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		args []string
+		row  string
+	}{
+		{"remove", []string{"remove", "alpha"}, "alpha"},
+		{"wt rm", []string{"wt", "rm", "alpha", "feat"}, "alpha/feat"},
+	} {
+		e := newBundleEnv(t)
+		_, primary := e.addRepo(t, "alpha")
+		testutil.Git(t, primary, "worktree", "add", "-q", "-b", "feat", filepath.Join(e.cwd, "alpha", "feat"))
+		var out syncBuffer
+		waiting := func() {
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				s := screenText(out.String())
+				if strings.Contains(s, "[y/N]") && strings.Contains(s, tc.row+"  waiting for the confirmation") {
+					return
+				}
+				if time.Now().After(deadline) {
+					t.Errorf("%s: the row does not wait while the question is open:\n%s", tc.name, s)
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+		in := newScript(t, true, []key{{keys: "n", wait: waiting}, {keys: "x", wait: waitScreen(t, &out, ": cancelled")}})
+		if errs, code := e.runTUI(t, in, &out, tc.args...); code != 1 {
+			t.Fatalf("%s: exit %d\nstdout:\n%s\nstderr:\n%s", tc.name, code, out.String(), errs)
+		}
+	}
+}
