@@ -266,9 +266,10 @@ func TestScdBashCompletionHidesGlobalFlags(t *testing.T) {
 // a tab), the echo of their printable part, the rest (the completion) being
 // processed by readline before the next keys, like typeahead. A wait that
 // times out (per step, and 20 s overall) is noted in the output and the
-// driver goes on; the test's assertions report it.
+// driver goes on; the test's assertions report it. The shell's PATH is the
+// sheaf binary's directory, then that of the suite's git, then /usr/bin:/bin.
 const ptyDriver = `
-import os, pty, select, shlex, sys, time
+import os, pty, select, shlex, shutil, sys, time
 shell, bindir, cwd, rc = sys.argv[1:5]
 zsh = os.path.basename(shell).startswith("zsh")
 # The system bashrc may set PS1: set it after rc, to recognise prompts.
@@ -281,7 +282,10 @@ with open(wrapper, "w") as f:
 pid, fd = pty.fork()
 if pid == 0:
     os.chdir(cwd)
-    env = {"PATH": bindir + ":/usr/bin:/bin", "HOME": cwd, "TERM": "dumb", "PS1": "PROMPT$ ", "LC_ALL": "C"}
+    # The suite's git first, before the system one (macOS: the xcrun shim).
+    git = shutil.which("git")
+    path = bindir + (":" + os.path.dirname(git) if git else "") + ":/usr/bin:/bin"
+    env = {"PATH": path, "HOME": cwd, "TERM": "dumb", "PS1": "PROMPT$ ", "LC_ALL": "C"}
     if zsh:  # -d: no global rc files; see shellBinary for the passed-through variables
         env["ZDOTDIR"] = os.path.dirname(wrapper)
         for k in ("LD_LIBRARY_PATH", "FPATH", "SHEAF_TEST_ZSH_MODULE_PATH"):
@@ -365,6 +369,45 @@ func TestScdBashCompletionInteractive(t *testing.T) {
 	}
 }
 
+// The pty driver's shell finds the git the suite uses first on its PATH,
+// not only the system one: on macOS, /usr/bin/git is the xcrun shim, whose
+// first (cold) call can outlast sheaf's 5 s completion timeout, which then
+// completes nothing (B65: TestScdBashCompletionInteractive failed that way
+// on the macOS runner). A wrapper git put first on the suite's PATH stands
+// for a git that is not /usr/bin/git.
+func TestPTYDriverShellUsesTheSuiteGit(t *testing.T) {
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is not installed: no pty-driven test")
+	}
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitDir := t.TempDir()
+	git := filepath.Join(gitDir, "git")
+	if err := os.WriteFile(git, []byte("#!/bin/sh\nexec "+shellQuote(real)+" \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", gitDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	bin := sheafBinary(t)
+	dir := t.TempDir()
+	rc := filepath.Join(dir, "rc")
+	script := filepath.Join(dir, "drive.py")
+	for f, c := range map[string]string{rc: "\n", script: ptyDriver} {
+		if err := os.WriteFile(f, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := exec.Command(py, "-I", script, "/bin/bash", bin, dir, rc, "command -v git\\n").CombinedOutput()
+	if err != nil {
+		t.Fatalf("driver: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "\n"+git) {
+		t.Errorf("the shell does not run the suite's git %s:\n%s", git, out)
+	}
+}
+
 // scdCompletionDumpRC is bash rc code, loaded after shell-init, for the
 // diagnostics of a failed interactive completion test (B65: it fails with
 // macOS's /bin/bash 3.2 only): it appends to the file dump the version of the
@@ -413,7 +456,11 @@ func logScdCompletionDiagnostics(t *testing.T, binDir, root, dump string, words 
 	for _, w := range words {
 		cmd := exec.Command(filepath.Join(binDir, "sheaf"), "__complete", "path", "a", w)
 		cmd.Dir = root
-		cmd.Env = []string{"PATH=" + binDir + ":/usr/bin:/bin", "HOME=" + root, "TERM=dumb", "LC_ALL=C"}
+		path := binDir
+		if git, err := exec.LookPath("git"); err == nil {
+			path += ":" + filepath.Dir(git) // as the pty driver
+		}
+		cmd.Env = []string{"PATH=" + path + ":/usr/bin:/bin", "HOME=" + root, "TERM=dumb", "LC_ALL=C"}
 		out, err := cmd.CombinedOutput()
 		t.Logf("diagnostics: sheaf __complete path a %q from %s (%v):\n%s", w, root, err, out)
 	}
