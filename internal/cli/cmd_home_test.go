@@ -73,7 +73,7 @@ func reportKey(t *testing.T, out *syncBuffer, name, k string) []key {
 // view, which a terminal never leads to.
 func declineRemoval(t *testing.T, out *syncBuffer) []key {
 	t.Helper()
-	return []key{{keys: "n", wait: waitOutput(t, out, "[y/N]")}, {keys: "x", wait: waitOutput(t, out, "cancelled after")}}
+	return []key{{keys: "n", wait: waitOutput(t, out, "[y/N]")}, {keys: "x", wait: waitOutput(t, out, ": cancelled")}}
 }
 
 // homeBundle has repositories alpha (primary main, worktree feat tracking
@@ -1299,7 +1299,7 @@ func multiRemoveBundle(t *testing.T) (e *env, feat, x, y string) {
 // the view shows the removal finished.
 func acceptRemoval(t *testing.T, out *syncBuffer) []key {
 	t.Helper()
-	return []key{{keys: "y", wait: waitOutput(t, out, "[y/N]")}, {keys: "x", wait: waitOutput(t, out, "finished in")}}
+	return []key{{keys: "y", wait: waitOutput(t, out, "[y/N]")}, {keys: "x", wait: waitOutput(t, out, ": finished")}}
 }
 
 // selectFeatXY selects feat, x and y in the overview of multiRemoveBundle,

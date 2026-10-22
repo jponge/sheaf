@@ -62,7 +62,8 @@ type TitleMsg struct{ Title string }
 // the title only, with how it ended and the elapsed time frozen: "<title>:
 // finished in 1.2s", "interrupted after", or "cancelled after" when every
 // row was cancelled, or a question was answered no before any row (aside
-// rows apart) finished. It has no counts: the caller prints the summary of
+// rows apart) finished; without the elapsed time under a second
+// ("<title>: finished"). It has no counts: the caller prints the summary of
 // the results itself, which they would repeat or contradict. Pending
 // questions are answered no.
 type FinishMsg struct{}
@@ -421,14 +422,19 @@ func (m Progress) header(aside, counted bool) string {
 		counts += fmt.Sprintf(", %d interrupted", interrupted)
 	}
 	if m.finished {
-		end := "finished in"
+		end, since := "finished", "in"
 		switch {
 		case m.interrupts > 0:
-			end = "interrupted after"
+			end, since = "interrupted", "after"
 		case (cancelled > 0 || m.declined) && running+done+skipped+failed+interrupted == 0:
-			end = "cancelled after"
+			end, since = "cancelled", "after"
 		}
-		return m.styles.Title.Render(sanitize(m.title)) + fmt.Sprintf(": %s %v", end, m.elapsed())
+		title := m.styles.Title.Render(sanitize(m.title))
+		// A duration under a second tells nothing ("finished in 0s").
+		if e := m.elapsed(); e >= time.Second {
+			return title + fmt.Sprintf(": %s %s %v", end, since, e)
+		}
+		return title + ": " + end
 	}
 	status := " · "
 	if aside {

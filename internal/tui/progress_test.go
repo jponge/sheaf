@@ -364,7 +364,7 @@ func TestProgressCancelledRowAndTitleChange(t *testing.T) {
 		t.Errorf("header does not count the cancelled row:\n%s", v)
 	}
 	m, _ = feed(m, FinishMsg{})
-	if v := view(m); !strings.HasPrefix(v, "Removing alpha: cancelled after ") {
+	if v := view(m); v != "Removing alpha: cancelled\n" {
 		t.Errorf("final view:\n%s", v)
 	}
 }
@@ -783,8 +783,8 @@ func TestProgressSpacesTheHeader(t *testing.T) {
 func TestProgressFinishAfterDeclinedQuestion(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ key, want string }{
-		{"n", "Checking prune candidates: cancelled after 0s\n"},
-		{"y", "Checking prune candidates: finished in 0s\n"},
+		{"n", "Checking prune candidates: cancelled\n"},
+		{"y", "Checking prune candidates: finished\n"},
 	} {
 		p, _ := newTestProgress("Checking prune candidates")
 		m, _ := feed(p.WithAside("fetch"),
@@ -879,5 +879,40 @@ func TestProgressInterruptedRow(t *testing.T) {
 	}
 	if pb := m.View().ProgressBar; pb == nil || pb.State != tea.ProgressBarDefault || pb.Value != 100 {
 		t.Errorf("terminal progress %+v, want the default state at 100", pb)
+	}
+}
+
+// The final line gives the elapsed time from one second on only (B62 L9):
+// "Fetching: finished", not "finished in 100ms" or "finished in 0s"; also
+// when cancelled or interrupted.
+func TestProgressFinalLineOmitsADurationUnderOneSecond(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		elapsed   time.Duration
+		interrupt bool
+		want      string
+	}{
+		{0, false, "Fetching: finished\n"},
+		{940 * time.Millisecond, false, "Fetching: finished\n"},
+		{950 * time.Millisecond, false, "Fetching: finished in 1s\n"},
+		{1200 * time.Millisecond, false, "Fetching: finished in 1.2s\n"},
+		{100 * time.Millisecond, true, "Fetching: interrupted\n"},
+		{2 * time.Second, true, "Fetching: interrupted after 2s\n"},
+	} {
+		p, clock := newTestProgress("Fetching")
+		m, _ := feed(p, RowUpdate{Key: "a", Label: "alpha", State: RowDone})
+		if c.interrupt {
+			m, _ = feed(m, InterruptedMsg{Count: 1})
+		}
+		clock.t = clock.t.Add(c.elapsed)
+		m, _ = feed(m, FinishMsg{})
+		if v := view(m); v != c.want {
+			t.Errorf("%v, interrupted %v: final view %q, want %q", c.elapsed, c.interrupt, v, c.want)
+		}
+	}
+	p, _ := newTestProgress("Checking prune candidates")
+	m, _ := feed(p, AskMsg{Question: "Prune 1 candidate?", Reply: make(chan bool, 1)}, keyMsg("n"), FinishMsg{})
+	if v, want := view(m), "Checking prune candidates: cancelled\n"; v != want {
+		t.Errorf("declined: final view %q, want %q", v, want)
 	}
 }

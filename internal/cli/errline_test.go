@@ -176,7 +176,7 @@ func TestSyncTUIListingFailureSaidOnce(t *testing.T) {
 	for name, in := range map[string]func(*syncBuffer) io.Reader{
 		"nothing selected": func(*syncBuffer) io.Reader { return newScript(t, false, keys("\r")) },
 		"applied": func(out *syncBuffer) io.Reader {
-			return newScript(t, true, keys(" ", "\r"), []key{{wait: waitOutput(t, out, "Syncing: finished in")}})
+			return newScript(t, true, keys(" ", "\r"), []key{{wait: waitOutput(t, out, "Syncing: finished")}})
 		},
 	} {
 		e := twoOrgSync(t)

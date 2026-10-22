@@ -308,7 +308,7 @@ func TestTUISyncAddsSelectedWithoutExclusionStep(t *testing.T) {
 	// one reads it, fail fast instead of blocking.
 	in := newScript(t, true, keys(" ", "\r"), []key{{wait: func() {
 		deadline := time.Now().Add(20 * time.Second)
-		for o := out.String(); !strings.Contains(o, "Syncing: finished in"); o = out.String() {
+		for o := out.String(); !strings.Contains(o, "Syncing: finished"); o = out.String() {
 			if strings.Contains(o, "Exclude") || time.Now().After(deadline) {
 				t.Errorf("no progress summary after the menu:\n%s", o)
 				return
@@ -590,7 +590,7 @@ func TestTUIPruneConfirms(t *testing.T) {
 	wt := addWorktree(t, primary, "feat", "feat")
 	testutil.Git(t, o.Path, "branch", "-D", "feat") // gone upstream
 	var out syncBuffer
-	in := newScript(t, true, []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}, {keys: "x", wait: waitScreen(t, &out, "Pruning: finished in")}})
+	in := newScript(t, true, []key{{keys: "y", wait: waitOutput(t, &out, "[y/N]")}, {keys: "x", wait: waitScreen(t, &out, "Pruning: finished")}})
 	errs, code := e.runTUI(t, in, &out, "prune")
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
@@ -625,8 +625,8 @@ func TestTUIProgressFinalLineHasNoCounts(t *testing.T) {
 		args        []string
 		final, sums string
 	}{
-		{[]string{"fetch"}, "Fetching: finished in ", "1 done"},
-		{[]string{"update"}, "Updating: finished in ", "1 fast-forwarded, 1 pinned"},
+		{[]string{"fetch"}, "Fetching: finished", "1 done"},
+		{[]string{"update"}, "Updating: finished", "1 fast-forwarded, 1 pinned"},
 	} {
 		var out syncBuffer
 		errs, code := e.runTUI(t, newScript(t, true), &out, tc.args...)
@@ -658,7 +658,7 @@ func TestTUIPruneHeaderCountsTheFetch(t *testing.T) {
 		t.Errorf("header while asking does not count the fetch:\n%s", asking)
 	}
 	// Declined: the view ends cancelled, like the command.
-	if !strings.Contains(screenText(out.String()), "Checking prune candidates: cancelled after ") {
+	if !strings.Contains(screenText(out.String()), "Checking prune candidates: cancelled") {
 		t.Errorf("final view does not say cancelled:\n%s", screenText(out.String()))
 	}
 }
@@ -780,9 +780,9 @@ func TestTUIDeletionTitlesCheckingThenRemovingOrCancelled(t *testing.T) {
 			_, primary := e.addRepo(t, "alpha")
 			testutil.Git(t, primary, "worktree", "add", "-q", "-b", "feat", filepath.Join(e.cwd, "alpha", "feat"))
 			var out syncBuffer
-			final := tc.checking + ": cancelled after "
+			final := tc.checking + ": cancelled"
 			if answer == "y" {
-				final = tc.removing + ": finished in "
+				final = tc.removing + ": finished"
 			}
 			// The second key keeps the input open until the final view.
 			in := newScript(t, true, []key{{keys: answer, wait: waitOutput(t, &out, "[y/N]")}, {keys: "x", wait: waitScreen(t, &out, final)}})

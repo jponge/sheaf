@@ -211,13 +211,13 @@ func TestHomeOnPTYOverviewOnAlternateScreen(t *testing.T) {
 	waitScreenState(t, s, "the report view of fetch on the alternate screen", func(vt *vtScreen) bool {
 		alt, normal := vt.altLines(), strings.Join(vt.normalLines(), "\n")
 		return vt.altActive() && len(alt) > 0 && strings.HasPrefix(alt[0], "sheaf fetch: ") && slices.Contains(alt, "done     alpha: fetched origin") &&
-			strings.Contains(normal, "Fetching: finished in") && strings.Contains(normal, "done     alpha: fetched origin")
+			strings.Contains(normal, "Fetching: finished") && strings.Contains(normal, "done     alpha: fetched origin")
 	})
 	time.Sleep(tui.ReportGrace)
 	s.write("q")
 	vt := waitScreenState(t, s, "the overview after fetch on the alternate screen", overviewShown("fetch: done"))
-	if normal := strings.Join(vt.normalLines(), "\n"); !strings.Contains(normal, "Fetching: finished in") ||
-		strings.Index(normal, "done     alpha: fetched origin") < strings.Index(normal, "Fetching: finished in") {
+	if normal := strings.Join(vt.normalLines(), "\n"); !strings.Contains(normal, "Fetching: finished") ||
+		strings.Index(normal, "done     alpha: fetched origin") < strings.Index(normal, "Fetching: finished") {
 		t.Errorf("the normal screen lacks the progress view of the fetch and its summary below it:\n%s", normal)
 	}
 	s.write("j\r")
@@ -358,7 +358,7 @@ func TestHomeOnPTYLeavesNoStaleOverviews(t *testing.T) {
 		}
 		return n
 	}
-	summaries := []string{"Fetching: finished in", "Updating: finished in", "Checking worktree feat of alpha for removal: cancelled after", "Fetching: finished in"}
+	summaries := []string{"Fetching: finished", "Updating: finished", "Checking worktree feat of alpha for removal: cancelled", "Fetching: finished"}
 	s.write("f")
 	dismissReport(t, s, "fetch", 1)
 	waitCount("fetch: done", 1)
