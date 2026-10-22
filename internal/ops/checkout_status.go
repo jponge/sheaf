@@ -126,7 +126,7 @@ func fetchSets(ctx context.Context, net gitx.Net, sets []*repoCheckouts, jobs in
 
 func sortProblems(ps []Problem) {
 	slices.SortStableFunc(ps, func(a, b Problem) int {
-		return cmp.Or(strings.Compare(a.Repo, b.Repo), strings.Compare(a.Path, b.Path))
+		return cmp.Or(strings.Compare(a.Repo, b.Repo), naturalCompare(a.Path, b.Path))
 	})
 }
 

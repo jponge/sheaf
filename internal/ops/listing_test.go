@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -78,6 +79,66 @@ func TestListingsOutsideWorktreeOrder(t *testing.T) {
 	want = []string{"alpha/main " + alpha + " primary", "alpha/feat " + feat, "alpha/zz " + zz, "alpha/aaa " + far + " outside"}
 	if got := checkoutListing(cs); !slices.Equal(got, want) {
 		t.Errorf("ListCheckouts =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// Worktrees are listed in the natural order of their directory names
+// (feat-2 before feat-10, B62 L2), after the primary, by both.
+func TestListingsNaturalWorktreeOrder(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	_, alpha := addRepoWith(t, f, "alpha")
+	for _, d := range []string{"feat-10", "feat-2", "feat-1", "feat"} {
+		addWorktree(t, alpha, d, d, false)
+	}
+	want := []string{"alpha/main", "alpha/feat", "alpha/feat-1", "alpha/feat-2", "alpha/feat-10"}
+	infos, fails, err := ListWorktrees(context.Background(), f.w, "")
+	if err != nil || len(fails) != 0 {
+		t.Fatal(err, fails)
+	}
+	var got []string
+	for _, in := range infos {
+		got = append(got, in.Repo+"/"+in.Dir)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("ListWorktrees = %q, want %q", got, want)
+	}
+	cs, probs, err := ListCheckouts(context.Background(), f.w, CheckoutFilter{}, 1)
+	if err != nil || len(probs) != 0 {
+		t.Fatal(err, probs)
+	}
+	if got := checkoutNames(cs); !slices.Equal(got, want) {
+		t.Errorf("ListCheckouts = %q, want %q", got, want)
+	}
+}
+
+// naturalCompare orders digit runs by their numeric value, the rest byte
+// by byte; names equal but for leading zeros are ordered by bytes, so
+// that the order is total.
+func TestNaturalCompare(t *testing.T) {
+	t.Parallel()
+	sorted := []string{"", "01", "1", "01x", "2", "10", "a", "a01", "a1", "a2", "a10", "a10b", "a10c", "a99999999999999999999", "a100000000000000000000", "b", "feat", "feat-1", "feat-2", "feat-10", "feat-10-1", "feat-10-2", "feat-10a", "feat2"}
+	for i, a := range sorted {
+		for j, b := range sorted {
+			if got, want := naturalCompare(a, b), cmp.Compare(i, j); got != want {
+				t.Errorf("naturalCompare(%q, %q) = %d, want %d", a, b, got, want)
+			}
+		}
+	}
+}
+
+// Problems are sorted by repository, then in the natural order of their
+// paths.
+func TestSortProblemsNaturalOrder(t *testing.T) {
+	t.Parallel()
+	ps := []Problem{{Repo: "b", Path: "/x/b/gone-1"}, {Repo: "a", Path: "/x/a/gone-10"}, {Repo: "a", Path: "/x/a/gone-2"}}
+	sortProblems(ps)
+	var got []string
+	for _, p := range ps {
+		got = append(got, p.Path)
+	}
+	if want := []string{"/x/a/gone-2", "/x/a/gone-10", "/x/b/gone-1"}; !slices.Equal(got, want) {
+		t.Errorf("sortProblems: %q, want %q", got, want)
 	}
 }
 

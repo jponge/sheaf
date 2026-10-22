@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -58,7 +59,8 @@ var errNotMainWorkTree = errors.New("not the main work tree of its repository")
 // with one `git worktree list`, plus at most one git invocation per linked
 // work tree to verify it (none with pol.noVerify). The primary comes first,
 // then the work trees in the repository directory by directory name (then
-// path), then those outside it by path. The error is set when git fails or when the first entry listed by
+// path), then those outside it by path, in natural order (see
+// naturalCompare). The error is set when git fails or when the first entry listed by
 // git is not the primary.
 func enumerateRepo(ctx context.Context, primary, common string, pol enumPolicy) ([]repoEntry, error) {
 	wts, err := gitx.WorktreeList(ctx, primary)
@@ -102,9 +104,9 @@ func enumerateRepo(ctx context.Context, primary, common string, pol enumPolicy) 
 			}
 			return 1
 		case dir(a) != dir(b):
-			return strings.Compare(dir(a), dir(b))
+			return naturalCompare(dir(a), dir(b))
 		}
-		return strings.Compare(filepath.Clean(a.Path), filepath.Clean(b.Path))
+		return naturalCompare(filepath.Clean(a.Path), filepath.Clean(b.Path))
 	})
 	return entries, nil
 }
@@ -149,4 +151,39 @@ func verifyLinked(ctx context.Context, path, primary, common string, keepMissing
 		err = &foreignWorktreeError{commonDir: insp.commonDir}
 	}
 	return err
+}
+
+// naturalCompare compares a and b in natural order: runs of ASCII digits
+// by their numeric value (feat-2 before feat-10), the other bytes as
+// bytes. Strings equal in that order (e.g. 01 and 1) compare as bytes, so
+// that the order is total.
+func naturalCompare(a, b string) int {
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		if !isDigit(a[i]) || !isDigit(b[j]) {
+			if a[i] != b[j] {
+				return cmp.Compare(a[i], b[j])
+			}
+			i, j = i+1, j+1
+			continue
+		}
+		ei, ej := digitsEnd(a, i), digitsEnd(b, j)
+		// Without leading zeros, the longer number is the larger one.
+		na, nb := strings.TrimLeft(a[i:ei], "0"), strings.TrimLeft(b[j:ej], "0")
+		if c := cmp.Or(cmp.Compare(len(na), len(nb)), strings.Compare(na, nb)); c != 0 {
+			return c
+		}
+		i, j = ei, ej
+	}
+	return cmp.Or(cmp.Compare(len(a)-i, len(b)-j), strings.Compare(a, b))
+}
+
+func isDigit(c byte) bool { return '0' <= c && c <= '9' }
+
+// digitsEnd returns the index after the run of digits of s at i.
+func digitsEnd(s string, i int) int {
+	for i < len(s) && isDigit(s[i]) {
+		i++
+	}
+	return i
 }
