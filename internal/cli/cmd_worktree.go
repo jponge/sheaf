@@ -404,7 +404,7 @@ func newWorktreeRemoveCmd(d Deps) *cobra.Command {
 		name := repo + "/" + target.Name // repo/dir once planned
 		opts.Confirm = func(p ops.WorktreeRemovePlan) bool {
 			name = repo + "/" + p.Worktree.Dir
-			for _, l := range worktreeRemovePlanLines(p, opts.Force) {
+			for _, l := range worktreeRemoveEventLines(p, opts.Force) {
 				emit(ops.Event{Worktree: p.Worktree.Dir, Message: l})
 			}
 			return yes
@@ -498,8 +498,17 @@ func worktreeRemovePlanLines(p ops.WorktreeRemovePlan, force bool) []string {
 	return lines
 }
 
+// worktreeRemoveEventLines are the lines of worktreeRemovePlanLines as
+// events of the worktree, which name it: the first one does not name it
+// again ("a/x: worktree: will remove the worktree [x] at /b/a/x").
+func worktreeRemoveEventLines(p ops.WorktreeRemovePlan, force bool) []string {
+	lines := worktreeRemovePlanLines(p, force)
+	lines[0] = fmt.Sprintf("will remove the worktree [%s] at %s", branchLabel(p.Worktree), p.Worktree.Path)
+	return lines
+}
+
 // worktreeRemoveLine is the line of worktreeRemovePlanLines saying which
-// worktree is removed.
+// worktree is removed (always the first one).
 func worktreeRemoveLine(p ops.WorktreeRemovePlan) string {
 	return fmt.Sprintf("will remove worktree %s/%s [%s] at %s", p.Repo, p.Worktree.Dir, branchLabel(p.Worktree), p.Worktree.Path)
 }

@@ -292,9 +292,14 @@ func TestWorktreeRemoveNamesTheRepository(t *testing.T) {
 	e, root := worktreeBundle(t)
 	p1 := filepath.Join(root, "a", "feat-x")
 	e.mustRun(t, "wt", "add", "a", "feat/x", "--no-fetch")
-	out := e.mustRun(t, "wt", "rm", "a", "feat/x", "--yes")
-	if want := "a/feat-x: removed worktree feat-x [feat/x] at " + p1 + "\n"; out != want || exists(p1) {
-		t.Errorf("wt rm: stdout %q, want %q", out, want)
+	out, errs, code := e.run(t, "wt", "rm", "a", "feat/x", "--yes")
+	if want := "a/feat-x: removed worktree feat-x [feat/x] at " + p1 + "\n"; code != 0 || out != want || exists(p1) {
+		t.Errorf("wt rm: exit %d, stdout %q, want %q", code, out, want)
+	}
+	// Its plan, on standard error after the name of the worktree, does not
+	// name it again (V4 review).
+	if want := "a/feat-x: worktree: will remove the worktree [feat/x] at " + p1 + "\n"; !strings.Contains(errs, want) || strings.Contains(errs, "will remove worktree a/feat-x") {
+		t.Errorf("wt rm: stderr lacks %q:\n%s", want, errs)
 	}
 }
 
