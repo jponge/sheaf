@@ -462,26 +462,14 @@ func worktreeRemoveCommand(ctx context.Context, root, repo string, target ops.Wo
 	return ops.YesCommandLine(ctx, root, args...)
 }
 
-// worktreeRemovePlanLines describes a worktree removal plan: risks, what is
-// removed and what happens to the branch. The unpushed commits of the
+// worktreeRemovePlanLines describes a worktree removal plan: what is
+// removed and what happens to the branch, then the risks (plan first, then
+// notes, as in every removal dialog). The unpushed commits of the
 // repository's local branches are listed only when a branch is deleted
 // (with the branches carrying them, see ops.WorktreeRemovePlan): they
 // survive the removal of a worktree whose branch is kept.
 func worktreeRemovePlanLines(p ops.WorktreeRemovePlan, force bool) []string {
-	var lines []string
-	deleting := (p.MergedInto != "" || p.ContainedIn != "" || p.Unmerged != "") && p.BranchKept == ""
-	for _, r := range p.NonBlocking() {
-		if r.Kind == gitx.RiskUnpushedBranchCommits && !deleting {
-			continue
-		}
-		lines = append(lines, fmt.Sprintf("%v (informational, not blocking)", r))
-	}
-	if force {
-		for _, r := range p.Blocking() {
-			lines = append(lines, fmt.Sprintf("%v will be lost (--force)", r))
-		}
-	}
-	lines = append(lines, worktreeRemoveLine(p))
+	lines := []string{worktreeRemoveLine(p)}
 	switch {
 	case p.MergedInto != "":
 		lines = append(lines, fmt.Sprintf("will delete branch %s (merged into %s)", p.Worktree.Branch, p.MergedInto))
@@ -494,6 +482,18 @@ func worktreeRemovePlanLines(p ops.WorktreeRemovePlan, force bool) []string {
 	}
 	if p.BranchKept != "" {
 		lines = append(lines, "warning: "+p.BranchKept)
+	}
+	deleting := (p.MergedInto != "" || p.ContainedIn != "" || p.Unmerged != "") && p.BranchKept == ""
+	for _, r := range p.NonBlocking() {
+		if r.Kind == gitx.RiskUnpushedBranchCommits && !deleting {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%v (informational, not blocking)", r))
+	}
+	if force {
+		for _, r := range p.Blocking() {
+			lines = append(lines, fmt.Sprintf("%v will be lost (--force)", r))
+		}
 	}
 	return lines
 }

@@ -5,9 +5,11 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/testutil"
 )
@@ -293,5 +295,29 @@ func TestWorktreeRemoveNamesTheRepository(t *testing.T) {
 	out := e.mustRun(t, "wt", "rm", "a", "feat/x", "--yes")
 	if want := "a/feat-x: removed worktree feat-x [feat/x] at " + p1 + "\n"; out != want || exists(p1) {
 		t.Errorf("wt rm: stdout %q, want %q", out, want)
+	}
+}
+
+// The removal dialogs give the plan first, then the notes, as prune's
+// does (B62 L10): wt rm (what is removed, the fate of the branch, then the
+// informational risks and those lost with --force) and remove (what is
+// deleted, then the informational risks).
+func TestRemovalPlansListNotesAfterThePlan(t *testing.T) {
+	t.Parallel()
+	p := ops.WorktreeRemovePlan{Repo: "alpha", Worktree: ops.WorktreeInfo{Repo: "alpha", Dir: "x", Branch: "x", Path: "/b/alpha/x"}, MergedInto: "origin/main",
+		Risks: []gitx.Risk{{Kind: gitx.RiskIgnoredFiles, Count: 2}, {Kind: gitx.RiskUntracked, Count: 1}}}
+	want := []string{
+		"will remove worktree alpha/x [x] at /b/alpha/x",
+		"will delete branch x (merged into origin/main)",
+		"2 ignored files (informational, not blocking)",
+		"1 untracked file will be lost (--force)",
+	}
+	if got := worktreeRemovePlanLines(p, true); !slices.Equal(got, want) {
+		t.Errorf("worktreeRemovePlanLines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	rp := ops.RemovePlan{Dir: "/b/alpha", Items: []ops.RemoveItem{{Path: "/b/alpha/main", Risks: []gitx.Risk{{Kind: gitx.RiskIgnoredFiles, Count: 2}}}}}
+	want = []string{"will delete /b/alpha", "/b/alpha/main: 2 ignored files (informational, not blocking)"}
+	if got := removePlanLines(rp); !slices.Equal(got, want) {
+		t.Errorf("removePlanLines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

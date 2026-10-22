@@ -1366,8 +1366,8 @@ func TestWorktreeRemovalsLines(t *testing.T) {
 	lines, removable := worktreeRemovalsLines(rs, false)
 	want := []string{
 		"will remove worktree alpha/x [x] at /some/long/bundle/alpha/x",
-		"  2 ignored files (informational, not blocking)",
 		"  branch x is kept",
+		"  2 ignored files (informational, not blocking)",
 		"refusing to remove alpha/feat: 1 untracked file",
 		"cannot remove beta/gone: no worktree \"gone\" in beta",
 	}

@@ -343,19 +343,19 @@ func newRemoveCmd(d Deps) *cobra.Command {
 	return cmd
 }
 
-// removePlanLines describes a removal plan: the informational risks and the
-// directory that will be deleted.
+// removePlanLines describes a removal plan: the directory that will be
+// deleted, then the informational risks.
 func removePlanLines(p ops.RemovePlan) []string {
 	var lines []string
+	if p.Dir != "" {
+		lines = append(lines, "will delete "+p.Dir)
+	}
 	for _, it := range p.Items {
 		for _, r := range it.Risks {
 			if r.Informational() {
 				lines = append(lines, fmt.Sprintf("%s: %v (informational, not blocking)", it.Path, r))
 			}
 		}
-	}
-	if p.Dir != "" {
-		lines = append(lines, "will delete "+p.Dir)
 	}
 	return lines
 }
