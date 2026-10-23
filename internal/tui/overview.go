@@ -22,6 +22,18 @@ type Row struct {
 	Level Level    // unless Alert, the last cell is rendered in the style of this level
 	Links []Link   // hyperlinks in the cells, see Overview.WithHyperlinks
 	Match string   // also matched by the filter, not displayed (e.g. the text of a blank cell)
+	Note  Note     // faint detail after a cell, see Note
+}
+
+// Note is a detail rendered faint after the text of the cell Cell of a Row
+// (not the last one, nor the first with WithGrouping), separated by a space, e.g. "(in dir)". It is part of
+// the cell for the width of its column and the filter, and gives way first
+// when the column is narrowed (see WithShrinkable): it is truncated with
+// an ellipsis, then left out, before the text of the cell is truncated.
+// A Note without Text is not rendered.
+type Note struct {
+	Cell int
+	Text string
 }
 
 // Link makes the first occurrence of Text in the cell Cell of a Row a
@@ -543,7 +555,7 @@ func (m *Overview) applyFilter() {
 	m.visible = nil // fresh slice: copies of the model must not share it
 	m.cursor = 0
 	for i, r := range m.rows {
-		if needle == "" || strings.Contains(strings.ToLower(strings.Join(append(slices.Clone(r.Cells), r.Match), "\x00")), needle) {
+		if needle == "" || strings.Contains(strings.ToLower(strings.Join(append(slices.Clone(r.Cells), r.Match, r.Note.Text), "\x00")), needle) {
 			if i == current {
 				m.cursor = len(m.visible)
 			}
@@ -659,6 +671,9 @@ func fitWidths(header []string, rows []Row, width, prefix int, shrink []int) ([]
 	grow(header)
 	for _, r := range rows {
 		grow(r.Cells)
+		if n := r.Note; n.Text != "" && n.Cell >= 0 && n.Cell < len(r.Cells)-1 {
+			w[n.Cell] = max(w[n.Cell], lipgloss.Width(sanitize(r.Cells[n.Cell]))+1+lipgloss.Width(sanitize(n.Text)))
+		}
 	}
 	if width <= 0 || len(w) == 0 {
 		return w, 0
@@ -725,7 +740,7 @@ func Table(header []string, rows []Row, width int, shrink []int, paint func(Leve
 		}
 		widths[widest]--
 	}
-	lines := []string{cells(header, widths, nil, nil)}
+	lines := []string{cells(header, widths, nil, nil, Note{}, nil)}
 	for i, r := range rows {
 		var last func(string) string
 		if paint != nil {
@@ -739,7 +754,7 @@ func Table(header []string, rows []Row, width int, shrink []int, paint func(Leve
 		if i > 0 && len(cs) > 0 && len(rows[i-1].Cells) > 0 && rows[i-1].Cells[0] == cs[0] {
 			cs = append([]string{""}, cs[1:]...)
 		}
-		lines = append(lines, cells(cs, widths, last, nil))
+		lines = append(lines, cells(cs, widths, last, nil, r.Note, nil))
 	}
 	cutLines(lines, width)
 	return lines
@@ -748,8 +763,9 @@ func Table(header []string, rows []Row, width int, shrink []int, paint func(Leve
 // cells pads the cells to the column widths (not the last one), truncating
 // those wider than their column, and joins them; last, if set, renders the
 // last cell. The first link of each cell is rendered as a hyperlink (see
-// link).
-func cells(cs []string, widths []int, last func(string) string, links []Link) string {
+// link). note follows its cell, rendered by faint (nil: unstyled), as far
+// as it fits (see Note).
+func cells(cs []string, widths []int, last func(string) string, links []Link, note Note, faint func(string) string) string {
 	var b strings.Builder
 	for i, c := range cs {
 		c = sanitize(c)
@@ -757,6 +773,15 @@ func cells(cs []string, widths []int, last func(string) string, links []Link) st
 			if l.Cell == i {
 				c = link(c, l)
 				break
+			}
+		}
+		if i == note.Cell && i < len(cs)-1 && note.Text != "" {
+			if room := widths[i] - lipgloss.Width(c) - 1; room > 0 {
+				n := ansi.Truncate(sanitize(note.Text), room, "…")
+				if faint != nil {
+					n = faint(n)
+				}
+				c += " " + n
 			}
 		}
 		if i < len(cs)-1 && lipgloss.Width(c) > widths[i] {
@@ -828,7 +853,7 @@ func (m Overview) View() tea.View {
 		lines = append(lines, f)
 	}
 	if l.header {
-		lines = append(lines, "      "+st.Detail.Render(cells(m.header, widths, nil, nil)))
+		lines = append(lines, "      "+st.Detail.Render(cells(m.header, widths, nil, nil, Note{}, nil)))
 	}
 	switch {
 	case len(m.rows) == 0:
@@ -920,7 +945,14 @@ func (m Overview) renderRow(i int, widths []int) string {
 	if m.hyperlinks {
 		links = r.Links
 	}
-	text := cells(cs, widths, last, links)
+	faint := func(s string) string { return st.Detail.Render(s) }
+	if i == m.cursor {
+		// The reset that ends the note would also end the style of the
+		// current row for the cells after it: open it again.
+		open, _, _ := strings.Cut(st.CurrentRow.Render("x"), "x")
+		faint = func(s string) string { return st.Detail.Render(s) + open }
+	}
+	text := cells(cs, widths, last, links, r.Note, faint)
 	if i == m.cursor {
 		text = st.CurrentRow.Render(text)
 	}

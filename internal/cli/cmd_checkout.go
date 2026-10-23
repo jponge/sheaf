@@ -115,8 +115,8 @@ Checkouts that cannot be inspected (e.g. a missing directory) are listed as
 problems after the table, and the exit code is then 1.
 
 When standard input and output are terminals and the terminal is
-narrower than the table, status prints the compact table of the home
-screen, cut to the terminal's width: REPO, DIR, BRANCH, CHANGES and STATE
+narrower than the table, status prints a compact table, cut to the
+terminal's width: REPO, DIR, BRANCH, CHANGES and STATE
 ("clean, ↑1 ↓2", "dirty, no upstream", "clean, PR #7"...). CHANGES holds
 the non-zero counts: +staged ~unstaged ?untracked !conflicted $stashes.
 --no-tui and --json always print the full output.

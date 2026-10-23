@@ -992,6 +992,58 @@ func TestOverviewFilterMatchesHiddenText(t *testing.T) {
 	}
 }
 
+// A Note is rendered faint after its cell, counts in the width of the
+// column, and gives way first when the column shrinks: it is truncated,
+// then dropped, before the text of the cell is truncated (B67: the
+// directory of a checkout after its branch). The filter matches it.
+func TestOverviewNoteIsFaintAndGivesWayFirst(t *testing.T) {
+	t.Parallel()
+	rows := []Row{
+		{Key: "1", Cells: []string{"alpha", "fix/async-v2", "2d", "clean"}, Note: Note{Cell: 1, Text: "(in fix-async)"}},
+		{Key: "2", Cells: []string{"alpha", "main", "5m", "dirty"}},
+	}
+	header := []string{"REPO", "BRANCH", "AGE", "STATE"}
+	at := func(m Overview, width int) (tea.Model, string) {
+		t.Helper()
+		var tm tea.Model = m
+		tm, _ = tm.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+		return tm, view(tm)
+	}
+	ov := func() Overview { return NewOverview("t", header, rows, nil).WithShrinkable(1) }
+	for _, tc := range []struct {
+		width int
+		want  []string
+	}{
+		{52, []string{"      REPO   BRANCH                       AGE  STATE", "> [ ] alpha  fix/async-v2 (in fix-async)  2d   clean", "  [ ] alpha  main                         5m   dirty"}},
+		{46, []string{"> [ ] alpha  fix/async-v2 (in fix…  2d   clean", "  [ ] alpha  main                   5m   dirty"}},
+		{39, []string{"> [ ] alpha  fix/async-v2 …  2d   clean"}},
+		{38, []string{"> [ ] alpha  fix/async-v2   2d   clean"}},
+		{37, []string{"> [ ] alpha  fix/async-v2  2d   clean"}},
+		{35, []string{"> [ ] alpha  fix/async…  2d   clean"}},
+	} {
+		if _, v := at(ov(), tc.width); !hasAllLines(v, tc.want) {
+			t.Errorf("width %d: view lacks one of %q:\n%s", tc.width, tc.want, v)
+		}
+	}
+	m, _ := at(ov().WithCursor("2"), 52)
+	if raw := m.View().Content; !strings.Contains(raw, DefaultStyles().Detail.Render("(in fix-async)")) {
+		t.Errorf("note not faint: %q", raw)
+	}
+	// On the current row, the cells after the note keep its style.
+	m, _ = at(ov(), 52)
+	open, _, _ := strings.Cut(DefaultStyles().CurrentRow.Render("x"), "x")
+	if raw := m.View().Content; open == "" || !strings.Contains(raw, DefaultStyles().Detail.Render("(in fix-async)")+open+"  2d") {
+		t.Errorf("current row style not restored after the note: %q", raw)
+	}
+	if _, v := at(ov().WithFilter("in fix-async"), 52); !strings.Contains(v, "1 shown") {
+		t.Errorf("filter on a note:\n%s", v)
+	}
+	// Table renders it too, unstyled.
+	if got := Table(header, rows, 40, []int{1}, nil); !slices.Contains(got, "alpha  fix/async-v2 (in fix…  2d   clean") {
+		t.Errorf("Table:\n%s", strings.Join(got, "\n"))
+	}
+}
+
 func hasAllLines(v string, want []string) bool {
 	for _, w := range want {
 		if !hasLine(v, w) {

@@ -233,15 +233,19 @@ sheaf prune                            # list worktrees whose branch is gone or 
 
 `sheaf` without a command, inside a bundle, with standard input and output
 on a terminal, opens an overview of every checkout of the bundle (columns
-REPO, DIR, BRANCH, AGE, STATE). It reads local state only; nothing is fetched
+REPO, BRANCH, AGE, STATE). It reads local state only; nothing is fetched
 when it opens. Checkouts that cannot be inspected are shown as problem rows.
 Rows are grouped by repository (primary first, problem rows last): REPO is
 only shown on the first row of each group, and on the first row on screen
 when the list is scrolled or filtered (the filter still matches it).
-DIR is blank when it is the directory sheaf derives from BRANCH (the
-branch or tag normalized as in [Repository layout](#repository-layout),
-e.g. `feat-x` for `feat/x`, or `main` for the primary checkout of `main`),
-so it shows only directories that differ (the filter still matches them).
+There is no DIR column: the directory of a checkout is the one sheaf
+derives from BRANCH (the branch or tag normalized as in
+[Repository layout](#repository-layout), e.g. `feat-x` for `feat/x`, or
+`main` for the primary checkout of `main`), except when BRANCH is followed
+by a faint `(in <dir>)`, e.g. `fix/x-v2 (in fix-x)`: a directory that
+differs, a detached checkout (`(detached 1a2b3c4) (in exp)`), a worktree
+outside the repository directory (`(in <dir>, outside)`) or a problem row
+(`- (in <dir>)`). The filter matches every directory, shown or not.
 In a bundle without repositories, it lists what to run instead, one
 command per line: `sheaf add owner/repo`, `sheaf add --org <org>` and, for
 clones already in the bundle directory, `sheaf adopt <dir>` (`<dir>` is
@@ -266,8 +270,8 @@ relative to the pull request head recorded by the last `wt pr` (e.g.
 (`↑` and `↓`), `upstream gone`, errors and problem rows; yellow for local
 changes or commits to push or pull (`dirty`, `↑`, `↓`); faint for
 `no upstream`; green otherwise (clean, in sync or detached). In a narrow
-terminal, the wider of DIR and BRANCH is truncated first (with `…`), then
-both alike, down to 8 columns each, so that STATE fits;
+terminal, BRANCH is truncated (with `…`), the `(in <dir>)` part first
+(then left out), then the branch, down to 8 columns, so that STATE fits;
 lines that still do not fit are cut at the right, ending with `…` (as in
 every view of the TUI). The title (`sheaf: <bundle>`) and that of the
 report view show the home directory as `~`; commands in hints keep
@@ -489,7 +493,7 @@ No network access: ahead/behind are relative to the last fetch, unless
 that cannot be inspected are listed as problems after the table and make
 the exit status 1. When standard input and output are both terminals
 (without `--no-tui` or `--json`) and the terminal is narrower than that
-table, status prints the compact table of the home screen instead: REPO,
+table, status prints a compact table instead: REPO,
 DIR, BRANCH, CHANGES and STATE (`clean, ↑1 ↓2`, `dirty, no upstream`,
 `clean, PR #7`...), with CHANGES made of the non-zero counts `+` staged,
 `~` unstaged, `?` untracked, `!` conflicted and `$` stashes (e.g. `+2 ~1

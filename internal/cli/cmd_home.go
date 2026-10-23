@@ -245,8 +245,8 @@ func (h *home) loop() error {
 }
 
 // overview reads the bundle and the local state of its checkouts. When the
-// table is wider than the window, BRANCH, then DIR, are truncated before
-// STATE is cut.
+// table is wider than the window, BRANCH is truncated (the directory after
+// the branch first, see homeDirNote) before STATE is cut.
 func (h *home) overview() (tui.Overview, error) {
 	w, err := ops.OpenWorkspace(h.root)
 	if err != nil {
@@ -265,20 +265,20 @@ func (h *home) overview() (tui.Overview, error) {
 	for i := range r.Checkouts {
 		cs := &r.Checkouts[i]
 		h.rows[cs.Path] = homeRow{checkout: cs}
-		rows = append(rows, tui.Row{Key: cs.Path, Cells: []string{cs.Repo, homeDir(cs.Checkout), homeBranch(*cs), homeAge(now, cs.HeadTime), homeState(*cs)}, Alert: cs.Err != nil, Level: homeLevel(*cs), Links: homeLinks(repoOf(h.bundle, cs.Repo), cs), Match: displayDir(cs.Checkout)})
+		rows = append(rows, tui.Row{Key: cs.Path, Cells: []string{cs.Repo, homeBranch(*cs), homeAge(now, cs.HeadTime), homeState(*cs)}, Alert: cs.Err != nil, Level: homeLevel(*cs), Links: homeLinks(repoOf(h.bundle, cs.Repo), cs), Match: displayDir(cs.Checkout), Note: tui.Note{Cell: 1, Text: homeDirNote(cs.Checkout)}})
 	}
 	for i := range r.Problems {
 		p := &r.Problems[i]
 		key := "problem:" + p.Path
 		h.rows[key] = homeRow{problem: p}
-		rows = append(rows, tui.Row{Key: key, Cells: []string{p.Repo, filepath.Base(p.Path), "-", "", "problem: " + errorText(p.Err)}, Alert: true, Links: homeLinks(repoOf(h.bundle, p.Repo), nil)})
+		rows = append(rows, tui.Row{Key: key, Cells: []string{p.Repo, "-", "", "problem: " + errorText(p.Err)}, Alert: true, Links: homeLinks(repoOf(h.bundle, p.Repo), nil), Note: tui.Note{Cell: 1, Text: "(in " + filepath.Base(p.Path) + ")"}})
 	}
 	// Checkouts and problems are each sorted by repository: the problem
 	// rows of a repository go after its checkouts, so that the rows of a
 	// repository are contiguous for the grouping.
 	slices.SortStableFunc(rows, func(a, b tui.Row) int { return strings.Compare(a.Cells[0], b.Cells[0]) })
-	ov := tui.NewOverview("sheaf: "+h.displayRoot(), []string{"REPO", "DIR", "BRANCH", "AGE", "STATE"}, rows, h.actions()).WithTitlePath(h.displayRoot())
-	ov = ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithFullHelp(h.fullHelp).WithAltScreen().WithGrouping().WithShrinkable(2, 1)
+	ov := tui.NewOverview("sheaf: "+h.displayRoot(), []string{"REPO", "BRANCH", "AGE", "STATE"}, rows, h.actions()).WithTitlePath(h.displayRoot())
+	ov = ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithFullHelp(h.fullHelp).WithAltScreen().WithGrouping().WithShrinkable(1)
 	if len(h.bundle.Repositories) == 0 {
 		ov = ov.WithEmpty(h.emptyHint())
 	}
@@ -336,7 +336,7 @@ func homeLinks(r *bundle.Repository, c *ops.CheckoutStatus) []tui.Link {
 	links := []tui.Link{{Cell: 0, Text: r.Name, URL: page}}
 	if c != nil && c.Err == nil && c.PullRequest != nil {
 		n := strconv.Itoa(c.PullRequest.Number)
-		links = append(links, tui.Link{Cell: 4, Text: "PR #" + n, URL: page + "/pull/" + n})
+		links = append(links, tui.Link{Cell: 3, Text: "PR #" + n, URL: page + "/pull/" + n})
 	}
 	return links
 }
@@ -351,18 +351,22 @@ func (h *home) scope(name string) tui.Scope {
 	return tui.ScopeNone
 }
 
-// homeDir returns the DIR cell of the overview for c: its directory (see
-// displayDir), blank when it is the directory sheaf derives from its branch
-// or tag (see bundle.NormalizeBranch), which BRANCH shows.
-func homeDir(c ops.Checkout) string {
+// homeDirNote returns the note after the BRANCH cell of the overview for
+// c: "(in <dir>)", "(in <dir>, outside)" for a worktree outside its
+// repository directory, or nothing when its directory is the one sheaf
+// derives from its branch or tag (see bundle.NormalizeBranch).
+func homeDirNote(c ops.Checkout) string {
 	name := c.Branch
 	if c.Tag != "" {
 		name = c.Tag
 	}
-	if derived, err := bundle.NormalizeBranch(name); err == nil && name != "" && !c.Outside && c.Dir == derived {
+	switch derived, err := bundle.NormalizeBranch(name); {
+	case c.Outside:
+		return "(in " + c.Dir + ", outside)"
+	case err == nil && name != "" && c.Dir == derived:
 		return ""
 	}
-	return displayDir(c)
+	return "(in " + c.Dir + ")"
 }
 
 func homeBranch(c ops.CheckoutStatus) string {
