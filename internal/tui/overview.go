@@ -29,12 +29,17 @@ type Row struct {
 // (not the last one, nor the first with WithGrouping), separated by a space, e.g. "(in dir)". It is part of
 // the cell for the width of its column and the filter, and gives way first
 // when the column is narrowed (see WithShrinkable): it is truncated with
-// an ellipsis, then left out, before the text of the cell is truncated.
-// A Note without Text is not rendered.
+// an ellipsis, down to minNoteWidth columns, then left out, before the
+// text of the cell is truncated. The filter matches the cell and its note
+// as displayed, separated by a space. A Note without Text is not rendered.
 type Note struct {
 	Cell int
 	Text string
 }
+
+// minNoteWidth is the narrowest a truncated Note is rendered: five
+// characters and "…", e.g. "(in d…", so that it still tells something.
+const minNoteWidth = 6
 
 // Link makes the first occurrence of Text in the cell Cell of a Row a
 // hyperlink to URL (see Overview.WithHyperlinks). A cell has at most one
@@ -555,7 +560,11 @@ func (m *Overview) applyFilter() {
 	m.visible = nil // fresh slice: copies of the model must not share it
 	m.cursor = 0
 	for i, r := range m.rows {
-		if needle == "" || strings.Contains(strings.ToLower(strings.Join(append(slices.Clone(r.Cells), r.Match, r.Note.Text), "\x00")), needle) {
+		cs := slices.Clone(r.Cells)
+		if n := r.Note; n.Text != "" && n.Cell >= 0 && n.Cell < len(cs) {
+			cs[n.Cell] += " " + n.Text // as displayed
+		}
+		if needle == "" || strings.Contains(strings.ToLower(strings.Join(append(cs, r.Match), "\x00")), needle) {
 			if i == current {
 				m.cursor = len(m.visible)
 			}
@@ -776,8 +785,9 @@ func cells(cs []string, widths []int, last func(string) string, links []Link, no
 			}
 		}
 		if i == note.Cell && i < len(cs)-1 && note.Text != "" {
-			if room := widths[i] - lipgloss.Width(c) - 1; room > 0 {
-				n := ansi.Truncate(sanitize(note.Text), room, "…")
+			text := sanitize(note.Text)
+			if room := widths[i] - lipgloss.Width(c) - 1; room >= min(lipgloss.Width(text), minNoteWidth) {
+				n := ansi.Truncate(text, room, "…")
 				if faint != nil {
 					n = faint(n)
 				}

@@ -245,7 +245,8 @@ derives from BRANCH (the branch or tag normalized as in
 by a faint `(in <dir>)`, e.g. `fix/x-v2 (in fix-x)`: a directory that
 differs, a detached checkout (`(detached 1a2b3c4) (in exp)`), a worktree
 outside the repository directory (`(in <dir>, outside)`) or a problem row
-(`- (in <dir>)`). The filter matches every directory, shown or not.
+(`- (in <dir>)`). The filter matches every directory, shown or not, and
+the branch with its `(in <dir>)` as shown (e.g. `v2 (in fix`).
 In a bundle without repositories, it lists what to run instead, one
 command per line: `sheaf add owner/repo`, `sheaf add --org <org>` and, for
 clones already in the bundle directory, `sheaf adopt <dir>` (`<dir>` is
@@ -271,7 +272,8 @@ relative to the pull request head recorded by the last `wt pr` (e.g.
 changes or commits to push or pull (`dirty`, `↑`, `↓`); faint for
 `no upstream`; green otherwise (clean, in sync or detached). In a narrow
 terminal, BRANCH is truncated (with `…`), the `(in <dir>)` part first
-(then left out), then the branch, down to 8 columns, so that STATE fits;
+(down to five characters and `…`, e.g. `(in f…`; left out when that does
+not fit), then the branch, down to 8 columns, so that STATE fits;
 lines that still do not fit are cut at the right, ending with `…` (as in
 every view of the TUI). The title (`sheaf: <bundle>`) and that of the
 report view show the home directory as `~`; commands in hints keep

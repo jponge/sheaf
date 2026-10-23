@@ -994,8 +994,9 @@ func TestOverviewFilterMatchesHiddenText(t *testing.T) {
 
 // A Note is rendered faint after its cell, counts in the width of the
 // column, and gives way first when the column shrinks: it is truncated,
-// then dropped, before the text of the cell is truncated (B67: the
-// directory of a checkout after its branch). The filter matches it.
+// down to 5 characters and "…", then dropped, before the text of the cell
+// is truncated (B67: the directory of a checkout after its branch). The
+// filter matches it as displayed, after its cell and a space.
 func TestOverviewNoteIsFaintAndGivesWayFirst(t *testing.T) {
 	t.Parallel()
 	rows := []Row{
@@ -1016,7 +1017,9 @@ func TestOverviewNoteIsFaintAndGivesWayFirst(t *testing.T) {
 	}{
 		{52, []string{"      REPO   BRANCH                       AGE  STATE", "> [ ] alpha  fix/async-v2 (in fix-async)  2d   clean", "  [ ] alpha  main                         5m   dirty"}},
 		{46, []string{"> [ ] alpha  fix/async-v2 (in fix…  2d   clean", "  [ ] alpha  main                   5m   dirty"}},
-		{39, []string{"> [ ] alpha  fix/async-v2 …  2d   clean"}},
+		{44, []string{"> [ ] alpha  fix/async-v2 (in f…  2d   clean"}},
+		{43, []string{"> [ ] alpha  fix/async-v2        2d   clean"}},
+		{39, []string{"> [ ] alpha  fix/async-v2    2d   clean"}},
 		{38, []string{"> [ ] alpha  fix/async-v2   2d   clean"}},
 		{37, []string{"> [ ] alpha  fix/async-v2  2d   clean"}},
 		{35, []string{"> [ ] alpha  fix/async…  2d   clean"}},
@@ -1035,12 +1038,19 @@ func TestOverviewNoteIsFaintAndGivesWayFirst(t *testing.T) {
 	if raw := m.View().Content; open == "" || !strings.Contains(raw, DefaultStyles().Detail.Render("(in fix-async)")+open+"  2d") {
 		t.Errorf("current row style not restored after the note: %q", raw)
 	}
-	if _, v := at(ov().WithFilter("in fix-async"), 52); !strings.Contains(v, "1 shown") {
-		t.Errorf("filter on a note:\n%s", v)
+	for _, f := range []string{"in fix-async", "v2 (in fix"} {
+		if _, v := at(ov().WithFilter(f), 52); !strings.Contains(v, "1 shown") {
+			t.Errorf("filter %q on a note:\n%s", f, v)
+		}
 	}
 	// Table renders it too, unstyled.
 	if got := Table(header, rows, 40, []int{1}, nil); !slices.Contains(got, "alpha  fix/async-v2 (in fix…  2d   clean") {
 		t.Errorf("Table:\n%s", strings.Join(got, "\n"))
+	}
+	// A note narrower than the minimum is shown whenever it fits whole.
+	short := []Row{{Key: "1", Cells: []string{"alpha", "b", "2d", "clean"}, Note: Note{Cell: 1, Text: "(ab)"}}, {Key: "2", Cells: []string{"beta", "main-long-branch", "2d", "clean"}}}
+	if got := Table(header, short, 25, []int{1}, nil); !slices.Contains(got, "alpha  b (ab)  2d   clean") {
+		t.Errorf("Table with a short note:\n%s", strings.Join(got, "\n"))
 	}
 }
 
