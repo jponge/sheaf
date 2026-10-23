@@ -236,8 +236,10 @@ on a terminal, opens an overview of every checkout of the bundle (columns
 REPO, BRANCH, AGE, STATE). It reads local state only; nothing is fetched
 when it opens. Checkouts that cannot be inspected are shown as problem rows.
 Rows are grouped by repository (primary first, problem rows last): REPO is
-shown on every row, faint when it repeats the row above, except on the
-first row on screen when the list is scrolled or filtered.
+shown on every row, faint when it repeats the visible row above (with a
+filter, the row above among those it shows), except on the first row on
+screen when the list is scrolled. Faint is a text style: on a terminal
+without styles (`TERM=dumb`), every row shows the name alike.
 There is no DIR column: the directory of a checkout is the one sheaf
 derives from BRANCH (the branch or tag normalized as in
 [Repository layout](#repository-layout), e.g. `feat-x` for `feat/x`, or
@@ -496,7 +498,7 @@ that cannot be inspected are listed as problems after the table and make
 the exit status 1. When standard input and output are both terminals
 (without `--no-tui` or `--json`) and the terminal is narrower than that
 table, status prints a compact table instead: REPO (faint when it repeats
-the row above), DIR, BRANCH, CHANGES and STATE (`clean, ↑1 ↓2`, `dirty,
+the row above, on a terminal with styles), DIR, BRANCH, CHANGES and STATE (`clean, ↑1 ↓2`, `dirty,
 no upstream`, `clean, PR #7`...), with CHANGES made of the non-zero counts `+` staged,
 `~` unstaged, `?` untracked, `!` conflicted and `$` stashes (e.g. `+2 ~1
 ?3`). Its columns give way (with `…`) before STATE does, and its lines,

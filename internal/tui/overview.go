@@ -771,9 +771,10 @@ func Table(header []string, rows []Row, width int, shrink []int, paint func(Leve
 
 // cells pads the cells to the column widths (not the last one), truncating
 // those wider than their column, and joins them; first and last, if set,
-// render the first cell (when not the last one) and the last cell. The first link of each cell is rendered as a hyperlink (see
-// link). note follows its cell, rendered by faint (nil: unstyled), as far
-// as it fits (see Note).
+// render the first cell (when not the last one) and the last cell. The
+// first link of each cell is rendered as a hyperlink (see link). note
+// follows its cell, rendered by faint (nil: unstyled), as far as it fits
+// (see Note).
 func cells(cs []string, widths []int, first, last func(string) string, links []Link, note Note, faint func(string) string) string {
 	var b strings.Builder
 	for i, c := range cs {

@@ -395,8 +395,11 @@ func TestHomeGroupsRowsByRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	faint := tui.DefaultStyles().Detail.Render
+	// The alpha/main row is the current row: a faint name there would be
+	// followed by the reopened row style.
+	open, _, _ := strings.Cut(tui.DefaultStyles().CurrentRow.Render("x"), "x")
 	raw := ov.View().Content
-	if !strings.Contains(raw, faint("alpha")+"  feat") || strings.Contains(raw, faint("alpha")+"  main") || strings.Contains(raw, faint("beta")) {
+	if open == "" || !strings.Contains(raw, faint("alpha")+"  feat") || strings.Contains(raw, faint("alpha")+open+"  main") || strings.Contains(raw, faint("alpha")+"  main") || strings.Contains(raw, faint("beta")) {
 		t.Errorf("want alpha faint on the feat row only: %q", raw)
 	}
 	if err := os.RemoveAll(feat); err != nil {
