@@ -278,7 +278,7 @@ func (h *home) overview() (tui.Overview, error) {
 	// repository are contiguous for the grouping.
 	slices.SortStableFunc(rows, func(a, b tui.Row) int { return strings.Compare(a.Cells[0], b.Cells[0]) })
 	ov := tui.NewOverview("sheaf: "+h.displayRoot(), []string{"REPO", "BRANCH", "AGE", "STATE"}, rows, h.actions()).WithTitlePath(h.displayRoot())
-	ov = ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithFullHelp(h.fullHelp).WithAltScreen().WithGrouping().WithShrinkable(1)
+	ov = ov.WithFilter(h.filter).WithCursor(h.cursor).WithMessage(h.message).WithSelected(h.selected).WithFullHelp(h.fullHelp).WithAltScreen().WithGroupFaint().WithShrinkable(1)
 	if len(h.bundle.Repositories) == 0 {
 		ov = ov.WithEmpty(h.emptyHint())
 	}

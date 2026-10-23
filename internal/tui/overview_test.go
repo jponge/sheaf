@@ -853,11 +853,13 @@ func TestOverviewShowsTheWholeProblemOfTheCurrentRow(t *testing.T) {
 	}
 }
 
-// With grouping, the first cell of a row repeating the one of the visible
-// row above it is blank; the first visible row of a group, and the first
-// row rendered after scrolling, show it. The filter still matches the
-// blanked cells.
-func TestOverviewGroupsRowsByFirstCell(t *testing.T) {
+// With WithGroupFaint, every row shows its first cell, rendered faint on a
+// row repeating the one of the visible row above it (B68, which replaced
+// the blank cells of B35); the first visible row of a group, and the first
+// row rendered after scrolling, show it in the row's style. On the current
+// row, the cells after a faint first cell keep the row's style. The filter
+// is unchanged.
+func TestOverviewFaintsRepeatedFirstCell(t *testing.T) {
 	t.Parallel()
 	rows := []Row{
 		{Key: "1", Cells: []string{"alpha", "main", "clean"}},
@@ -866,7 +868,7 @@ func TestOverviewGroupsRowsByFirstCell(t *testing.T) {
 		{Key: "4", Cells: []string{"bravo", "main", "clean"}},
 	}
 	newGrouped := func() Overview {
-		return NewOverview("t", []string{"REPO", "DIR", "STATE"}, rows, nil).WithGrouping()
+		return NewOverview("t", []string{"REPO", "DIR", "STATE"}, rows, nil).WithGroupFaint()
 	}
 	wantLines := func(m tea.Model, want ...string) {
 		t.Helper()
@@ -877,35 +879,68 @@ func TestOverviewGroupsRowsByFirstCell(t *testing.T) {
 			}
 		}
 	}
-	wantLines(newGrouped(),
+	faint := func(s string) string { return DefaultStyles().Detail.Render(s) }
+	// wantFaint checks whether the raw line containing text renders name
+	// faint.
+	wantFaint := func(m tea.Model, text, name string, want bool) {
+		t.Helper()
+		for _, l := range strings.Split(m.View().Content, "\n") {
+			if strings.Contains(sgr.ReplaceAllString(l, ""), text) {
+				if got := strings.Contains(l, faint(name)); got != want {
+					t.Errorf("line of %q: %s faint %v, want %v: %q", text, name, got, want, l)
+				}
+				return
+			}
+		}
+		t.Errorf("no line of %q:\n%s", text, view(m))
+	}
+	var m tea.Model = newGrouped()
+	wantLines(m,
 		"> [ ] alpha  main    clean",
-		"  [ ]        feat-x  dirty",
-		"  [ ]        feat-z  clean",
+		"  [ ] alpha  feat-x  dirty",
+		"  [ ] alpha  feat-z  clean",
 		"  [ ] bravo  main    clean")
-	// The first visible row of a group shows its name.
-	wantLines(newGrouped().WithFilter("feat-z"), "> [ ] alpha  feat-z  clean")
-	wantLines(newGrouped().WithFilter("dirty"), "> [ ] alpha  feat-x  dirty")
-	// The filter matches the blanked names.
-	m := newGrouped().WithFilter("alph")
-	wantLines(m, "> [ ] alpha  main    clean", "  [ ]        feat-x  dirty", "  [ ]        feat-z  clean")
+	wantFaint(m, "alpha  main", "alpha", false)
+	wantFaint(m, "feat-x", "alpha", true)
+	wantFaint(m, "feat-z", "alpha", true)
+	wantFaint(m, "bravo", "bravo", false)
+	// On the current row, the name is faint and the row's style is opened
+	// again after it, as after a Note.
+	open, _, _ := strings.Cut(DefaultStyles().CurrentRow.Render("x"), "x")
+	if raw := newGrouped().WithCursor("2").View().Content; open == "" || !strings.Contains(raw, faint("alpha")+open+"  feat-x") {
+		t.Errorf("current row style not restored after the faint name: %q", raw)
+	}
+	// The first visible row of a group is not faint.
+	m = newGrouped().WithFilter("feat-z")
+	wantLines(m, "> [ ] alpha  feat-z  clean")
+	wantFaint(m, "feat-z", "alpha", false)
+	m = newGrouped().WithFilter("dirty")
+	wantLines(m, "> [ ] alpha  feat-x  dirty")
+	wantFaint(m, "feat-x", "alpha", false)
+	m = newGrouped().WithFilter("alph")
+	wantLines(m, "> [ ] alpha  main    clean", "  [ ] alpha  feat-x  dirty", "  [ ] alpha  feat-z  clean")
 	if v := view(m); !strings.Contains(v, "3 shown") || strings.Contains(v, "bravo") {
 		t.Errorf("filter alph:\n%s", v)
 	}
 	// The row above is the visible one, not the one hidden by the filter.
 	split := []Row{rows[0], rows[3], rows[1]}
-	wantLines(NewOverview("t", []string{"REPO", "DIR", "STATE"}, split, nil).WithGrouping().WithFilter("alpha"),
-		"> [ ] alpha  main    clean", "  [ ]        feat-x  dirty")
-	// After scrolling, the first row rendered shows its name although the
-	// row above it is scrolled off.
+	m = NewOverview("t", []string{"REPO", "DIR", "STATE"}, split, nil).WithGroupFaint().WithFilter("alpha")
+	wantLines(m, "> [ ] alpha  main    clean", "  [ ] alpha  feat-x  dirty")
+	wantFaint(m, "feat-x", "alpha", true)
+	wantFaint(NewOverview("t", []string{"REPO", "DIR", "STATE"}, split, nil).WithGroupFaint(), "feat-x", "alpha", false)
+	// After scrolling, the first row rendered is not faint although the
+	// row above it, scrolled off, has the same name.
 	more := append(slices.Clone(rows), Row{Key: "5", Cells: []string{"bravo", "b1", "clean"}}, Row{Key: "6", Cells: []string{"bravo", "b2", "clean"}})
-	var sm tea.Model = NewOverview("t", []string{"REPO", "DIR", "STATE"}, more, nil).WithGrouping()
+	var sm tea.Model = NewOverview("t", []string{"REPO", "DIR", "STATE"}, more, nil).WithGroupFaint()
 	sm, _ = sm.Update(tea.WindowSizeMsg{Width: 80, Height: 9}) // 2 rows
 	sm, _ = press(sm, "down", "down")
-	if v := view(sm); !hasLine(v, "  [ ] alpha  feat-x  dirty") || !hasLine(v, "> [ ]        feat-z  clean") {
-		t.Errorf("scrolled:\n%s", v)
-	}
-	// Without grouping every row shows its first cell.
-	wantLines(NewOverview("t", []string{"REPO", "DIR", "STATE"}, rows, nil), "  [ ] alpha  feat-x  dirty")
+	wantLines(sm, "  [ ] alpha  feat-x  dirty", "> [ ] alpha  feat-z  clean")
+	wantFaint(sm, "feat-x", "alpha", false)
+	wantFaint(sm, "feat-z", "alpha", true)
+	// Without WithGroupFaint, no first cell is faint.
+	m = NewOverview("t", []string{"REPO", "DIR", "STATE"}, rows, nil)
+	wantLines(m, "  [ ] alpha  feat-x  dirty")
+	wantFaint(m, "feat-x", "alpha", false)
 }
 
 // Shrinkable columns are truncated, the widest first (ties: in their
@@ -1274,8 +1309,8 @@ func TestOverviewActionWithDoRunsInPlace(t *testing.T) {
 }
 
 // Table renders rows as the overview renders its table, without cursor,
-// selection boxes or header style: grouped by the first cell, the
-// shrinkable columns narrowed to the width, the last cell painted at the
+// selection boxes or header style: a first cell repeating the one of the
+// row above painted at LevelInfo (faint, B68), the shrinkable columns narrowed to the width, the last cell painted at the
 // level of the row (failed for Alert), lines that still do not fit cut
 // with "…"; with an unknown width (0), nothing is narrowed or cut.
 func TestTable(t *testing.T) {
@@ -1286,7 +1321,7 @@ func TestTable(t *testing.T) {
 		{Cells: []string{"api", "fix-timeout", "fix/a-very-long-branch", "+1", "dirty, ↑1"}, Level: LevelWarn},
 		{Cells: []string{"web", "main", "main", "", "error: boom boom boom boom"}, Alert: true, Level: LevelOK},
 	}
-	names := map[Level]string{LevelOK: "32", LevelWarn: "33", LevelFail: "31"}
+	names := map[Level]string{LevelOK: "32", LevelInfo: "2", LevelWarn: "33", LevelFail: "31"}
 	paint := func(l Level, s string) string { return "\x1b[" + names[l] + "m" + s + "\x1b[m" }
 	for _, tc := range []struct {
 		width int
@@ -1295,7 +1330,7 @@ func TestTable(t *testing.T) {
 		{0, []string{
 			"REPO  DIR          BRANCH                  CHANGES  STATE",
 			"api   main         main                             \x1b[32mclean\x1b[m",
-			"      fix-timeout  fix/a-very-long-branch  +1       \x1b[33mdirty, ↑1\x1b[m",
+			"\x1b[2mapi\x1b[m   fix-timeout  fix/a-very-long-branch  +1       \x1b[33mdirty, ↑1\x1b[m",
 			"web   main         main                             \x1b[31merror: boom boom boom boom\x1b[m",
 		}},
 		// Below minShrunkWidth, the widest columns first: the last column
@@ -1303,7 +1338,7 @@ func TestTable(t *testing.T) {
 		{40, []string{
 			"REPO  DIR     BRANCH  CHANGES  STATE",
 			"api   main    main             \x1b[32mclean\x1b[m",
-			"      fix-t…  fix/a…  +1       \x1b[33mdirty, ↑1\x1b[m",
+			"\x1b[2mapi\x1b[m   fix-t…  fix/a…  +1       \x1b[33mdirty, ↑1\x1b[m",
 			"web   main    main             \x1b[31merror: b…\x1b[m",
 		}},
 	} {
@@ -1317,6 +1352,9 @@ func TestTable(t *testing.T) {
 	}
 	if got := Table(header, rows[:1], 0, nil, nil); !reflect.DeepEqual(got, []string{"REPO  DIR   BRANCH  CHANGES  STATE", "api   main  main             clean"}) {
 		t.Errorf("unpainted:\n%q", got)
+	}
+	if got := Table(header, rows[:2], 0, nil, nil); len(got) != 3 || got[2] != "api   fix-timeout  fix/a-very-long-branch  +1       dirty, ↑1" {
+		t.Errorf("unpainted repeat:\n%q", got)
 	}
 }
 

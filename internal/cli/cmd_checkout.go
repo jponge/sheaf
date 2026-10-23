@@ -220,7 +220,7 @@ func writeStatus(out io.Writer, r ops.StatusReport, paint func(tui.Level, string
 }
 
 // writeStatusCompact writes the status of r as the home screen's overview
-// shows it (see tui.Table), cut to width: REPO (blank when it repeats),
+// shows it (see tui.Table), cut to width: REPO (faint when it repeats),
 // DIR, BRANCH, CHANGES (statusChanges) and STATE (homeState, colored
 // alike), then the problems, cut to width.
 func writeStatusCompact(out io.Writer, r ops.StatusReport, paint func(tui.Level, string) string, width int) {

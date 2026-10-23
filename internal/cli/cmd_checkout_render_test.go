@@ -104,7 +104,8 @@ func TestStatusTableStateLevels(t *testing.T) {
 }
 
 // On a terminal narrower than the full table, status prints the compact
-// table of the overview (B62 H1): REPO grouped, DIR, BRANCH, CHANGES
+// table of the overview (B62 H1): REPO (faint when repeated, B68), DIR,
+// BRANCH, CHANGES
 // (+staged ~unstaged ?untracked !conflicts $stashes, zeros left out) and
 // STATE as the overview shows it, colored alike; problems follow as
 // usual. Wide enough, or with an unknown width, the full table is
@@ -132,7 +133,7 @@ func TestStatusCompactOnNarrowTerminal(t *testing.T) {
 	want := strings.Join([]string{
 		"REPO  DIR   BRANCH  CHANGES         STATE",
 		"a     main  main    +2 ~1 ?3 !1 $1  dirty, ↑1 ↓1",
-		"      feat  feat                    clean, no upstream",
+		"a     feat  feat                    clean, no upstream",
 		"b     main  main                    error: boom",
 		"problem: " + prob.Error(),
 		"",
@@ -144,7 +145,9 @@ func TestStatusCompactOnNarrowTerminal(t *testing.T) {
 	writeStatus(&b, r, func(l tui.Level, s string) string { return "\x1b[" + strconv.Itoa(int(l)) + "m" + s + "\x1b[m" }, 80)
 	for _, l := range []string{
 		"main  main    +2 ~1 ?3 !1 $1  \x1b[" + strconv.Itoa(int(tui.LevelFail)) + "mdirty, ↑1 ↓1\x1b[m\n",
-		"feat  feat                    \x1b[" + strconv.Itoa(int(tui.LevelInfo)) + "mclean, no upstream\x1b[m\n",
+		"\n\x1b[" + strconv.Itoa(int(tui.LevelInfo)) + "ma\x1b[m     feat  feat                    \x1b[" + strconv.Itoa(int(tui.LevelInfo)) + "mclean, no upstream\x1b[m\n",
+		"\na     main  main    +2",
+		"\nb     main  main ",
 		"main  main                    \x1b[" + strconv.Itoa(int(tui.LevelFail)) + "merror: boom\x1b[m\n",
 	} {
 		if !strings.Contains(b.String(), l) {
@@ -155,7 +158,7 @@ func TestStatusCompactOnNarrowTerminal(t *testing.T) {
 	r.Checkouts[1].Branch, r.Checkouts[1].Dir = "feature/very-long-name", "feature-very-long-name"
 	b.Reset()
 	writeStatus(&b, r, nil, 60)
-	if !strings.Contains(b.String(), "\n      feature…  feature…"+strings.Repeat(" ", 2+14+2)+"clean, no upstream\n") {
+	if !strings.Contains(b.String(), "\na     feature…  feature…"+strings.Repeat(" ", 2+14+2)+"clean, no upstream\n") {
 		t.Errorf("shrunk compact:\n%s", b.String())
 	}
 }

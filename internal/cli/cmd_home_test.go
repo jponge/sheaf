@@ -356,7 +356,7 @@ func TestHomeShowsAheadBehindAndAge(t *testing.T) {
 	header, rows := overviewLines(t, d, e.cwd, 0)
 	want := []string{
 		"> [ ] alpha  main    2d   clean, ↑1",
-		"  [ ]        feat    3h   dirty, ↑1 ↓1",
+		"  [ ] alpha  feat    3h   dirty, ↑1 ↓1",
 		"  [ ] beta   main    1mo  clean, ↑1",
 	}
 	if header != "      REPO   BRANCH  AGE  STATE" || !slices.Equal(rows, want) {
@@ -366,13 +366,14 @@ func TestHomeShowsAheadBehindAndAge(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, rows = overviewLines(t, d, e.cwd, 0)
-	if len(rows) != 3 || !strings.HasPrefix(rows[1], "  [ ]        - (in feat)       problem: ") {
+	if len(rows) != 3 || !strings.HasPrefix(rows[1], "  [ ] alpha  - (in feat)       problem: ") {
 		t.Errorf("problem row with an age:\n%s", strings.Join(rows, "\n"))
 	}
 }
 
 // The overview groups rows by repository: the rows of a repository are
-// contiguous, problem rows included, and only the first shows its name.
+// contiguous, problem rows included, and all show its name, faint after
+// the first (B68).
 func TestHomeGroupsRowsByRepository(t *testing.T) {
 	t.Parallel()
 	e, _, feat, _, _ := homeBundle(t)
@@ -387,12 +388,22 @@ func TestHomeGroupsRowsByRepository(t *testing.T) {
 			}
 		}
 	}
-	want(overviewRows(t, e), "> [ ] alpha  main ", "  [ ]        feat ", "  [ ] beta   main ")
+	want(overviewRows(t, e), "> [ ] alpha  main ", "  [ ] alpha  feat ", "  [ ] beta   main ")
+	h := &home{d: e.deps(), s: &tuiSession{ctx: context.Background()}, root: e.cwd, jobs: 4}
+	ov, err := h.overview()
+	if err != nil {
+		t.Fatal(err)
+	}
+	faint := tui.DefaultStyles().Detail.Render
+	raw := ov.View().Content
+	if !strings.Contains(raw, faint("alpha")+"  feat") || strings.Contains(raw, faint("alpha")+"  main") || strings.Contains(raw, faint("beta")) {
+		t.Errorf("want alpha faint on the feat row only: %q", raw)
+	}
 	if err := os.RemoveAll(feat); err != nil {
 		t.Fatal(err)
 	}
 	rows := overviewRows(t, e)
-	want(rows, "> [ ] alpha  main ", "  [ ]        - (in feat) ", "  [ ] beta   main ")
+	want(rows, "> [ ] alpha  main ", "  [ ] alpha  - (in feat) ", "  [ ] beta   main ")
 	if !strings.Contains(rows[1], "problem: worktree directory missing") {
 		t.Errorf("row 1 is not the problem: %q", rows[1])
 	}

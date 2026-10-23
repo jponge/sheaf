@@ -26,7 +26,7 @@ type Row struct {
 }
 
 // Note is a detail rendered faint after the text of the cell Cell of a Row
-// (not the last one, nor the first with WithGrouping), separated by a space, e.g. "(in dir)". It is part of
+// (not the last one), separated by a space, e.g. "(in dir)". It is part of
 // the cell for the width of its column and the filter, and gives way first
 // when the column is narrowed (see WithShrinkable): it is truncated with
 // an ellipsis, down to minNoteWidth columns, then left out, before the
@@ -121,7 +121,7 @@ type Overview struct {
 	width, height int // 0 = unknown
 	altScreen     bool
 	mouse         bool  // see WithMouse
-	grouped       bool  // see WithGrouping
+	grouped       bool  // see WithGroupFaint
 	shrink        []int // see WithShrinkable
 	hyperlinks    bool  // see WithHyperlinks
 
@@ -209,12 +209,12 @@ func (m Overview) WithMouse() Overview {
 // wheel moves the cursor of an Overview (scrolls a Report).
 const wheelStep = 3
 
-// WithGrouping returns a copy of m that groups rows by their first cell
-// (e.g. a repository): the first cell of a rendered row is left blank when
-// it equals that of the visible row above it, except on the first row
-// rendered, so that each group shown starts with its name. The filter still
-// matches the blanked cells.
-func (m Overview) WithGrouping() Overview {
+// WithGroupFaint returns a copy of m that groups rows by their first cell
+// (e.g. a repository): the first cell of a rendered row is rendered faint
+// when it equals that of the visible row above it, except on the first row
+// rendered, so that each group shown starts with its name in the style of
+// its row. On the current row, the cells after it keep the row's style.
+func (m Overview) WithGroupFaint() Overview {
 	m.grouped = true
 	return m
 }
@@ -223,8 +223,8 @@ func (m Overview) WithGrouping() Overview {
 // hyperlinks (OSC 8), for a terminal that takes terminal controls: the text
 // is unchanged, terminals without hyperlinks ignore the sequences. Only a
 // URL of printable ASCII characters without spaces is linked; a link is
-// ended on its line, also in a cell or a line cut at the window width, and
-// is not rendered in a cell blanked by WithGrouping.
+// ended on its line, also in a cell or a line cut at the window width,
+// also in a first cell rendered faint by WithGroupFaint.
 func (m Overview) WithHyperlinks() Overview {
 	m.hyperlinks = true
 	return m
@@ -718,12 +718,13 @@ func fitWidths(header []string, rows []Row, width, prefix int, shrink []int) ([]
 }
 
 // Table renders header and rows as an Overview renders its table (see
-// WithGrouping and WithShrinkable), for output that is not a bubbletea
+// WithGroupFaint and WithShrinkable), for output that is not a bubbletea
 // program (e.g. a command's table on a terminal), without cursor,
 // selection boxes or header style: the columns shrink are narrowed to fit
-// width (0 = unknown: nothing is narrowed or cut), the first cell is blank
-// when it repeats the one of the row above, the last cell is rendered by
-// paint (nil: unstyled) at the level of its row (LevelFail for Alert), and
+// width (0 = unknown: nothing is narrowed or cut), the first cell is
+// rendered by paint at LevelInfo (faint) when it repeats the one of the
+// row above, the last cell is rendered by paint (nil: unstyled) at the
+// level of its row (LevelFail for Alert), and
 // lines still wider than width are cut with "…". Cells are sanitized.
 // When narrowing the columns shrink to minShrunkWidth is not enough, every
 // column but the last gives way, the widest first (ties: the columns
@@ -749,9 +750,12 @@ func Table(header []string, rows []Row, width int, shrink []int, paint func(Leve
 		}
 		widths[widest]--
 	}
-	lines := []string{cells(header, widths, nil, nil, Note{}, nil)}
+	lines := []string{cells(header, widths, nil, nil, nil, Note{}, nil)}
 	for i, r := range rows {
-		var last func(string) string
+		var first, last func(string) string
+		if paint != nil && i > 0 && len(r.Cells) > 0 && len(rows[i-1].Cells) > 0 && rows[i-1].Cells[0] == r.Cells[0] {
+			first = func(s string) string { return paint(LevelInfo, s) }
+		}
 		if paint != nil {
 			l := r.Level
 			if r.Alert {
@@ -759,22 +763,18 @@ func Table(header []string, rows []Row, width int, shrink []int, paint func(Leve
 			}
 			last = func(s string) string { return paint(l, s) }
 		}
-		cs := r.Cells
-		if i > 0 && len(cs) > 0 && len(rows[i-1].Cells) > 0 && rows[i-1].Cells[0] == cs[0] {
-			cs = append([]string{""}, cs[1:]...)
-		}
-		lines = append(lines, cells(cs, widths, last, nil, r.Note, nil))
+		lines = append(lines, cells(r.Cells, widths, first, last, nil, r.Note, nil))
 	}
 	cutLines(lines, width)
 	return lines
 }
 
 // cells pads the cells to the column widths (not the last one), truncating
-// those wider than their column, and joins them; last, if set, renders the
-// last cell. The first link of each cell is rendered as a hyperlink (see
+// those wider than their column, and joins them; first and last, if set,
+// render the first cell (when not the last one) and the last cell. The first link of each cell is rendered as a hyperlink (see
 // link). note follows its cell, rendered by faint (nil: unstyled), as far
 // as it fits (see Note).
-func cells(cs []string, widths []int, last func(string) string, links []Link, note Note, faint func(string) string) string {
+func cells(cs []string, widths []int, first, last func(string) string, links []Link, note Note, faint func(string) string) string {
 	var b strings.Builder
 	for i, c := range cs {
 		c = sanitize(c)
@@ -799,6 +799,9 @@ func cells(cs []string, widths []int, last func(string) string, links []Link, no
 		}
 		if i > 0 {
 			b.WriteString("  ")
+		}
+		if i == 0 && i < len(cs)-1 && first != nil {
+			c = first(c)
 		}
 		if i == len(cs)-1 {
 			if last != nil {
@@ -863,7 +866,7 @@ func (m Overview) View() tea.View {
 		lines = append(lines, f)
 	}
 	if l.header {
-		lines = append(lines, "      "+st.Detail.Render(cells(m.header, widths, nil, nil, Note{}, nil)))
+		lines = append(lines, "      "+st.Detail.Render(cells(m.header, widths, nil, nil, nil, Note{}, nil)))
 	}
 	switch {
 	case len(m.rows) == 0:
@@ -948,9 +951,6 @@ func (m Overview) renderRow(i int, widths []int) string {
 		last = func(s string) string { return style.Render(s) }
 	}
 	cs := r.Cells
-	if prev := m.rows[m.visible[max(i-1, 0)]].Cells; m.grouped && i > m.offset && len(cs) > 0 && len(prev) > 0 && prev[0] == cs[0] {
-		cs = append([]string{""}, cs[1:]...)
-	}
 	var links []Link
 	if m.hyperlinks {
 		links = r.Links
@@ -962,7 +962,11 @@ func (m Overview) renderRow(i int, widths []int) string {
 		open, _, _ := strings.Cut(st.CurrentRow.Render("x"), "x")
 		faint = func(s string) string { return st.Detail.Render(s) + open }
 	}
-	text := cells(cs, widths, last, links, r.Note, faint)
+	var first func(string) string
+	if prev := m.rows[m.visible[max(i-1, 0)]].Cells; m.grouped && i > m.offset && len(cs) > 0 && len(prev) > 0 && prev[0] == cs[0] {
+		first = faint
+	}
+	text := cells(cs, widths, first, last, links, r.Note, faint)
 	if i == m.cursor {
 		text = st.CurrentRow.Render(text)
 	}

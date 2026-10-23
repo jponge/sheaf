@@ -63,12 +63,12 @@ func linkRows() []Row {
 }
 
 func newLinkOv(rows []Row) Overview {
-	return NewOverview("t", []string{"REPO", "DIR", "BRANCH", "STATE"}, rows, nil).WithGrouping()
+	return NewOverview("t", []string{"REPO", "DIR", "BRANCH", "STATE"}, rows, nil).WithGroupFaint()
 }
 
 // With hyperlinks, the cells of the links (B46) are OSC 8 hyperlinks to
-// their URL: the repository name on the first row of its group (not the
-// blanked cells of the others), "PR #7" in STATE; the text is unchanged.
+// their URL: the repository name on every row of its group (faint or not,
+// B68), "PR #7" in STATE; the text is unchanged.
 // Without, no hyperlink is rendered.
 func TestOverviewRendersHyperlinks(t *testing.T) {
 	t.Parallel()
@@ -78,14 +78,14 @@ func TestOverviewRendersHyperlinks(t *testing.T) {
 	}
 	m := plain.WithHyperlinks()
 	raw := m.View().Content
-	if got := linked(raw, "https://github.com/o/alpha"); len(got) != 1 || sgr.ReplaceAllString(got[0], "") != "alpha" {
-		t.Errorf("repository links %q, want one on alpha:\n%q", got, raw)
+	if got := linked(raw, "https://github.com/o/alpha"); len(got) != 2 || sgr.ReplaceAllString(got[0], "") != "alpha" || sgr.ReplaceAllString(got[1], "") != "alpha" {
+		t.Errorf("repository links %q, want two on alpha:\n%q", got, raw)
 	}
 	if got := linked(raw, "https://github.com/o/alpha/pull/7"); len(got) != 1 || sgr.ReplaceAllString(got[0], "") != "PR #7" {
 		t.Errorf("pull request links %q, want one on PR #7:\n%q", got, raw)
 	}
-	if strings.Contains(raw, "bravo\x1b]8") || len(osc8.FindAllString(raw, -1)) != 4 {
-		t.Errorf("want 2 hyperlinks (4 sequences):\n%q", raw)
+	if strings.Contains(raw, "bravo\x1b]8") || len(osc8.FindAllString(raw, -1)) != 6 {
+		t.Errorf("want 3 hyperlinks (6 sequences):\n%q", raw)
 	}
 	if stripOSC8(raw) != plain.View().Content {
 		t.Errorf("text changed by the hyperlinks:\n%q\nwant\n%q", stripOSC8(raw), plain.View().Content)
@@ -135,7 +135,7 @@ func TestOverviewHyperlinksSurviveTruncation(t *testing.T) {
 	rows[1].Links = append(rows[1].Links, Link{Cell: 1, Text: "a-very-long-directory-name", URL: dirURL})
 	for width := 10; width <= 200; width++ {
 		for _, cursor := range []string{"1", "2"} {
-			base := NewOverview("t", []string{"REPO", "DIR", "BRANCH", "STATE"}, rows, nil).WithGrouping().WithShrinkable(2, 1).WithCursor(cursor).WithSelected([]string{"2"})
+			base := NewOverview("t", []string{"REPO", "DIR", "BRANCH", "STATE"}, rows, nil).WithGroupFaint().WithShrinkable(2, 1).WithCursor(cursor).WithSelected([]string{"2"})
 			var plain, m tea.Model = base, base.WithHyperlinks()
 			plain, _ = plain.Update(tea.WindowSizeMsg{Width: width, Height: 30})
 			m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
