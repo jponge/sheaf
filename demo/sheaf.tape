@@ -20,8 +20,8 @@ Require sheaf
 Require git
 
 Set Shell "bash"
-Set FontSize 16
-Set Columns 140
+Set FontSize 20
+Set Columns 90
 Set Rows 22
 Set Padding 20
 Set Theme "Catppuccin Mocha"
@@ -108,7 +108,13 @@ Enter
 Wait /feat-search >$/
 Sleep 1s
 
-# The status of every checkout, from the new worktree.
+# The status of every checkout, from the new worktree, on a cleared screen
+# (the plain output of the earlier actions wraps at 90 columns).
+Hide
+Type "clear"
+Enter
+Wait /feat-search >$/
+Show
 Type "sheaf status"
 Sleep 500ms
 Enter
