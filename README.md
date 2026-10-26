@@ -906,7 +906,7 @@ These commands accept `--json`; each document has a `"version": 1` field.
 ## Platform support
 
 - Linux and macOS: tested.
-- Windows: not supported. The code builds, but `sheaf` refuses to run there (exit 1): it relies on Unix process groups, signals and file locks.
+- Windows: not supported natively. The code builds, but `sheaf` refuses to run there (exit 1): it relies on Unix process groups, signals and file locks. On Windows, use it in [WSL](https://learn.microsoft.com/windows/wsl/) (WSL 2), where it runs as on Linux (expected, not tested). Keep bundles on the Linux file system (for example under `~`), not under `/mnt/c`, and use the Linux git and gh inside WSL.
 
 ## Development
 

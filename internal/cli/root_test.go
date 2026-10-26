@@ -194,8 +194,8 @@ func TestWindowsIsRefusedAtStartup(t *testing.T) {
 		var out, errb bytes.Buffer
 		code := executeOn(goos, []string{"version"}, Streams{In: strings.NewReader(""), Out: &out, Err: &errb})
 		if goos == "windows" {
-			if code != 1 || out.Len() != 0 || !strings.Contains(errb.String(), "Windows is not supported") {
-				t.Errorf("%s: exit %d, stdout %q, stderr %q; want exit 1, no output, a refusal", goos, code, out.String(), errb.String())
+			if code != 1 || out.Len() != 0 || !strings.Contains(errb.String(), "Windows is not supported") || !strings.Contains(errb.String(), "WSL") {
+				t.Errorf("%s: exit %d, stdout %q, stderr %q; want exit 1, no output, a refusal pointing to WSL", goos, code, out.String(), errb.String())
 			}
 			continue
 		}

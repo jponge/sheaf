@@ -178,7 +178,7 @@ func executeOn(goos string, args []string, s Streams) int {
 		if errw == nil {
 			errw = os.Stderr
 		}
-		fmt.Fprintln(errw, "sheaf: Windows is not supported; use Linux or macOS")
+		fmt.Fprintln(errw, "sheaf: Windows is not supported; use Linux, macOS or WSL")
 		return 1
 	}
 	cdFile := os.Getenv(cdFileVar)
