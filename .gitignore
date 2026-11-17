@@ -13,3 +13,6 @@ coverage.*
 
 # Agent harness (worktrees)
 .claude/
+
+# Design notes kept out of version control
+/docs/superpowers/
