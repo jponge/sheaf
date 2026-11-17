@@ -70,13 +70,23 @@ func startPTYShell(t *testing.T, dir, script string, delay time.Duration) *ptySh
 			s.pending.Done()
 		}
 	}()
+	// A gh that fails comes first on PATH, so that the real gh never runs
+	// (the w prompt lists issues with gh); a script that needs gh puts its
+	// stub before it, one that sets PATH has none.
+	noGH := t.TempDir()
+	writeFile(t, filepath.Join(noGH, "gh"), "#!/bin/sh\necho 'gh is disabled in the tests' >&2\nexit 1\n")
+	if err := os.Chmod(filepath.Join(noGH, "gh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	cmd := exec.Command("/bin/sh", "-c", script)
 	cmd.Dir = dir
 	var env []string
 	for _, kv := range os.Environ() {
-		k, _, _ := strings.Cut(kv, "=")
+		k, v, _ := strings.Cut(kv, "=")
 		switch k {
 		case "TERM", "TERM_PROGRAM", "SSH_TTY", "CI", "NO_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "COLORTERM":
+		case "PATH":
+			env = append(env, "PATH="+noGH+string(os.PathListSeparator)+v)
 		default:
 			env = append(env, kv)
 		}

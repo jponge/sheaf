@@ -28,7 +28,7 @@ import (
 // cursor, and → or ctrl+e appends it. A suggestion with control or format
 // characters is never offered (see listable). enter confirms the value typed (never
 // the selected row), if it is not blank (on a blank one, a line asks for a
-// value) and accepted by its check, if any (WithCheck); esc and ctrl+c
+// value) and accepted by its check, if any (WithCheck, WithModeCheck); esc and ctrl+c
 // cancel. A hint per mode (WithHints) is displayed below the input while it
 // is edited. Update returns tea.Quit once answered; later messages are
 // ignored. The title is displayed with control characters replaced by
@@ -50,6 +50,8 @@ type Prompt struct {
 	suggestions map[int]loadedSuggestions            // by mode, once loaded
 	jumps       []modeJump                           // see WithModeJump
 	exact       map[int]string                       // missing text by mode, see WithExactDetail
+	empty       map[int]string                       // by mode, see WithEmptyText
+	checks      map[int]func(string) string          // by mode, see WithModeCheck
 
 	confirmed, cancelled, interrupted bool
 
@@ -123,7 +125,7 @@ func (m Prompt) WithCheck(check func(value string) string) Prompt {
 // opens without waiting and a slow load does not delay the others. Until
 // a mode's load returns, a line says that its suggestions are loading;
 // then its error, if any, is displayed as its first line, and an empty
-// list as "no <mode>s" (e.g. "no branches").
+// list as "no <mode>s" (e.g. "no branches"), or as WithEmptyText says.
 func (m Prompt) WithSuggestions(mode string, load func() ([]Suggestion, error)) Prompt {
 	if i := slices.Index(m.modes, mode); i >= 0 {
 		m.loads = maps.Clone(m.loads)
@@ -157,6 +159,34 @@ func (m Prompt) WithExactDetail(mode, missing string) Prompt {
 			m.exact = map[int]string{}
 		}
 		m.exact[i] = missing
+	}
+	return m
+}
+
+// WithModeCheck returns a copy of m in which check checks the values of
+// mode, as WithCheck does, instead of the check of WithCheck (e.g. an
+// issue number in a mode, branch names in the others).
+func (m Prompt) WithModeCheck(mode string, check func(value string) string) Prompt {
+	if i := slices.Index(m.modes, mode); i >= 0 {
+		m.checks = maps.Clone(m.checks)
+		if m.checks == nil {
+			m.checks = map[int]func(string) string{}
+		}
+		m.checks[i] = check
+	}
+	return m
+}
+
+// WithEmptyText returns a copy of m that displays text in mode once its
+// suggestions are loaded and empty, instead of "no <mode>s" (e.g. "no open
+// issues").
+func (m Prompt) WithEmptyText(mode, text string) Prompt {
+	if i := slices.Index(m.modes, mode); i >= 0 {
+		m.empty = maps.Clone(m.empty)
+		if m.empty == nil {
+			m.empty = map[int]string{}
+		}
+		m.empty[i] = text
 	}
 	return m
 }
@@ -348,8 +378,12 @@ func (m Prompt) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.blank = true
 				break
 			}
-			if m.check != nil {
-				m.refused = m.check(m.value)
+			check := m.check
+			if c, ok := m.checks[m.mode]; ok {
+				check = c
+			}
+			if check != nil {
+				m.refused = check(m.value)
 			}
 			if m.refused == "" {
 				m.confirmed = true
@@ -456,7 +490,11 @@ func (m Prompt) lines() (head, tail []string) {
 		case loaded.err != nil:
 			head = append(head, st.Warn.Render(errorLine(loaded.err, "cannot load "+mode)))
 		case len(loaded.list) == 0:
-			head = append(head, st.Empty.Render("no "+mode))
+			empty, ok := m.empty[m.mode]
+			if !ok {
+				empty = "no " + mode
+			}
+			head = append(head, st.Empty.Render(sanitize(empty)))
 		}
 	}
 	if m.blank {

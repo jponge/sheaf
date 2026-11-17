@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jponge/sheaf/internal/bundle"
 	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/hosting"
 )
@@ -76,6 +77,17 @@ func (e *IssueIsPullRequestError) Error() string {
 	return fmt.Sprintf("#%d is a pull request of %s, not an issue\nto check it out in a worktree, run: %s", e.Number, e.Slug, e.Command)
 }
 
+// issueWorktreesWhat is what checkGitHub says about issues.
+const issueWorktreesWhat = "worktrees for issues can only be added"
+
+// CheckIssueRepository returns the error with which AddIssueWorktree
+// refuses r, a repository that is not hosted on GitHub (see OnGitHub),
+// else nil.
+func CheckIssueRepository(r bundle.Repository) error {
+	_, err := checkGitHub(r, issueWorktreesWhat)
+	return err
+}
+
 // AddIssueWorktree creates a worktree for issue number of repo (a GitHub
 // repository of the bundle, see checkGitHub) with AddWorktree, on the
 // branch of the issue.
@@ -97,7 +109,7 @@ func AddIssueWorktree(ctx context.Context, w *Workspace, h hosting.Hosting, repo
 	if err != nil {
 		return WorktreeAddResult{}, err
 	}
-	alias, err := checkGitHub(r, "worktrees for issues can only be added")
+	alias, err := checkGitHub(r, issueWorktreesWhat)
 	if err != nil {
 		return WorktreeAddResult{}, err
 	}

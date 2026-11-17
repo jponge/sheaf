@@ -736,3 +736,48 @@ func TestPromptLoadErrorFirstNonBlankLine(t *testing.T) {
 		}
 	}
 }
+
+// WithModeCheck checks the values of its mode only, instead of the check
+// of WithCheck there: a branch name is not a number.
+func TestPromptModeCheck(t *testing.T) {
+	t.Parallel()
+	digits := func(v string) string {
+		if strings.Trim(v, "0123456789") != "" {
+			return "not a number: " + v
+		}
+		return ""
+	}
+	p := issuePrompt().WithCheck(func(v string) string { return "global: " + v }).WithModeCheck("issue", digits)
+	m, cmd := press(p, "ctrl+t", "ctrl+t", "x", "enter")
+	if asPrompt(t, m).Confirmed() || isQuit(cmd) || !hasLine(view(m), "not a number: x") || strings.Contains(view(m), "global") {
+		t.Fatalf("issue mode, x:\n%s", view(m))
+	}
+	m, cmd = press(m, "ctrl+u", "4", "2", "enter")
+	if p := asPrompt(t, m); !isQuit(cmd) || !p.Confirmed() || p.Value() != "42" {
+		t.Fatalf("issue mode, 42: quit=%v confirmed=%v value=%q", isQuit(cmd), p.Confirmed(), p.Value())
+	}
+	// The other modes keep the check of WithCheck.
+	if m, _ := press(p, "x", "enter"); asPrompt(t, m).Confirmed() || !hasLine(view(m), "global: x") {
+		t.Fatalf("branch mode, x:\n%s", view(m))
+	}
+	// Without WithCheck, the other modes accept any value.
+	m, cmd = press(issuePrompt().WithModeCheck("issue", digits), "x", "enter")
+	if p := asPrompt(t, m); !isQuit(cmd) || !p.Confirmed() || p.Value() != "x" {
+		t.Fatalf("branch mode without WithCheck: quit=%v confirmed=%v value=%q", isQuit(cmd), p.Confirmed(), p.Value())
+	}
+}
+
+// WithEmptyText replaces the line of a mode whose suggestions are loaded
+// and empty ("no issues").
+func TestPromptEmptyText(t *testing.T) {
+	t.Parallel()
+	none := func() ([]Suggestion, error) { return nil, nil }
+	m, _ := press(loaded(t, issuePrompt().WithSuggestions("tag", none).WithSuggestions("issue", none).WithEmptyText("issue", "no open issues")), "ctrl+t")
+	if v := view(m); !hasLine(v, "no tags") {
+		t.Fatalf("tag mode:\n%s", v)
+	}
+	m, _ = press(m, "ctrl+t")
+	if v := view(m); !hasLine(v, "no open issues") || hasLine(v, "no issues") {
+		t.Fatalf("issue mode:\n%s", v)
+	}
+}

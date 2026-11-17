@@ -20,6 +20,7 @@ import (
 
 	"github.com/jponge/sheaf/internal/bundle"
 	"github.com/jponge/sheaf/internal/gitx"
+	"github.com/jponge/sheaf/internal/hosting"
 	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/tui"
 )
@@ -730,19 +731,30 @@ func (h *home) removeWorktrees(targets []string) []error {
 	return tuiWorktreeRemoveMany(c, d, w, items, ops.WorktreeRemoveOptions{WorkingDir: wd})
 }
 
-// add asks for a branch or a tag and adds the worktree with `wt add`. The
-// prompt suggests the branches and the tags of the repository's local refs
-// (see ops.SuggestWorktree), read in the background while it is open: the
-// git process is stopped once the prompt ends.
+// add asks for a branch, a tag or an issue and adds the worktree with `wt
+// add`. The prompt suggests the branches and the tags of the repository's
+// local refs (see ops.SuggestWorktree), and its open issues (see
+// issueSuggestions), read in the background while it is open: the git and
+// gh processes are stopped once the prompt ends.
 func (h *home) add(repo string) string {
 	// The hints follow wt add: an existing branch (local, then origin's),
 	// else a new one from the default branch; --tag pins a detached
-	// worktree at the tag.
+	// worktree at the tag; --issue makes or reuses the issue's branch.
 	ctx, cancel := context.WithCancel(h.actx)
 	defer cancel()
-	prompt := tui.NewPrompt("New worktree of "+repo, []string{"branch", "tag"}).WithHints(
+	prompt := tui.NewPrompt("New worktree of "+repo, []string{"branch", "tag", "issue"}).WithHints(
 		"an existing local or remote branch, else a new branch from the default branch",
-		"a tag: a detached worktree pinned at it")
+		"a tag: a detached worktree pinned at it",
+		"an open issue: a worktree on issue/<n>-<title>").
+		WithModeJump('#', "branch", "issue").
+		WithExactDetail("issue", fmt.Sprintf("not among the first %d open issues: wt add --issue checks it", completionIssueLimit)).
+		WithEmptyText("issue", "no open issues").
+		WithModeCheck("issue", func(v string) string {
+			if _, err := parseNumber(strings.TrimSpace(v), "issue"); err != nil {
+				return err.Error()
+			}
+			return ""
+		})
 	// Both modes' loads share one git process, started by the first load
 	// that runs.
 	suggest := sync.OnceValues(func() (ops.WorktreeSuggestions, error) {
@@ -765,9 +777,16 @@ func (h *home) add(repo string) string {
 			return list, nil
 		}
 	}
+	var issueRepo *bundle.Repository // a copy: the load may outlive the prompt
+	if r, ok := h.bundle.Repository(repo); ok {
+		c := *r
+		issueRepo = &c
+	}
+	hs := h.d.hosting()
 	prompt = prompt.
 		WithSuggestions("branch", load("branches", func(s ops.WorktreeSuggestions) []string { return s.Branches })).
-		WithSuggestions("tag", load("tags", func(s ops.WorktreeSuggestions) []string { return s.Tags }))
+		WithSuggestions("tag", load("tags", func(s ops.WorktreeSuggestions) []string { return s.Tags })).
+		WithSuggestions("issue", func() ([]tui.Suggestion, error) { return issueSuggestions(ctx, hs, repo, issueRepo) })
 	final, err := h.session().run(prompt)
 	cancel()
 	if err != nil {
@@ -778,10 +797,42 @@ func (h *home) add(repo string) string {
 		return h.outcome("add", []error{errCancelled})
 	}
 	value := strings.TrimSpace(p.Value())
-	if p.Mode() == "tag" {
+	switch p.Mode() {
+	case "tag":
 		return h.outcome("add", []error{h.command("wt", "add", "--tag="+value, "--", repo)})
+	case "issue":
+		n, err := parseNumber(value, "issue")
+		if err != nil {
+			return h.outcome("add", []error{err})
+		}
+		return h.outcome("add", []error{h.command("wt", "add", "--issue="+strconv.Itoa(n), "--", repo)})
 	}
 	return h.outcome("add", []error{h.command("wt", "add", "--", repo, value)})
+}
+
+// issueSuggestions returns the open issues of r, the repository repo of
+// the bundle (nil: not found), for the issue mode of the w prompt: those
+// of its reference repository (r.Slug, not the user's fork), the first
+// completionIssueLimit in the order of hs, numbers with their titles. For
+// a repository not hosted on GitHub, the error of wt add --issue (see
+// ops.CheckIssueRepository), without asking hs.
+func issueSuggestions(ctx context.Context, hs hosting.Hosting, repo string, r *bundle.Repository) ([]tui.Suggestion, error) {
+	if r == nil {
+		return nil, fmt.Errorf("%s is not in the bundle", repo)
+	}
+	if err := ops.CheckIssueRepository(*r); err != nil {
+		return nil, err
+	}
+	owner, name, _ := strings.Cut(r.Slug, "/")
+	issues, err := hs.Issues(ctx, owner, name, completionIssueLimit)
+	if err != nil && !errors.Is(err, hosting.ErrPossiblyTruncated) {
+		return nil, fmt.Errorf("cannot list the issues of %s: %s", r.Slug, issuesCause(err))
+	}
+	list := make([]tui.Suggestion, 0, len(issues))
+	for _, is := range issues {
+		list = append(list, tui.Suggestion{Value: strconv.Itoa(is.Number), Detail: is.Title})
+	}
+	return list, nil
 }
 
 // suggestionsCause returns the cause of err, an error of
@@ -799,6 +850,22 @@ func suggestionsCause(repo string, err error) string {
 	lines := strings.Split(strings.TrimSpace(ge.Stderr), "\n")
 	if last := strings.TrimSpace(lines[len(lines)-1]); last != "" {
 		return last
+	}
+	return ge.Err.Error()
+}
+
+// issuesCause returns the cause of err, an error of Hosting.Issues, for
+// the one line that the w prompt displays: for a gh failure without a
+// specific message (see hosting.GHError), gh's standard error, else how gh
+// failed, rather than gh's command line, which would push the cause out of
+// the row; else the message of err.
+func issuesCause(err error) string {
+	ge, ok := errors.AsType[*hosting.GHError](err)
+	if !ok || !strings.HasPrefix(ge.Error(), "gh "+strings.Join(ge.Args, " ")+": ") {
+		return err.Error()
+	}
+	if strings.TrimSpace(ge.Stderr) != "" {
+		return ge.Stderr
 	}
 	return ge.Err.Error()
 }

@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1003,6 +1006,277 @@ func TestHomeAddWorktreeSuggestsBranchesAndTags(t *testing.T) {
 	}
 	if !exists(filepath.Join(repo, "v1.2", ".git")) {
 		t.Fatalf("tag worktree not created\nstdout:\n%s\nstderr:\n%s", out.String(), errs)
+	}
+}
+
+// shownThen are the key presses ks, the first one waiting until the
+// terminal shows want (see waitScreen).
+func shownThen(t *testing.T, out *syncBuffer, want string, ks ...string) []key {
+	t.Helper()
+	k := keys(ks...)
+	k[0].wait = waitScreen(t, out, want)
+	return k
+}
+
+// issuesHosting is a hosting service whose Issues is issues, and whose
+// Issue calls issue first, if set.
+type issuesHosting struct {
+	hosting.Hosting
+	issues func(ctx context.Context, owner, name string, limit int) ([]hosting.Issue, error)
+	issue  func()
+}
+
+func (h issuesHosting) Issues(ctx context.Context, owner, name string, limit int) ([]hosting.Issue, error) {
+	return h.issues(ctx, owner, name, limit)
+}
+
+func (h issuesHosting) Issue(ctx context.Context, owner, name string, number int) (hosting.Issue, error) {
+	if h.issue != nil {
+		h.issue()
+	}
+	return h.Hosting.Issue(ctx, owner, name, number)
+}
+
+// # on an empty branch switches the w prompt to its issue mode, which
+// lists the open issues with their titles (matched too): tab takes the
+// number, whose title is displayed below the input, and enter runs `wt
+// add --issue`.
+func TestHomeAddWorktreeForIssue(t *testing.T) {
+	t.Parallel()
+	e, alpha, _, _, _ := homeBundle(t)
+	e.fake.AddIssue("o", "alpha", hosting.Issue{Number: 7, Title: "Other", State: "OPEN"})
+	e.fake.AddIssue("o", "alpha", hosting.Issue{Number: 42, Title: "Add --issue flag", State: "OPEN"})
+	var out syncBuffer
+	in := newScript(t, false,
+		ovKeys(t, &out, "STATE", 1, "w"),
+		slices.Concat(keys("#"), shownThen(t, &out, "an open issue: a worktree on issue/<n>-<title>", "a", "d", "d"),
+			shownThen(t, &out, "> 42  Add --issue flag", "\t"), shownThen(t, &out, "issue: 42█\nAdd --issue flag\n", "\r")),
+		reportKey(t, &out, "wt add", "q"),
+		ovKeys(t, &out, "wt add: done", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	wt := filepath.Join(filepath.Dir(alpha), "issue-42-add-issue-flag")
+	if !exists(filepath.Join(wt, ".git")) {
+		t.Fatalf("worktree not created\nstdout:\n%s\nstderr:\n%s", out.String(), errs)
+	}
+	if got := testutil.Git(t, wt, "branch", "--show-current"); got != "issue/42-add-issue-flag" {
+		t.Errorf("branch %q", got)
+	}
+}
+
+// tab takes the selected candidate, a branch containing the text.
+func TestHomeAddWorktreeTabCompletesBranch(t *testing.T) {
+	t.Parallel()
+	e, alpha, _, _, _ := homeBundle(t)
+	testutil.Git(t, alpha, "branch", "fix/local")
+	var out syncBuffer
+	in := newScript(t, false,
+		ovKeys(t, &out, "STATE", 1, "w"),
+		slices.Concat(keys("l", "o", "c"), shownThen(t, &out, "> fix/local", "\t"), shownThen(t, &out, "branch: fix/local█", "\r")),
+		reportKey(t, &out, "wt add", "q"),
+		ovKeys(t, &out, "wt add: done", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	if got := testutil.Git(t, filepath.Join(filepath.Dir(alpha), "fix-local"), "branch", "--show-current"); got != "fix/local" {
+		t.Errorf("branch %q", got)
+	}
+}
+
+// addBranchAfterIssueMode runs the home screen of e with d, opens the w
+// prompt, switches to its issue mode, waits until it shows line, and goes
+// back to the branch mode, where tab still completes fix/local (a branch
+// of alpha) and enter adds its worktree.
+func addBranchAfterIssueMode(t *testing.T, e *env, d Deps, alpha, line string) string {
+	t.Helper()
+	var out syncBuffer
+	in := newScript(t, false,
+		ovKeys(t, &out, "STATE", 1, "w"),
+		slices.Concat(keys("\x14", "\x14"), shownThen(t, &out, line, "\x14", "l", "o", "c"), shownThen(t, &out, "> fix/local", "\t"), shownThen(t, &out, "branch: fix/local█", "\r")),
+		reportKey(t, &out, "wt add", "q"),
+		ovKeys(t, &out, "wt add: done", 1, "q"))
+	errs, code := runHomeWith(t, d, in, &out)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	if got := testutil.Git(t, filepath.Join(filepath.Dir(alpha), "fix-local"), "branch", "--show-current"); got != "fix/local" {
+		t.Errorf("branch %q\nstdout:\n%s", got, out.String())
+	}
+	return out.String()
+}
+
+// For a clone of your fork, the issue mode of the w prompt lists the
+// issues of the reference repository, not those of the fork.
+func TestHomeAddWorktreeIssuesOfForkReference(t *testing.T) {
+	t.Parallel()
+	e := newBundleEnv(t)
+	e.forked(t, "up", "x")
+	e.mustRun(t, "add", "up/x")
+	e.fake.AddIssue("up", "x", hosting.Issue{Number: 5, Title: "Upstream issue", State: "OPEN"})
+	var calls []string
+	var mu sync.Mutex
+	d := e.deps()
+	d.Hosting = func() hosting.Hosting {
+		return issuesHosting{e.fake, func(ctx context.Context, owner, name string, limit int) ([]hosting.Issue, error) {
+			mu.Lock()
+			calls = append(calls, owner+"/"+name)
+			mu.Unlock()
+			return e.fake.Issues(ctx, owner, name, limit)
+		}, nil}
+	}
+	var out syncBuffer
+	in := newScript(t, false,
+		ovKeys(t, &out, "STATE", 1, "w"), slices.Concat(keys("#"), shownThen(t, &out, "> 5  Upstream issue", "\x1b")),
+		ovKeys(t, &out, "wt add: cancelled", 1, "q"))
+	errs, code := runHomeWith(t, d, in, &out)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(calls, []string{"up/x"}) {
+		t.Errorf("Issues calls %q, want [up/x]", calls)
+	}
+}
+
+// When the issues cannot be listed, the issue mode of the w prompt says
+// why on one line, and the branch mode keeps working: gh's error, or, for a
+// repository not hosted on GitHub, an explanation, without running gh;
+// likewise without open issues.
+func TestHomeAddWorktreeIssuesUnavailable(t *testing.T) {
+	t.Parallel()
+	t.Run("gh error", func(t *testing.T) {
+		t.Parallel()
+		e, alpha, _, _, _ := homeBundle(t)
+		testutil.Git(t, alpha, "branch", "fix/local")
+		e.fake.IssueErr = map[string]error{"o/alpha": &hosting.GHError{Args: []string{"issue", "list", "--repo", "o/alpha"}, Err: fmt.Errorf("%w: exit status 1", hosting.ErrIssuesDisabled)}}
+		addBranchAfterIssueMode(t, e, e.deps(), alpha, "cannot list the issues of o/alpha: issues are disabled on o/alpha\n")
+	})
+	t.Run("no issues", func(t *testing.T) {
+		t.Parallel()
+		e, alpha, _, _, _ := homeBundle(t)
+		testutil.Git(t, alpha, "branch", "fix/local")
+		addBranchAfterIssueMode(t, e, e.deps(), alpha, "no open issues\n")
+	})
+	t.Run("not on GitHub", func(t *testing.T) {
+		t.Parallel()
+		e, alpha, _, _, _ := homeBundle(t)
+		testutil.Git(t, alpha, "branch", "fix/local")
+		setHost(t, e.cwd, "alpha", "gitlab.com")
+		var calls atomic.Int32
+		d := e.deps()
+		d.Hosting = func() hosting.Hosting {
+			return issuesHosting{e.fake, func(ctx context.Context, owner, name string, limit int) ([]hosting.Issue, error) {
+				calls.Add(1)
+				return e.fake.Issues(ctx, owner, name, limit)
+			}, nil}
+		}
+		addBranchAfterIssueMode(t, e, d, alpha, "alpha is hosted on gitlab.com: worktrees for issues can only be added for GitHub repositories\n")
+		if n := calls.Load(); n != 0 {
+			t.Errorf("%d Issues calls for a repository not on GitHub", n)
+		}
+	})
+}
+
+// The issues of the w prompt load in the background with the prompt's
+// context: while they load, the branch mode works, and the load is
+// stopped once the prompt is answered, before wt add runs.
+func TestHomeAddWorktreeIssuesLoadStoppedWithPrompt(t *testing.T) {
+	t.Parallel()
+	e, alpha, _, _, _ := homeBundle(t)
+	testutil.Git(t, alpha, "branch", "fix/local")
+	e.fake.AddIssue("o", "alpha", hosting.Issue{Number: 42, Title: "Add --issue flag", State: "OPEN"})
+	stopped := make(chan error, 1)
+	// wantStopped checks that the load was stopped, waiting up to 5
+	// seconds (stopping it takes a moment).
+	wantStopped := func(when string) {
+		select {
+		case err := <-stopped:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("%s: issue load stopped with %v", when, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Errorf("%s: the issue load still runs", when)
+		}
+	}
+	d := e.deps()
+	var inWtAdd atomic.Bool
+	d.Hosting = func() hosting.Hosting {
+		return issuesHosting{e.fake, func(ctx context.Context, owner, name string, limit int) ([]hosting.Issue, error) {
+			<-ctx.Done()
+			stopped <- ctx.Err()
+			return nil, ctx.Err()
+		}, func() {
+			if !inWtAdd.Swap(true) { // once: wt add --issue asks for the issue
+				wantStopped("when wt add --issue asks for the issue")
+			}
+		}}
+	}
+	var out syncBuffer
+	report := reportKey(t, &out, "wt add", "q")
+	wait := report[0].wait
+	report[0].wait = func() { wait(); wantStopped("in the report view of wt add") }
+	in := newScript(t, false,
+		ovKeys(t, &out, "STATE", 1, "w"),
+		slices.Concat(keys("\x14", "\x14"), shownThen(t, &out, "loading issues…", "\x14", "l", "o", "c"), shownThen(t, &out, "> fix/local", "\t"), shownThen(t, &out, "branch: fix/local█", "\r")),
+		report,
+		ovKeys(t, &out, "wt add: done", 1, "w"), keys("#", "4", "2", "\r"), reportKey(t, &out, "wt add", "q"),
+		ovKeys(t, &out, "wt add: done", 2, "q"))
+	errs, code := runHomeWith(t, d, in, &out)
+	repo := filepath.Dir(alpha)
+	if code != 0 || !exists(filepath.Join(repo, "fix-local", ".git")) || !exists(filepath.Join(repo, "issue-42-add-issue-flag", ".git")) || !inWtAdd.Load() {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+}
+
+// More open issues than the w prompt lists: the first ones are listed,
+// without an error; a number beyond them is not in the list. A value that
+// is not a number is refused in the prompt, which stays open.
+func TestHomeAddWorktreeIssuesTruncated(t *testing.T) {
+	t.Parallel()
+	e, _, _, _, _ := homeBundle(t)
+	for n := 1; n <= 201; n++ {
+		e.fake.AddIssue("o", "alpha", hosting.Issue{Number: n, Title: fmt.Sprintf("Issue number %d", n), State: "OPEN"})
+	}
+	var out syncBuffer
+	in := newScript(t, false,
+		ovKeys(t, &out, "STATE", 1, "w"),
+		slices.Concat(keys("#"), shownThen(t, &out, "> 1  Issue number 1", "2", "0", "0"), shownThen(t, &out, "issue: 200█\nIssue number 200\n", "\x7f", "1"),
+			shownThen(t, &out, "issue: 201█\nnot among the first 200 open issues: wt add --issue checks it\n", "x", "\r"),
+			shownThen(t, &out, "invalid issue number \"201x\"", "\x1b")),
+		ovKeys(t, &out, "wt add: cancelled", 1, "q"))
+	errs, code := runHomeWith(t, e.deps(), in, &out)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs)
+	}
+	if s := screenText(out.String()); strings.Contains(s, "cannot list") || strings.Contains(s, "truncated") {
+		t.Errorf("truncation shown as an error:\n%s", s)
+	}
+}
+
+// The cause of a failed load of the issues of the w prompt fits its one
+// line: for a gh failure without a specific message, gh's standard error
+// (not gh's command line), else how gh failed; the specific messages as
+// they are.
+func TestIssuesCause(t *testing.T) {
+	t.Parallel()
+	args := []string{"issue", "list", "--repo", "o/a", "--json", "number,title,state,url"}
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{&hosting.GHError{Args: args, Err: errors.New("exit status 1"), Stderr: "error connecting to api.github.com\ncheck your internet connection"}, "error connecting to api.github.com\ncheck your internet connection"},
+		{&hosting.GHError{Args: args, Err: errors.New("exit status 1")}, "exit status 1"},
+		{&hosting.GHError{Args: args, Err: fmt.Errorf("%w: exit status 1", hosting.ErrIssuesDisabled), Stderr: "the 'o/a' repository has disabled issues"}, "issues are disabled on o/a"},
+		{&hosting.GHError{Args: args, Err: fmt.Errorf("%w: exit status 4", hosting.ErrGHNotAuthenticated)}, "gh is not authenticated: run `gh auth login`"},
+		{fmt.Errorf("x: %w", hosting.ErrGHNotFound), "x: gh executable not found"},
+	} {
+		if got := issuesCause(c.err); got != c.want {
+			t.Errorf("issuesCause(%q) = %q, want %q", c.err, got, c.want)
+		}
 	}
 }
 

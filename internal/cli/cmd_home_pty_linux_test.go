@@ -864,6 +864,45 @@ func TestHomeOnPTYSuggestionsErrorAndOneGitRun(t *testing.T) {
 	}
 }
 
+// The issue mode of the w prompt (ctrl+t twice) lists the open issues
+// with their titles, in gh's order, the first row highlighted; ↓ moves the
+// highlight to the next row.
+func TestHomeOnPTYPromptIssueModeRows(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	bin := t.TempDir()
+	writeFile(t, filepath.Join(bin, "gh"), `#!/bin/sh
+case "$*" in
+*"issue list --repo o/alpha "*) echo '[{"number":7,"state":"OPEN","title":"Fix the parser","url":"https://github.com/o/alpha/issues/7"},{"number":3,"state":"OPEN","title":"Crash on start","url":"https://github.com/o/alpha/issues/3"}]';;
+*) echo "unexpected: gh $*" >&2; exit 1;;
+esac
+`)
+	if err := os.Chmod(filepath.Join(bin, "gh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := startPTYShell(t, e.cwd, `PATH='`+bin+`':$PATH; export PATH; B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	s.write("w")
+	s.waitFor(`New worktree of alpha`)
+	s.write("\x14")
+	waitScreenState(t, s, "the tag mode", func(vt *vtScreen) bool { return slices.Contains(vt.normalLines(), "tag: █") })
+	s.write("\x14")
+	waitScreenState(t, s, "the issues, the first one highlighted", func(vt *vtScreen) bool {
+		lines := vt.normalLines()
+		i := slices.Index(lines, "> 7  Fix the parser")
+		return slices.Contains(lines, "issue: █") && i >= 0 && i+1 < len(lines) && lines[i+1] == "  3  Crash on start"
+	})
+	s.write("\x1b[B")
+	waitScreenState(t, s, "the second issue highlighted", func(vt *vtScreen) bool {
+		lines := vt.normalLines()
+		i := slices.Index(lines, "  7  Fix the parser")
+		return i >= 0 && i+1 < len(lines) && lines[i+1] == "> 3  Crash on start"
+	})
+	s.write("\x1b")
+	s.waitFor(`wt add: cancelled`)
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
+}
+
 // The w prompt opens, takes input and is cancelled while the git process
 // reading its suggestions (B47) still runs: they are loaded in the
 // background.
