@@ -803,6 +803,67 @@ func TestHomeOnPTYLinksRepositories(t *testing.T) {
 	}
 }
 
+// On a short terminal, the w prompt with candidate rows fits the window
+// with the empty line kept below it (keepLastLine): its title and its
+// input stay shown (the frame was one line too tall, and the title was
+// dropped).
+func TestHomeOnPTYPromptFitsShortTerminal(t *testing.T) {
+	e, alpha, _, _, _ := homeBundle(t)
+	for _, b := range []string{"b1", "b2", "b3", "b4", "b5", "b6"} {
+		testutil.Git(t, alpha, "branch", b)
+	}
+	s := startPTYShell(t, e.cwd, `stty rows 7; B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	s.write("w")
+	waitScreenStateRows(t, s, 7, "the prompt", func(vt *vtScreen) bool { return slices.Contains(vt.normalLines(), "branch: █") })
+	s.write("b")
+	waitScreenStateRows(t, s, 7, "the prompt's title, input and a candidate row", func(vt *vtScreen) bool {
+		lines := vt.normalLines()
+		return slices.Contains(lines, "New worktree of alpha") && slices.Contains(lines, "branch: b█1") && slices.Contains(lines, "> b1")
+	})
+	s.write("\x1b")
+	s.waitFor(`wt add: cancelled`)
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
+}
+
+// When the suggestions of the w prompt cannot be read, each mode says so
+// on one line with git's message (not git's command line, which pushed the
+// cause out of the row), and the two modes share one git process.
+func TestHomeOnPTYSuggestionsErrorAndOneGitRun(t *testing.T) {
+	e, _, _, _, _ := homeBundle(t)
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin, state := t.TempDir(), t.TempDir()
+	runs := filepath.Join(state, "runs")
+	// The suggestions are the only for-each-ref of refs/tags and
+	// refs/remotes/origin.
+	writeFile(t, filepath.Join(bin, "git"), "#!/bin/sh\ntags=; origin=\nfor a in \"$@\"; do case $a in refs/tags) tags=1;; refs/remotes/origin) origin=1;; esac; done\n"+
+		"if [ \"$tags$origin\" = 11 ]; then echo run >> '"+runs+"'; echo 'warning: first' >&2; echo 'fatal: refs are broken' >&2; exit 128; fi\nexec '"+git+"' \"$@\"\n")
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := startPTYShell(t, e.cwd, `PATH='`+bin+`':$PATH; export PATH; B=$(stty -g); "$SHEAF"`+sttyCheck, 0)
+	s.waitFor(`STATE`)
+	s.write("w")
+	waitScreenState(t, s, "the branch load error", func(vt *vtScreen) bool {
+		return slices.Contains(vt.normalLines(), "cannot read the branches of alpha: fatal: refs are broken")
+	})
+	s.write("\x14")
+	waitScreenState(t, s, "the tag load error", func(vt *vtScreen) bool {
+		return slices.Contains(vt.normalLines(), "cannot read the tags of alpha: fatal: refs are broken")
+	})
+	s.write("\x1b")
+	s.waitFor(`wt add: cancelled`)
+	s.write("q")
+	wantTerminalRestored(t, s, "0")
+	if got, err := os.ReadFile(runs); err != nil || string(got) != "run\n" {
+		t.Errorf("git runs reading the suggestions: %q, %v (want one, shared by both modes)", got, err)
+	}
+}
+
 // The w prompt opens, takes input and is cancelled while the git process
 // reading its suggestions (B47) still runs: they are loaded in the
 // background.

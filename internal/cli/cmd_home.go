@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jponge/sheaf/internal/bundle"
+	"github.com/jponge/sheaf/internal/gitx"
 	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/tui"
 )
@@ -741,17 +742,32 @@ func (h *home) add(repo string) string {
 	defer cancel()
 	prompt := tui.NewPrompt("New worktree of "+repo, []string{"branch", "tag"}).WithHints(
 		"an existing local or remote branch, else a new branch from the default branch",
-		"a tag: a detached worktree pinned at it").WithSuggestions(func() [][]string {
+		"a tag: a detached worktree pinned at it")
+	// Both modes' loads share one git process, started by the first load
+	// that runs.
+	suggest := sync.OnceValues(func() (ops.WorktreeSuggestions, error) {
 		w, err := ops.OpenWorkspace(h.root)
 		if err != nil {
-			return nil
+			return ops.WorktreeSuggestions{}, err
 		}
-		s, err := ops.SuggestWorktree(ctx, w, repo)
-		if err != nil {
-			return nil
-		}
-		return [][]string{s.Branches, s.Tags}
+		return ops.SuggestWorktree(ctx, w, repo)
 	})
+	load := func(what string, names func(ops.WorktreeSuggestions) []string) func() ([]tui.Suggestion, error) {
+		return func() ([]tui.Suggestion, error) {
+			s, err := suggest()
+			if err != nil {
+				return nil, fmt.Errorf("cannot read the %s of %s: %s", what, repo, suggestionsCause(repo, err))
+			}
+			var list []tui.Suggestion
+			for _, n := range names(s) {
+				list = append(list, tui.Suggestion{Value: n})
+			}
+			return list, nil
+		}
+	}
+	prompt = prompt.
+		WithSuggestions("branch", load("branches", func(s ops.WorktreeSuggestions) []string { return s.Branches })).
+		WithSuggestions("tag", load("tags", func(s ops.WorktreeSuggestions) []string { return s.Tags }))
 	final, err := h.session().run(prompt)
 	cancel()
 	if err != nil {
@@ -766,6 +782,25 @@ func (h *home) add(repo string) string {
 		return h.outcome("add", []error{h.command("wt", "add", "--tag="+value, "--", repo)})
 	}
 	return h.outcome("add", []error{h.command("wt", "add", "--", repo, value)})
+}
+
+// suggestionsCause returns the cause of err, an error of
+// ops.SuggestWorktree for repo, for the one line that the w prompt
+// displays: for a failed git command, the last line of its standard error
+// (git's message, its most specific line) or else how it failed, rather
+// than its command line and directory, which would push the cause out of
+// the row; for another error, its message without a leading "<repo>: "
+// (the line names the repository already).
+func suggestionsCause(repo string, err error) string {
+	ge, ok := errors.AsType[*gitx.GitError](err)
+	if !ok {
+		return strings.TrimPrefix(err.Error(), repo+": ")
+	}
+	lines := strings.Split(strings.TrimSpace(ge.Stderr), "\n")
+	if last := strings.TrimSpace(lines[len(lines)-1]); last != "" {
+		return last
+	}
+	return ge.Err.Error()
 }
 
 // pr asks for the number of a pull request of repo and checks it out with

@@ -147,3 +147,18 @@ func cutLines(lines []string, width int) {
 		}
 	}
 }
+
+// oneLine returns s for a single row: without its format characters
+// (invisible: bidi controls, zero-width spaces, byte order marks), with
+// each run of control characters and white space replaced by one space,
+// without leading or trailing space. Unlike sanitize, it suits text that
+// may contain tabs and newlines (e.g. an issue title).
+func oneLine(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.Join(strings.FieldsFunc(s, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }), " ")
+}

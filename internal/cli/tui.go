@@ -537,10 +537,18 @@ func printFailureDetails(w io.Writer, s ops.Summary) {
 
 // keepLastLine wraps a menu or dialog so that its view ends with an empty
 // line: bubbletea erases the last line of the final frame when the program
-// exits, and the whole final state should stay in the terminal.
+// exits, and the whole final state should stay in the terminal. The
+// wrapped model is told that the window is one line shorter (unless it has
+// one line, or an unknown height), so that a view filling the height still
+// fits with that line (bubbletea would drop the first line of a frame one
+// line too tall).
 type keepLastLine struct{ tea.Model }
 
 func (k keepLastLine) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if size, ok := msg.(tea.WindowSizeMsg); ok && size.Height > 1 {
+		size.Height--
+		msg = size
+	}
 	m, cmd := k.Model.Update(msg)
 	return keepLastLine{m}, cmd
 }

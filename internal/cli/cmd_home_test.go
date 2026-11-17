@@ -919,7 +919,7 @@ func TestHomeAddWorktreeForBranchAndTag(t *testing.T) {
 	testutil.TagOrigin(t, o, "v1", "main", false)
 	var out syncBuffer
 	// Each prompt shows the hint of its mode (waited for on the emulated
-	// screen: after tab, the renderer may rewrite only part of the line).
+	// screen: after ctrl+t, the renderer may rewrite only part of the line).
 	hinted := func(hint string, ks ...string) []key {
 		k := keys(ks...)
 		k[0].wait = waitScreen(t, &out, hint)
@@ -927,7 +927,7 @@ func TestHomeAddWorktreeForBranchAndTag(t *testing.T) {
 	}
 	in := newScript(t, false,
 		ovKeys(t, &out, "STATE", 1, "w"), hinted("an existing local or remote branch, else a new branch from the default branch", "t", "o", "p", "i", "c", "/", "y", "\r"), reportKey(t, &out, "wt add", "q"),
-		ovKeys(t, &out, "wt add: done", 1, "w"), append(keys("v", "1", "\t"), hinted("a tag: a detached worktree pinned at it", "\r")...), reportKey(t, &out, "wt add", "q"),
+		ovKeys(t, &out, "wt add: done", 1, "w"), append(keys("v", "1", "\x14"), hinted("a tag: a detached worktree pinned at it", "\r")...), reportKey(t, &out, "wt add", "q"),
 		ovKeys(t, &out, "wt add: done", 2, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {
@@ -954,6 +954,27 @@ func TestHomeAddWorktreeForBranchAndTag(t *testing.T) {
 	}
 }
 
+// The cause of a failed load of the w prompt's suggestions fits its one
+// line: git's last line of standard error (not its command line), else how
+// git failed; another error without the repository's name that the line
+// already gives.
+func TestSuggestionsCause(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{&gitx.GitError{Args: []string{"for-each-ref"}, Dir: "/x", Err: errors.New("exit status 128"), Stderr: "warning: first\nfatal: refs are broken"}, "fatal: refs are broken"},
+		{&gitx.GitError{Args: []string{"for-each-ref"}, Dir: "/x", Err: errors.New("exit status 128")}, "exit status 128"},
+		{errors.New("alpha: primary checkout's .git is not a directory"), "primary checkout's .git is not a directory"},
+		{errors.New("alphabet: other"), "alphabet: other"},
+	} {
+		if got := suggestionsCause("alpha", c.err); got != c.want {
+			t.Errorf("suggestionsCause(%q) = %q, want %q", c.err, got, c.want)
+		}
+	}
+}
+
 // The w prompt suggests the branches and the tags of the repository, read
 // from its local refs (B47): → accepts the suggested branch, ctrl+e the
 // suggested tag.
@@ -970,7 +991,7 @@ func TestHomeAddWorktreeSuggestsBranchesAndTags(t *testing.T) {
 	}
 	in := newScript(t, false,
 		ovKeys(t, &out, "STATE", 1, "w"), slices.Concat(keys("f", "i"), suggested("branch: fi█x/local", "\x1b[C"), suggested("branch: fix/local█", "\r")), reportKey(t, &out, "wt add", "q"),
-		ovKeys(t, &out, "wt add: done", 1, "w"), slices.Concat(keys("\t", "v"), suggested("tag: v█1.2", "\x05"), suggested("tag: v1.2█", "\r")), reportKey(t, &out, "wt add", "q"),
+		ovKeys(t, &out, "wt add: done", 1, "w"), slices.Concat(keys("\x14", "v"), suggested("tag: v█1.2", "\x05"), suggested("tag: v1.2█", "\r")), reportKey(t, &out, "wt add", "q"),
 		ovKeys(t, &out, "wt add: done", 2, "q"))
 	errs, code := runHomeWith(t, e.deps(), in, &out)
 	if code != 0 {

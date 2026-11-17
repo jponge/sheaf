@@ -137,3 +137,32 @@ func TestKeepLastLineWrapper(t *testing.T) {
 		t.Fatal("inner model not updated")
 	}
 }
+
+// sizeRecorder records the window sizes it receives.
+type sizeRecorder struct{ sizes *[]tea.WindowSizeMsg }
+
+func (r sizeRecorder) Init() tea.Cmd  { return nil }
+func (r sizeRecorder) View() tea.View { return tea.NewView("") }
+func (r sizeRecorder) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if s, ok := msg.(tea.WindowSizeMsg); ok {
+		*r.sizes = append(*r.sizes, s)
+	}
+	return r, nil
+}
+
+// The wrapped model is told the window is one line shorter than it is:
+// the empty line keepLastLine adds would otherwise make a view filling the
+// height one line too tall, and bubbletea drops its first line (the
+// title). A window of one line (or unknown, 0) is passed on as it is.
+func TestKeepLastLineReservesItsLine(t *testing.T) {
+	t.Parallel()
+	var sizes []tea.WindowSizeMsg
+	var m tea.Model = keepLastLine{sizeRecorder{&sizes}}
+	for _, h := range []int{7, 2, 1, 0} {
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
+	}
+	want := []tea.WindowSizeMsg{{Width: 80, Height: 6}, {Width: 80, Height: 1}, {Width: 80, Height: 1}, {Width: 80, Height: 0}}
+	if !reflect.DeepEqual(sizes, want) {
+		t.Fatalf("sizes %v, want %v", sizes, want)
+	}
+}
