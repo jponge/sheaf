@@ -380,6 +380,9 @@ type WorktreeAddOptions struct {
 	// remotes (ops-internal) overrides the remotes searched for an
 	// existing remote branch (default: RemotesOf(r).BranchSearch()).
 	remotes []string
+	// fetched (ops-internal), with NoFetch, tells that the caller fetched
+	// the remotes itself: errors then do not blame --no-fetch.
+	fetched bool
 	// afterAddCheck (test seam, nil in production) runs once the target
 	// was checked, under the bundle lock.
 	afterAddCheck func()
@@ -531,7 +534,7 @@ func AddWorktree(ctx context.Context, w *Workspace, repo, branch string, opts Wo
 			return WorktreeAddResult{}, ctx.Err()
 		}
 		if errors.Is(err, gitx.ErrBaseNotFound) {
-			return WorktreeAddResult{}, baseNotFoundError(ctx, primary, r.Name, base, opts.NoFetch, rs)
+			return WorktreeAddResult{}, baseNotFoundError(ctx, primary, r.Name, base, opts.NoFetch && !opts.fetched, rs)
 		}
 		return WorktreeAddResult{}, fmt.Errorf("creating worktree %s: %w", path, err)
 	}

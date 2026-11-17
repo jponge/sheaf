@@ -309,4 +309,9 @@ func TestFakeIssues(t *testing.T) {
 	if _, err := f.Issue(ctx, "o", "r", 12); !errors.Is(err, boom) {
 		t.Fatalf("Issue err = %v", err)
 	}
+	// The valid Issue calls, as passed, failed ones included.
+	wantCalls := []IssueCall{{"o/R", 12}, {"o/R", 5}, {"o/R", 7}, {"o/r", 99}, {"o/r", 12}}
+	if got := f.IssueCalls(); !slices.Equal(got, wantCalls) {
+		t.Fatalf("IssueCalls = %v, want %v", got, wantCalls)
+	}
 }

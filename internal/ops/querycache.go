@@ -13,10 +13,10 @@ import (
 // the command; a command called by another one shares the caller's cache.
 //
 // Commands with a cache: status, update, fetch, wt list, path, doctor,
-// prune (planning only), remove, wt rm, wt add (branch and tag). The others
-// never read through a cache: adopt moves checkouts and add and sync clone
-// into new directories (file system changes outside git), run executes
-// arbitrary user commands, and wt pr was not measured.
+// prune (planning only), remove, wt rm, wt add (branch, tag and issue). The
+// others never read through a cache: adopt moves checkouts and add and sync
+// clone into new directories (file system changes outside git), run
+// executes arbitrary user commands, and wt pr was not measured.
 //
 // A command's own mutations need no care: every git invocation that is not
 // a known read-only query invalidates the answers of its repository (see
@@ -30,9 +30,10 @@ import (
 //     then the deletion);
 //   - prune (ApplyPrune): everything, since it re-checks a plan made by an
 //     earlier call (the worktree, branch and commit of each candidate);
-//   - wt rm, prune's branch deletion, wt add (branch and tag): everything
-//     under the bundle lock (see lockBundleFresh), i.e. the re-check of the
-//     removal plan and the branch deletion, the add checks and the creation;
+//   - wt rm, prune's branch deletion, wt add (branch, tag and issue):
+//     everything under the bundle lock (see lockBundleFresh), i.e. the
+//     re-check of the removal plan and the branch deletion, the add checks
+//     and the creation;
 //   - gitx itself: the branch clean-up after a failed worktree add.
 //
 // Some of these are no-ops today and kept as documented defence in depth,

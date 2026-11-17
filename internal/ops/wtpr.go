@@ -80,11 +80,9 @@ func AddPRWorktree(ctx context.Context, w *Workspace, h hosting.Hosting, repo st
 	if err != nil {
 		return PRWorktreeResult{}, err
 	}
-	// SSH aliases of github.com (e.g. "github_work") are accepted with the
-	// heuristic add uses for them (looksLikeGitHubAlias).
-	alias := !r.IsGitHub() && looksLikeGitHubAlias(r.HostName())
-	if !r.IsGitHub() && !alias {
-		return PRWorktreeResult{}, fmt.Errorf("%s is hosted on %s: pull requests can only be checked out for GitHub repositories", r.Name, r.HostName())
+	alias, err := checkGitHub(r, "pull requests can only be checked out")
+	if err != nil {
+		return PRWorktreeResult{}, err
 	}
 	if number <= 0 {
 		return PRWorktreeResult{}, fmt.Errorf("invalid pull request number %d", number)
@@ -132,6 +130,19 @@ func AddPRWorktree(ctx context.Context, w *Workspace, h hosting.Hosting, repo st
 		report("warning: " + res.Warnings[len(res.Warnings)-1])
 	}
 	return pullRefPR(ctx, w, r, primary, res, opts, emit)
+}
+
+// checkGitHub refuses r, saying that what (e.g. "pull requests can only be
+// checked out") is "for GitHub repositories", unless r is hosted on
+// github.com or on an SSH alias of it (e.g. "github_work"), accepted with
+// the heuristic add uses for them (looksLikeGitHubAlias). It reports
+// whether the host is such an alias.
+func checkGitHub(r bundle.Repository, what string) (bool, error) {
+	alias := !r.IsGitHub() && looksLikeGitHubAlias(r.HostName())
+	if !r.IsGitHub() && !alias {
+		return false, fmt.Errorf("%s is hosted on %s: %s for GitHub repositories", r.Name, r.HostName(), what)
+	}
+	return alias, nil
 }
 
 func sameRepoPR(ctx context.Context, w *Workspace, r bundle.Repository, head, headRemote string, res PRWorktreeResult, opts PRWorktreeOptions, emit func(Event)) (PRWorktreeResult, error) {

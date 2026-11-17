@@ -51,6 +51,7 @@ type Fake struct {
 
 	defaultCalls []DefaultRepoCall
 	browseCalls  []BrowseCall
+	issueCalls   []IssueCall
 
 	owners map[string][]hosting.Repo
 	prs    map[string]hosting.PR
@@ -193,11 +194,29 @@ func (f *Fake) Issues(_ context.Context, owner, name string, limit int) ([]hosti
 	return out, nil
 }
 
+// IssueCall is an Issue call recorded by the Fake: "owner/name" as passed
+// and the number.
+type IssueCall struct {
+	Slug   string
+	Number int
+}
+
+// IssueCalls returns the valid Issue calls so far, in call order (failed
+// ones included).
+func (f *Fake) IssueCalls() []IssueCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]IssueCall(nil), f.issueCalls...)
+}
+
 // Issue returns one registered issue or pull request, in any state.
 func (f *Fake) Issue(_ context.Context, owner, name string, number int) (hosting.Issue, error) {
 	if err := hosting.ValidateIssue(owner, name, number); err != nil {
 		return hosting.Issue{}, err
 	}
+	f.mu.Lock()
+	f.issueCalls = append(f.issueCalls, IssueCall{Slug: owner + "/" + name, Number: number})
+	f.mu.Unlock()
 	if err := lookupErr(f.IssueErr, owner+"/"+name); err != nil {
 		return hosting.Issue{}, err
 	}

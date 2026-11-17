@@ -184,6 +184,26 @@ var gitCallCommands = []struct {
 		_, err := AddWorktree(ctx, f.w, "r1", "feat/new", WorktreeAddOptions{}, noEmit)
 		return err
 	}},
+	// wt add's own fetch replaced by the issue branch lookup (one
+	// for-each-ref) and no tag fetch, plus one rev-parse: wt add checks the
+	// primary checkout again after the fetch invalidated the cache.
+	{"wt add --issue (new)", 18 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+		f.fake.AddIssue("o", "r4", hosting.Issue{Number: 42, Title: "New feature", State: "OPEN"})
+		res, err := AddIssueWorktree(ctx, f.w, f.fake, "r4", 42, WorktreeAddOptions{}, noEmit)
+		if err == nil && res.Mode != gitx.WorktreeNewBranch {
+			err = fmt.Errorf("mode %v, want a new branch", res.Mode)
+		}
+		return err
+	}},
+	// A branch for the issue pushed from another machine.
+	{"wt add --issue (existing)", 16 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
+		testutil.Git(t, filepath.Join(f.w.Root, "r4", "main"), "push", "-q", "origin", "main:refs/heads/issue/7-old-title")
+		res, err := AddIssueWorktree(ctx, f.w, f.fake, "r4", 7, WorktreeAddOptions{}, noEmit)
+		if err == nil && (res.Branch != "issue/7-old-title" || res.Mode != gitx.WorktreeRemoteBranch) {
+			err = fmt.Errorf("branch %s, mode %v, want issue/7-old-title from origin", res.Branch, res.Mode)
+		}
+		return err
+	}},
 	{"wt rm", 27 + 2, func(ctx context.Context, t *testing.T, f *fixture) error {
 		_, err := RemoveWorktree(ctx, f.w, "r1", WorktreeTarget{Name: "feat/b"}, WorktreeRemoveOptions{WorkingDir: f.w.Root, Confirm: func(WorktreeRemovePlan) bool { return true }}, noEmit)
 		return err
