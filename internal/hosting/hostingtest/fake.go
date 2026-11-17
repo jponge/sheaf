@@ -23,6 +23,9 @@ type Fake struct {
 	ListErr map[string]error
 	RepoErr map[string]error
 	PRErr   map[string]error
+	// IssueErr is keyed by "owner/name" like RepoErr, and returned by
+	// Issues and Issue.
+	IssueErr map[string]error
 
 	// User is the login returned by CurrentUser; UserErr and ForksErr,
 	// when set, are returned by CurrentUser and ListForks.
@@ -51,6 +54,7 @@ type Fake struct {
 
 	owners map[string][]hosting.Repo
 	prs    map[string]hosting.PR
+	issues map[string][]hosting.Issue // by lower-case "owner/name"
 }
 
 // NewFake returns an empty Fake.
@@ -58,6 +62,7 @@ func NewFake() *Fake {
 	return &Fake{
 		ListErr: map[string]error{}, RepoErr: map[string]error{}, PRErr: map[string]error{},
 		owners: map[string][]hosting.Repo{}, prs: map[string]hosting.PR{},
+		IssueErr: map[string]error{}, issues: map[string][]hosting.Issue{},
 	}
 }
 
@@ -144,6 +149,64 @@ func (f *Fake) PR(_ context.Context, owner, name string, number int) (hosting.PR
 		return p, nil
 	}
 	return hosting.PR{}, fmt.Errorf("pull request %s/%s#%d: %w", owner, name, number, hosting.ErrNotFound)
+}
+
+// AddIssue registers an issue of owner/name, replacing any with the same
+// number. A pull request number is registered as an Issue with PullRequest
+// set (Issue returns it, Issues leaves it out, like gh).
+func (f *Fake) AddIssue(owner, name string, i hosting.Issue) {
+	key := strings.ToLower(owner + "/" + name)
+	is := f.issues[key]
+	for k := range is {
+		if is[k].Number == i.Number {
+			is[k] = i
+			return
+		}
+	}
+	f.issues[key] = append(is, i)
+}
+
+// Issues returns a copy of the open issues of owner/name in insertion
+// order: those that are not pull requests nor CLOSED (an empty State
+// counts as open). A repository without issues (registered or not) gets an
+// empty list. Like the gh adapter, more than limit issues yields the first
+// limit and an error wrapping ErrPossiblyTruncated.
+func (f *Fake) Issues(_ context.Context, owner, name string, limit int) ([]hosting.Issue, error) {
+	if err := hosting.ValidateRepo(owner, name); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		return nil, fmt.Errorf("%w: issue limit %d must be positive", hosting.ErrInvalidInput, limit)
+	}
+	if err := lookupErr(f.IssueErr, owner+"/"+name); err != nil {
+		return nil, err
+	}
+	out := []hosting.Issue{}
+	for _, i := range f.issues[strings.ToLower(owner+"/"+name)] {
+		if !i.PullRequest && i.State != "CLOSED" {
+			out = append(out, i)
+		}
+	}
+	if len(out) > limit {
+		return out[:limit], fmt.Errorf("%w: %q has more than %d open issues", hosting.ErrPossiblyTruncated, owner+"/"+name, limit)
+	}
+	return out, nil
+}
+
+// Issue returns one registered issue or pull request, in any state.
+func (f *Fake) Issue(_ context.Context, owner, name string, number int) (hosting.Issue, error) {
+	if err := hosting.ValidateIssue(owner, name, number); err != nil {
+		return hosting.Issue{}, err
+	}
+	if err := lookupErr(f.IssueErr, owner+"/"+name); err != nil {
+		return hosting.Issue{}, err
+	}
+	for _, i := range f.issues[strings.ToLower(owner+"/"+name)] {
+		if i.Number == number {
+			return i, nil
+		}
+	}
+	return hosting.Issue{}, fmt.Errorf("issue %s/%s#%d: %w", owner, name, number, hosting.ErrNotFound)
 }
 
 // FakeUser is the login returned by Fake.CurrentUser when User is empty.

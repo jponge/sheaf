@@ -625,3 +625,222 @@ func TestGHChildEnvironment(t *testing.T) {
 		t.Errorf("unexpected env:\n%s", env)
 	}
 }
+
+// Issues and Issue, characterized against output recorded from a real gh
+// (2.104.0, 2026-11-17, see the design notes of the issue completion).
+
+// issueJSON is the --json argument of gh's issue commands.
+const issueJSON = "number,title,state,url"
+
+func TestGHRealIssueList(t *testing.T) {
+	path, calls := stubGH(t, map[string]resp{"issue list": {fixture: "real_issue_list.json"}})
+	issues, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).Issues(context.Background(), "cli", "cli", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Issue{Number: 10093, Title: "Enhance `gh pr create` to support cross repo pull requests within the same organization",
+		State: "OPEN", URL: "https://github.com/cli/cli/issues/10093"}
+	if len(issues) != 5 || issues[0] != want || issues[4].Number != 15022 {
+		t.Fatalf("issues = %+v", issues)
+	}
+	for _, i := range issues {
+		if i.PullRequest {
+			t.Errorf("issue %d taken for a pull request", i.Number)
+		}
+	}
+	wantCall := "issue list --repo cli/cli --state open --limit 11 --search sort:updated-desc --json " + issueJSON
+	if got := calls(); !reflect.DeepEqual(got, []string{wantCall}) {
+		t.Fatalf("calls = %q\nwant      %q", got, wantCall)
+	}
+}
+
+func TestGHIssueListTruncated(t *testing.T) {
+	path, _ := stubGH(t, map[string]resp{"issue list": {fixture: "real_issue_list.json"}})
+	gh := NewGH(GHOptions{Path: path, Protocol: "ssh"})
+	issues, err := gh.Issues(context.Background(), "cli", "cli", 3)
+	if !errors.Is(err, ErrPossiblyTruncated) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(issues) != 3 || issues[2].Number != 2921 {
+		t.Fatalf("partial result must be the first 3 issues, got %+v", issues)
+	}
+	// Exactly the limit: no error.
+	if issues, err := gh.Issues(context.Background(), "cli", "cli", 5); err != nil || len(issues) != 5 {
+		t.Fatalf("got %d, %v", len(issues), err)
+	}
+}
+
+func TestGHRealIssueView(t *testing.T) {
+	for _, c := range []struct {
+		fixture string
+		number  int
+		want    Issue
+	}{
+		{"real_issue_view.json", 10093, Issue{Number: 10093,
+			Title: "Enhance `gh pr create` to support cross repo pull requests within the same organization",
+			State: "OPEN", URL: "https://github.com/cli/cli/issues/10093"}},
+		{"real_issue_view_closed.json", 15063, Issue{Number: 15063, Title: "x", State: "CLOSED",
+			URL: "https://github.com/cli/cli/issues/15063"}},
+		// gh issue view succeeds on a pull request number.
+		{"real_issue_view_pr.json", 15065, Issue{Number: 15065, Title: "Fix workflow log truncation after long lines",
+			State: "OPEN", URL: "https://github.com/cli/cli/pull/15065", PullRequest: true}},
+	} {
+		t.Run(c.fixture, func(t *testing.T) {
+			path, calls := stubGH(t, map[string]resp{"issue view": {fixture: c.fixture}})
+			i, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).Issue(context.Background(), "cli", "cli", c.number)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if i != c.want {
+				t.Fatalf("got %+v\nwant %+v", i, c.want)
+			}
+			wantCall := "issue view " + strconv.Itoa(c.number) + " --repo cli/cli --json " + issueJSON
+			if got := calls(); !reflect.DeepEqual(got, []string{wantCall}) {
+				t.Fatalf("calls = %q", got)
+			}
+		})
+	}
+	// Only a /pull/<n> path is a pull request: an issue of a repository
+	// (or owner) named "pull" is not.
+	path, _ := stubGH(t, map[string]resp{"issue view": {stdout: `{"number":3,"state":"OPEN","title":"t","url":"https://github.com/pull/pull/issues/3"}`}})
+	if i, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).Issue(context.Background(), "pull", "pull", 3); err != nil || i.PullRequest {
+		t.Fatalf("issue of pull/pull: %+v, %v", i, err)
+	}
+}
+
+func TestGHIssueMalformedJSON(t *testing.T) {
+	path, _ := stubGH(t, map[string]resp{"issue list": {fixture: "malformed.json"}, "issue view": {fixture: "malformed.json"}})
+	gh := NewGH(GHOptions{Path: path, Protocol: "ssh"})
+	if _, err := gh.Issues(context.Background(), "o", "r", 10); err == nil || !strings.Contains(err.Error(), "parse") {
+		t.Fatalf("Issues err = %v", err)
+	}
+	if _, err := gh.Issue(context.Background(), "o", "r", 1); err == nil || !strings.Contains(err.Error(), "parse") {
+		t.Fatalf("Issue err = %v", err)
+	}
+}
+
+func TestGHIssueErrors(t *testing.T) {
+	// Exact stderr recorded from a real gh (2.104.0, 2026-11-17), exit
+	// status 1.
+	const (
+		noIssue    = "GraphQL: Could not resolve to an issue or pull request with the number of 99999999. (repository.issue)"
+		noRepo     = "GraphQL: Could not resolve to a Repository with the name 'jponge/no-such-repo-xyz'. (repository)"
+		disabled   = "the 'jponge/sheaf' repository has disabled issues"
+		disabledTo = "issues are disabled on jponge/sheaf"
+	)
+	ctx := context.Background()
+	for _, c := range []struct {
+		name, cmd string
+		r         resp
+		call      func(*GH) error
+		want      string
+		kind      error
+	}{
+		{"no such issue", "issue view", resp{stderr: noIssue, code: 1},
+			func(g *GH) error { _, err := g.Issue(ctx, "cli", "cli", 99999999); return err },
+			"no such issue on GitHub", ErrNotFound},
+		{"issues of no such repository", "issue list", resp{stderr: noRepo, code: 1},
+			func(g *GH) error { _, err := g.Issues(ctx, "jponge", "no-such-repo-xyz", 10); return err },
+			"no such repository on GitHub (or not visible to your gh account)", ErrNotFound},
+		{"list, issues disabled", "issue list", resp{stderr: disabled, code: 1},
+			func(g *GH) error { _, err := g.Issues(ctx, "jponge", "sheaf", 10); return err }, disabledTo, ErrIssuesDisabled},
+		{"view, issues disabled", "issue view", resp{stderr: disabled, code: 1},
+			func(g *GH) error { _, err := g.Issue(ctx, "jponge", "sheaf", 1); return err }, disabledTo, ErrIssuesDisabled},
+		{"list, no credentials", "issue list", resp{stderr: unauthenticatedStderr, code: 4},
+			func(g *GH) error { _, err := g.Issues(ctx, "o", "r", 10); return err },
+			"gh is not authenticated: run `gh auth login`", ErrGHNotAuthenticated},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path, _ := stubGH(t, map[string]resp{c.cmd: c.r})
+			err := c.call(NewGH(GHOptions{Path: path, Protocol: "ssh"}))
+			if err == nil || err.Error() != c.want || !errors.Is(err, c.kind) {
+				t.Fatalf("err = %q, want %q wrapping %v", err, c.want, c.kind)
+			}
+			if c.kind == ErrIssuesDisabled && errors.Is(err, ErrNotFound) {
+				t.Fatalf("issues disabled taken for not found: %v", err)
+			}
+			ge, ok := errors.AsType[*GHError](err)
+			if !ok || !strings.HasPrefix(strings.Join(ge.Args, " "), c.cmd+" ") || ge.Stderr != strings.TrimSpace(c.r.stderr) {
+				t.Fatalf("GHError = %+v, want the command %q and gh's stderr", ge, c.cmd)
+			}
+		})
+	}
+	// Like a not-found answer, only gh's whole answer means issues are
+	// disabled (not recorded from a real gh: the disabled line joined to
+	// another error). The other classifications apply, or the full text is
+	// kept.
+	const disabledOR = "the 'o/r' repository has disabled issues"
+	const listCmd = "gh issue list --repo o/r --state open --limit 11 --search sort:updated-desc --json " + issueJSON
+	for _, c := range []struct {
+		name string
+		r    resp
+		want string
+		kind error
+	}{
+		{"bad credentials", resp{stderr: badCredentialsStderr + "\n" + disabledOR, code: 1},
+			"gh's credentials were rejected (HTTP 401: Bad credentials): check GH_TOKEN or GITHUB_TOKEN, or run `gh auth login`", ErrGHCredentialsRejected},
+		{"no credentials", resp{stderr: unauthenticatedStderr + "\n" + disabledOR, code: 4},
+			"gh is not authenticated: run `gh auth login`", ErrGHNotAuthenticated},
+		{"SAML", resp{stderr: "GraphQL: Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization. (repository)\n" + disabledOR, code: 1},
+			"", nil},
+		{"rate limit", resp{stderr: disabledOR + "\nAPI rate limit exceeded", code: 1}, "", nil},
+		{"prefixed", resp{stderr: "error: " + disabledOR, code: 1}, "", nil},
+	} {
+		t.Run("joined, "+c.name, func(t *testing.T) {
+			path, _ := stubGH(t, map[string]resp{"issue list": c.r})
+			_, err := NewGH(GHOptions{Path: path, Protocol: "ssh"}).Issues(ctx, "o", "r", 10)
+			want := c.want
+			if want == "" {
+				want = listCmd + ": exit status 1: " + c.r.stderr
+			}
+			if err == nil || err.Error() != want || errors.Is(err, ErrIssuesDisabled) || c.kind != nil && !errors.Is(err, c.kind) {
+				t.Fatalf("err = %q\nwant %q wrapping %v, not ErrIssuesDisabled", err, want, c.kind)
+			}
+		})
+	}
+}
+
+func TestValidateIssue(t *testing.T) {
+	for _, c := range []struct {
+		owner, name string
+		number      int
+	}{{"o", "r", 0}, {"o", "r", -1}, {"-o", "r", 1}, {"", "r", 1}, {"a/b", "r", 1}, {"o", "..", 1}, {"o", "a b", 1}} {
+		if err := ValidateIssue(c.owner, c.name, c.number); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("ValidateIssue(%q, %q, %d) = %v, want ErrInvalidInput", c.owner, c.name, c.number, err)
+		}
+	}
+	for _, c := range [][2]string{{"o", "r"}, {"smallrye", ".github"}, {"name_shortcode", "-r"}} {
+		if err := ValidateIssue(c[0], c[1], 1); err != nil {
+			t.Errorf("ValidateIssue(%q, %q, 1) = %v", c[0], c[1], err)
+		}
+	}
+	// The adapter validates before running gh, the limit too.
+	path, calls := stubGH(t, map[string]resp{"issue list": {fixture: "empty_list.json"}, "issue view": {fixture: "real_issue_view.json"}})
+	gh := NewGH(GHOptions{Path: path, Protocol: "ssh"})
+	ctx := context.Background()
+	if _, err := gh.Issue(ctx, "o", "r", 0); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("Issue number 0: err = %v", err)
+	}
+	if _, err := gh.Issue(ctx, "--json", "r", 1); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("Issue owner --json: err = %v", err)
+	}
+	for _, limit := range []int{0, -1} {
+		if _, err := gh.Issues(ctx, "o", "r", limit); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("Issues limit %d: err = %v", limit, err)
+		}
+	}
+	if _, err := gh.Issues(ctx, "o", "a/b", 10); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("Issues name a/b: err = %v", err)
+	}
+	if got := calls(); len(got) != 0 {
+		t.Fatalf("gh must not be invoked on invalid input: %q", got)
+	}
+	// A huge limit does not overflow limit+1, even where int has 32 bits:
+	// the requested count is at most math.MaxInt32.
+	if _, err := gh.Issues(ctx, "o", "r", math.MaxInt); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls(); len(got) != 1 || !strings.Contains(got[0], " --limit "+strconv.Itoa(math.MaxInt32)+" ") {
+		t.Fatalf("calls = %q, want --limit %d", got, math.MaxInt32)
+	}
+}

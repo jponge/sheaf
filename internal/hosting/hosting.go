@@ -19,6 +19,10 @@ var ErrNotFound = errors.New("not found")
 // ErrInvalidInput is returned (wrapped) for a malformed owner, repository name or PR number.
 var ErrInvalidInput = errors.New("invalid input")
 
+// ErrIssuesDisabled is returned (wrapped) when the repository has its
+// issues disabled. It is not ErrNotFound: the repository exists.
+var ErrIssuesDisabled = errors.New("issues are disabled")
+
 // Repo describes a hosted repository.
 type Repo struct {
 	Owner         string
@@ -43,6 +47,16 @@ type PR struct {
 	HeadRepo          string // empty if the head repository was deleted
 	IsCrossRepository bool
 	URL               string
+}
+
+// Issue describes an issue, or a pull request: the service numbers both in
+// one sequence, and looking up an issue by number may give a pull request.
+type Issue struct {
+	Number      int
+	Title       string // as the service gives it: may contain control characters
+	State       string // as the service gives it, e.g. "OPEN" or "CLOSED"
+	URL         string
+	PullRequest bool // the number is a pull request's
 }
 
 // Fork is a repository forked by the user, with the repository it was
@@ -100,6 +114,18 @@ func ValidatePR(owner, name string, number int) error {
 	return nil
 }
 
+// ValidateIssue validates owner and name like ValidateRepo, then requires a
+// positive issue number.
+func ValidateIssue(owner, name string, number int) error {
+	if err := ValidateRepo(owner, name); err != nil {
+		return err
+	}
+	if number <= 0 {
+		return fmt.Errorf("%w: issue number %d must be positive", ErrInvalidInput, number)
+	}
+	return nil
+}
+
 // Hosting is the read-only view of a hosting service needed by sheaf, plus
 // the local configuration of its CLI (SetDefaultRepo).
 //
@@ -111,6 +137,13 @@ type Hosting interface {
 	ListRepos(ctx context.Context, owner string) ([]Repo, error)
 	Repo(ctx context.Context, owner, name string) (Repo, error)
 	PR(ctx context.Context, owner, name string, number int) (PR, error)
+	// Issues lists the open issues of owner/name (not its pull requests),
+	// most recently updated first. More than limit (positive) yields the
+	// first limit together with an error wrapping ErrPossiblyTruncated.
+	Issues(ctx context.Context, owner, name string, limit int) ([]Issue, error)
+	// Issue returns issue number of owner/name, in any state; a pull
+	// request with that number is returned with PullRequest set.
+	Issue(ctx context.Context, owner, name string, number int) (Issue, error)
 	// CurrentUser returns the login of the authenticated user.
 	CurrentUser(ctx context.Context) (string, error)
 	// ListForks lists the forks owned by owner, with their parents.

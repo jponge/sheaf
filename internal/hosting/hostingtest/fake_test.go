@@ -248,3 +248,65 @@ func TestFakeBrowseHead(t *testing.T) {
 		}
 	}
 }
+
+func TestFakeIssues(t *testing.T) {
+	t.Parallel()
+	f := NewFake()
+	i1 := hosting.Issue{Number: 12, Title: "first", State: "OPEN", URL: "https://github.com/O/R/issues/12"}
+	i2 := hosting.Issue{Number: 3, Title: "second", State: "OPEN", URL: "https://github.com/O/R/issues/3"}
+	closed := hosting.Issue{Number: 5, Title: "done", State: "CLOSED", URL: "https://github.com/O/R/issues/5"}
+	pr := hosting.Issue{Number: 7, Title: "a pull request", State: "OPEN", URL: "https://github.com/O/R/pull/7", PullRequest: true}
+	f.AddIssue("O", "R", i1)
+	f.AddIssue("O", "R", closed)
+	f.AddIssue("O", "R", pr)
+	f.AddIssue("O", "R", i2)
+	f.AddIssue("O", "other", hosting.Issue{Number: 1, Title: "elsewhere", State: "OPEN"})
+	ctx := context.Background()
+
+	// Like gh issue list: the open issues, without pull requests, in
+	// insertion order; owner and name match case-insensitively.
+	got, err := f.Issues(ctx, "o", "R", 10)
+	if err != nil || !slices.Equal(got, []hosting.Issue{i1, i2}) {
+		t.Fatalf("Issues = %+v, %v", got, err)
+	}
+	got[0].Title = "mutated"
+	if again, _ := f.Issues(ctx, "o", "r", 10); again[0].Title != "first" {
+		t.Fatal("Issues must return a copy")
+	}
+	if got, err := f.Issues(ctx, "o", "r", 1); !errors.Is(err, hosting.ErrPossiblyTruncated) || !slices.Equal(got, []hosting.Issue{i1}) {
+		t.Fatalf("Issues limit 1 = %+v, %v", got, err)
+	}
+	if got, err := f.Issues(ctx, "o", "none", 10); err != nil || len(got) != 0 {
+		t.Fatalf("Issues of a repository without issues = %+v, %v", got, err)
+	}
+	// Like gh issue view: any issue or pull request, any state.
+	for _, want := range []hosting.Issue{i1, closed, pr} {
+		if got, err := f.Issue(ctx, "o", "R", want.Number); err != nil || got != want {
+			t.Errorf("Issue(%d) = %+v, %v", want.Number, got, err)
+		}
+	}
+	// Adding a number again replaces the issue.
+	retitled := i2
+	retitled.Title = "retitled"
+	f.AddIssue("o", "r", retitled)
+	if got, err := f.Issues(ctx, "o", "r", 10); err != nil || !slices.Equal(got, []hosting.Issue{i1, retitled}) {
+		t.Fatalf("Issues after re-adding #3 = %+v, %v", got, err)
+	}
+	if _, err := f.Issue(ctx, "o", "r", 99); !errors.Is(err, hosting.ErrNotFound) {
+		t.Fatalf("unknown number: err = %v", err)
+	}
+	if _, err := f.Issue(ctx, "o", "r", 0); !errors.Is(err, hosting.ErrInvalidInput) {
+		t.Fatalf("number 0: err = %v", err)
+	}
+	if _, err := f.Issues(ctx, "o", "r", 0); !errors.Is(err, hosting.ErrInvalidInput) {
+		t.Fatalf("limit 0: err = %v", err)
+	}
+	boom := errors.New("boom")
+	f.IssueErr["O/R"] = boom
+	if _, err := f.Issues(ctx, "o", "r", 10); !errors.Is(err, boom) {
+		t.Fatalf("Issues err = %v", err)
+	}
+	if _, err := f.Issue(ctx, "o", "r", 12); !errors.Is(err, boom) {
+		t.Fatalf("Issue err = %v", err)
+	}
+}

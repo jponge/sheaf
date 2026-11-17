@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -109,10 +110,14 @@ func childEnv() []string {
 //	no pull requests found for branch "feat"
 //
 // The "with the login of" form of the GraphQL message (for an owner) is
-// not recorded: it follows the same pattern.
+// not recorded: it follows the same pattern. Recorded with gh 2.104.0 on
+// 2026-11-17, for a missing number (`gh issue list` of a missing repository
+// answers like repo view):
+//
+//	issue view: GraphQL: Could not resolve to an issue or pull request with the number of 99999999. (repository.issue)
 var notFoundAnswers = []*regexp.Regexp{
 	regexp.MustCompile(`^(?:GraphQL: )?Could not resolve to an? [A-Za-z]+ with the (?:name|login of) '[^'\n]*'\.(?: \([A-Za-z.]+\))?$`),
-	regexp.MustCompile(`^(?:GraphQL: )?Could not resolve to an? [A-Za-z]+ with the number of [0-9]+\.(?: \([A-Za-z.]+\))?$`),
+	regexp.MustCompile(`^(?:GraphQL: )?Could not resolve to an? (?:[A-Za-z]+|issue or pull request) with the number of [0-9]+\.(?: \([A-Za-z.]+\))?$`),
 	regexp.MustCompile(`^the owner handle "[^"\n]*" was not recognized as either a GitHub user or an organization$`),
 	regexp.MustCompile(`^no pull requests found for branch ".*"$`),
 }
@@ -136,6 +141,14 @@ const ghExitAuth = 4
 //	HTTP 401: Bad credentials (https://api.github.com/graphql)
 //	Try authenticating with:  gh auth login
 const badCredentialsMarker = "HTTP 401: Bad credentials"
+
+// issuesDisabledAnswer matches the whole stderr gh prints when the
+// repository has its issues disabled (exit code 1, `gh issue list` and `gh
+// issue view`), and nothing else, like notFoundAnswers. Recorded with gh
+// 2.104.0 on 2026-11-17:
+//
+//	the 'jponge/sheaf' repository has disabled issues
+var issuesDisabledAnswer = regexp.MustCompile(`^the '[^'\n]*' repository has disabled issues$`)
 
 func isUnauthenticated(err error) bool {
 	ee, ok := errors.AsType[*exec.ExitError](err)
@@ -184,19 +197,23 @@ type GHError struct {
 	Args   []string // the arguments of gh
 	Stderr string   // what gh printed on standard error, trimmed
 	// Err is the error of the run (an *exec.ExitError), wrapped in
-	// ErrNotFound, ErrGHCredentialsRejected or ErrGHNotAuthenticated when
-	// gh's answer says so.
+	// ErrNotFound, ErrIssuesDisabled, ErrGHCredentialsRejected or
+	// ErrGHNotAuthenticated when gh's answer says so.
 	Err error
 }
 
 // Error returns one actionable line for the common failures: for
 // ErrGHCredentialsRejected, what to check; for ErrGHNotAuthenticated, how
-// to log in; for ErrNotFound, what is missing (see notFoundLine). Other failures name the command and keep the error
-// of the run and gh's standard error.
+// to log in; for ErrNotFound, what is missing (see notFoundLine); for
+// ErrIssuesDisabled, the repository (see issuesDisabledLine). Other
+// failures name the command and keep the error of the run and gh's
+// standard error.
 func (e *GHError) Error() string {
 	switch {
 	case errors.Is(e.Err, ErrNotFound):
 		return notFoundLine(e.Stderr)
+	case errors.Is(e.Err, ErrIssuesDisabled):
+		return issuesDisabledLine(e.Args)
 	case errors.Is(e.Err, ErrGHCredentialsRejected):
 		return "gh's credentials were rejected (" + badCredentialsMarker + "): check GH_TOKEN or GITHUB_TOKEN, or run `gh auth login`"
 	case errors.Is(e.Err, ErrGHNotAuthenticated):
@@ -213,8 +230,8 @@ func (e *GHError) Unwrap() error { return e.Err }
 
 // notFoundLine returns what is missing according to stderr, gh's answer
 // recognized by isNotFound: no such owner, repository (which may also be
-// one the account cannot see) or pull request; else stderr (gh's "no pull
-// requests found for branch ...").
+// one the account cannot see), pull request or issue; else stderr (gh's
+// "no pull requests found for branch ...").
 func notFoundLine(stderr string) string {
 	switch {
 	case strings.Contains(stderr, "Could not resolve to a RepositoryOwner"),
@@ -224,8 +241,19 @@ func notFoundLine(stderr string) string {
 		return "no such repository on GitHub (or not visible to your gh account)"
 	case strings.Contains(stderr, "Could not resolve to a PullRequest"):
 		return "no such pull request on GitHub"
+	case strings.Contains(stderr, "Could not resolve to an issue or pull request"):
+		return "no such issue on GitHub"
 	}
 	return stderr
+}
+
+// issuesDisabledLine returns the message of ErrIssuesDisabled for the gh
+// command args, naming the repository of its --repo argument.
+func issuesDisabledLine(args []string) string {
+	if i := slices.Index(args, "--repo"); i >= 0 && i+1 < len(args) {
+		return ErrIssuesDisabled.Error() + " on " + args[i+1]
+	}
+	return ErrIssuesDisabled.Error()
 }
 
 // failure returns the error of the gh command args whose run ended with
@@ -245,6 +273,8 @@ func (g *GH) failure(ctx context.Context, args []string, err error, stderr strin
 	wrapped := err
 	if isNotFound(msg) {
 		wrapped = fmt.Errorf("%w: %w", ErrNotFound, err)
+	} else if issuesDisabledAnswer.MatchString(msg) {
+		wrapped = fmt.Errorf("%w: %w", ErrIssuesDisabled, err)
 	} else if strings.Contains(msg, badCredentialsMarker) {
 		wrapped = fmt.Errorf("%w: %w", ErrGHCredentialsRejected, err)
 	} else if isUnauthenticated(err) {
@@ -438,6 +468,75 @@ func (g *GH) PR(ctx context.Context, owner, name string, number int) (PR, error)
 		p.HeadOwner = raw.HeadRepositoryOwner.Login
 	}
 	return p, nil
+}
+
+const issueFields = "number,title,state,url"
+
+type ghIssue struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	State  string `json:"state"`
+	URL    string `json:"url"`
+}
+
+// toIssue converts i. gh gives the URL of a pull request
+// (https://<host>/<owner>/<name>/pull/<n>) for a pull request number: its
+// path ends with /pull/<n>, while an issue's ends with /issues/<n> (owner
+// and name may be "pull").
+func (i ghIssue) toIssue() Issue {
+	return Issue{Number: i.Number, Title: i.Title, State: i.State, URL: i.URL,
+		PullRequest: strings.HasSuffix(i.URL, "/pull/"+strconv.Itoa(i.Number))}
+}
+
+// Issues lists the open issues of owner/name, most recently updated first
+// (`gh issue list --state open --search sort:updated-desc`: gh has no sort
+// option, and leaves pull requests out). limit must be positive; like
+// ListRepos, more than limit issues yields the first limit together with
+// ErrPossiblyTruncated.
+func (g *GH) Issues(ctx context.Context, owner, name string, limit int) ([]Issue, error) {
+	if err := ValidateRepo(owner, name); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		return nil, fmt.Errorf("%w: issue limit %d must be positive", ErrInvalidInput, limit)
+	}
+	limit = min(limit, math.MaxInt32-1) // keeps limit+1 from overflowing a 32-bit int
+	// Ask for one more than the limit so that truncation is detectable.
+	out, err := g.run(ctx, "issue", "list", "--repo", owner+"/"+name, "--state", "open",
+		"--limit", strconv.Itoa(limit+1), "--search", "sort:updated-desc", "--json", issueFields)
+	if err != nil {
+		return nil, err
+	}
+	var raw []ghIssue
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, fmt.Errorf("parse gh issue list output for %s/%s: %w", owner, name, err)
+	}
+	issues := make([]Issue, 0, len(raw))
+	for _, i := range raw {
+		issues = append(issues, i.toIssue())
+	}
+	if len(issues) > limit {
+		return issues[:limit], fmt.Errorf("%w: %q has more than %d open issues", ErrPossiblyTruncated, owner+"/"+name, limit)
+	}
+	return issues, nil
+}
+
+// Issue fetches issue number of owner/name, in any state (`gh issue
+// view`). gh answers a pull request number with the pull request: it comes
+// back with PullRequest set.
+func (g *GH) Issue(ctx context.Context, owner, name string, number int) (Issue, error) {
+	if err := ValidateIssue(owner, name, number); err != nil {
+		return Issue{}, err
+	}
+	out, err := g.run(ctx, "issue", "view", strconv.Itoa(number), "--repo", owner+"/"+name, "--json", issueFields)
+	if err != nil {
+		return Issue{}, err
+	}
+	var raw ghIssue
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return Issue{}, fmt.Errorf("parse gh issue view output for %s/%s#%d: %w", owner, name, number, err)
+	}
+	return raw.toIssue(), nil
 }
 
 const forkFields = "name,owner,parent,url,sshUrl,isFork"
