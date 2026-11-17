@@ -680,9 +680,9 @@ names, worktree branches and directories, branches for `wt add`, and
 organizations, read from the bundle (`--bundle` on the command line is
 honoured). It never uses the network, except for `wt add --issue`, which
 offers the 200 most recently updated open issues of the repository, read
-with gh (nothing when gh fails), with their titles as descriptions. zsh and
-fish show the descriptions; bash shows them as `<n>  (<title>)` when several
-candidates are listed.
+with gh (nothing when gh fails), with their titles as descriptions, most
+recently updated first. zsh and fish show the descriptions; bash shows them
+as `<n>  (<title>)` when several candidates are listed.
 
 The fish completion needs fish 3.1 or later. With fish older than 4.0,
 `~` in a previous word is not expanded: `sheaf --bundle ~/b path <TAB>`

@@ -807,3 +807,107 @@ func TestScdBashCompletionQuotedWords(t *testing.T) {
 		}
 	}
 }
+
+// issueShellBin is a directory for the shells' PATH with the sheaf binary
+// and a stub gh answering `issue list` with three open issues, in an order
+// that neither a lexical nor a numeric sort gives (9, 30, 4), one title with
+// a tab and a newline (gh returns titles verbatim).
+func issueShellBin(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Symlink(filepath.Join(sheafBinary(t), "sheaf"), filepath.Join(dir, "sheaf")); err != nil {
+		t.Fatal(err)
+	}
+	list := `[{"number":9,"title":"Nine","state":"OPEN","url":"https://github.com/o/a/issues/9"},` +
+		`{"number":30,"title":"Fix\tthing\nnow","state":"OPEN","url":"https://github.com/o/a/issues/30"},` +
+		`{"number":4,"title":"Four","state":"OPEN","url":"https://github.com/o/a/issues/4"}]`
+	stub := "#!/bin/sh\n[ \"$1 $2\" = 'issue list' ] || exit 1\ncat '" + filepath.Join(dir, "issues.json") + "'\n"
+	for f, c := range map[string]string{"issues.json": list, "gh": stub} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte(c), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// The --issue completion in fish: the titles as descriptions, on one line,
+// in gh's order.
+func TestFishIssueCompletion(t *testing.T) {
+	t.Parallel()
+	fish := shellBinary(t, "fish")
+	bin := issueShellBin(t)
+	_, root := shellBundle(t)
+	cmd := exec.Command(fish, "--no-config", "-c", "sheaf completion fish | source; complete -C 'sheaf wt add a --issue '")
+	cmd.Dir = root
+	cmd.Env = shellEnv(t, bin)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fish: %v\n%s", err, out)
+	}
+	if want := "9\tNine\n30\tFix thing now\n4\tFour\n"; string(out) != want {
+		t.Errorf("got:\n%q\nwant:\n%q", out, want)
+	}
+}
+
+// The --issue completion listed by zsh and bash (two tabs): the titles as
+// descriptions, on one line, in gh's order.
+func TestZshBashIssueCompletionListing(t *testing.T) {
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is not installed: no pty-driven completion test")
+	}
+	bin := issueShellBin(t)
+	_, root := shellBundle(t)
+	for _, c := range []struct {
+		shell, rc string
+		want      *regexp.Regexp
+	}{
+		{"zsh", "[[ -n $SHEAF_TEST_ZSH_MODULE_PATH ]] && module_path=(${(s.:.)SHEAF_TEST_ZSH_MODULE_PATH} $module_path)\n" +
+			"autoload -U compinit && compinit -u -D\nsource <(sheaf completion zsh)\n",
+			regexp.MustCompile(`9 +-- +Nine\s+30 +-- +Fix thing now\s+4 +-- +Four`)},
+		{"bash", "source <(sheaf completion bash)\n",
+			regexp.MustCompile(`9 +\(Nine\)\s+30 +\(Fix thing now\)\s+4 +\(Four\)`)},
+	} {
+		t.Run(c.shell, func(t *testing.T) {
+			shell, rcText := "/bin/bash", c.rc
+			if c.shell == "zsh" {
+				shell = shellBinary(t, "zsh")
+			} else {
+				// its compatibility functions (_get_comp_words_by_ref, used
+				// by cobra) are in etc/bash_completion.d next to share/
+				bc := bashCompletion(t)
+				compat := filepath.Join(filepath.Dir(bc), "..", "..", "..", "etc", "bash_completion.d")
+				rcText = "BASH_COMPLETION_COMPAT_DIR='" + compat + "'\n. '" + bc + "'\n" + rcText
+			}
+			dir := t.TempDir()
+			rc, script := filepath.Join(dir, "rc"), filepath.Join(dir, "drive.py")
+			for f, s := range map[string]string{rc: rcText, script: ptyDriver} {
+				if err := os.WriteFile(f, []byte(s), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			out, err := exec.Command(py, "-I", script, shell, bin, root, rc, `sheaf wt add a --issue \t\t`, `\x15\n`).CombinedOutput()
+			if err != nil {
+				t.Fatalf("driver: %v\n%s", err, out)
+			}
+			if !c.want.Match(out) || strings.Contains(string(out), "DRIVER:") {
+				t.Errorf("no listing matching %s in:\n%s", c.want, out)
+			}
+		})
+	}
+}
+
+// bashCompletion is the bash-completion package's main script, which
+// cobra's bash completion needs (README): SHEAF_TEST_BASH_COMPLETION, else
+// the usual path; without it, the test is skipped.
+func bashCompletion(t *testing.T) string {
+	t.Helper()
+	p := os.Getenv("SHEAF_TEST_BASH_COMPLETION")
+	if p == "" {
+		p = "/usr/share/bash-completion/bash_completion"
+	}
+	if _, err := os.Stat(p); err != nil {
+		t.Skipf("bash-completion not found (%v; SHEAF_TEST_BASH_COMPLETION not set): bash completion of sheaf NOT tested", err)
+	}
+	return p
+}

@@ -38,7 +38,8 @@ test-symlinked-tmp:
 # Runs the cli tests with fish and zsh required: `make test` skips the fish and
 # zsh tests when the shells are missing. The shells are the ones on PATH, or
 # the ones unpacked (no root needed, e.g. `dpkg-deb -x fish_*.deb DIR`, same
-# for zsh) under SHELLS_ROOT=DIR, giving DIR/usr/bin/fish and DIR/usr/bin/zsh:
+# for zsh, and optionally bash-completion, which cobra's bash completion
+# needs) under SHELLS_ROOT=DIR, giving DIR/usr/bin/fish and DIR/usr/bin/zsh:
 # wrappers then set their library path, the zsh function and module paths,
 # and run a copy of fish next to links to its data (fish finds its data
 # relative to its binary). See shellBinary in internal/cli/cmd_shell_test.go.
@@ -60,6 +61,8 @@ test-shells:
 	  export SHEAF_TEST_FISH="$$tmp/bin/fish" SHEAF_TEST_ZSH="$$tmp/bin/zsh"; \
 	  "$$SHEAF_TEST_FISH" --no-config -c 'echo "fish $$version, data: $$__fish_data_dir"'; \
 	  "$$SHEAF_TEST_ZSH" -fc 'echo "zsh $$ZSH_VERSION"'; \
+	  bc="$$r/usr/share/bash-completion/bash_completion"; \
+	  if [ -f "$$bc" ]; then export SHEAF_TEST_BASH_COMPLETION="$$bc"; echo "bash-completion: $$bc"; fi; \
 	fi; \
 	SHEAF_TEST_REQUIRE_SHELLS=1 go test -race -count=1 -timeout $(TEST_TIMEOUT) ./internal/cli/
 
