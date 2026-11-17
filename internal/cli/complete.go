@@ -2,25 +2,34 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jponge/sheaf/internal/gitx"
+	"github.com/jponge/sheaf/internal/hosting"
 	"github.com/jponge/sheaf/internal/ops"
 	"github.com/spf13/cobra"
 )
 
 // completionTimeout bounds one completion request; completions never touch
-// the network, this only guards against a stuck git.
+// the network (except gh for wt add --issue): this guards against a stuck
+// git or gh.
 const completionTimeout = 5 * time.Second
+
+// completionIssueLimit is the number of issues wt add --issue completes.
+const completionIssueLimit = 200
 
 // installCompletions attaches the dynamic completion functions to the
 // commands registered on root, by command path, so the commands themselves
 // do not know about completion. Completion functions never print errors and
-// never use the network: when anything fails they offer no candidates. The
-// bundle is the one of the --bundle flag if it is on the command line, else
-// the one around the working directory.
+// never use the network (except gh, for the issues of wt add --issue): when
+// anything fails they offer no candidates. The bundle is the one of the
+// --bundle flag if it is on the command line, else the one around the
+// working directory.
 func installCompletions(root *cobra.Command, d Deps) { _ = installCompletionsReport(root, d) }
 
 // installCompletionsReport does the work of installCompletions and returns
@@ -77,7 +86,7 @@ func installCompletionsReport(root *cobra.Command, d Deps) []string {
 	argsOf([]string{"browse"}, k.positional(k.repoOnly))
 	argsOf([]string{"worktree", "list"}, k.positional(k.repoOnly))
 	argsOf([]string{"worktree", "add"}, k.positional(func(c *cobra.Command, args []string) []string {
-		if c.Flags().Changed("tag") { // the only positional argument is the repository
+		if c.Flags().Changed("tag") || c.Flags().Changed("issue") { // the only positional argument is the repository
 			return k.repoOnly(c, args)
 		}
 		switch len(args) {
@@ -135,6 +144,18 @@ func installCompletionsReport(root *cobra.Command, d Deps) []string {
 		}
 		return k.tagsToAdd(c, repo)
 	}))
+	flagOf([]string{"worktree", "add"}, "issue", func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		repo := ""
+		if len(args) > 0 {
+			repo = args[0]
+		}
+		issues, ok := k.issues(c, repo)
+		dir := cobra.ShellCompDirectiveNoFileComp
+		if ok { // the order of the hosting service: most recently updated first
+			dir |= cobra.ShellCompDirectiveKeepOrder
+		}
+		return filterPrefix(issues, toComplete), dir
+	})
 	for _, p := range [][]string{{"add"}, {"sync"}} {
 		flagOf(p, "org", k.flag(func(c *cobra.Command, _ []string) []string { return k.orgs(c) }))
 	}
@@ -348,4 +369,55 @@ func (k completer) tagsToAdd(c *cobra.Command, repoArg string) []string {
 	}
 	slices.Sort(names)
 	return names
+}
+
+// issues returns the open issues of the repository (see ops.ResolveRepo),
+// "<number>\t<title>" in the order of the hosting service, for `worktree add
+// --issue`: those of the reference repository for a clone of your fork,
+// none for a repository that is not on GitHub (gh is not run). ok reports
+// whether the hosting service answered (possibly with a truncated list).
+func (k completer) issues(c *cobra.Command, repoArg string) (candidates []string, ok bool) {
+	w := k.workspace(c)
+	if w == nil {
+		return nil, false
+	}
+	wd, err := k.d.getwd()
+	if err != nil {
+		return nil, false
+	}
+	rc, err := ops.ResolveRepo(w, repoArg, wd)
+	if err != nil {
+		return nil, false
+	}
+	r, found := w.Bundle().Repository(rc.Name)
+	if !found || !ops.OnGitHub(*r) {
+		return nil, false
+	}
+	owner, name, _ := strings.Cut(r.Slug, "/")
+	ctx, cancel := completionContext(c)
+	defer cancel()
+	issues, err := k.d.hosting().Issues(ctx, owner, name, completionIssueLimit)
+	if err != nil && !errors.Is(err, hosting.ErrPossiblyTruncated) {
+		return nil, false
+	}
+	for _, is := range issues {
+		candidates = append(candidates, cobra.CompletionWithDesc(strconv.Itoa(is.Number), oneLine(is.Title)))
+	}
+	return candidates, true
+}
+
+// oneLine returns s without its format characters (invisible: bidi
+// controls, zero-width spaces, byte order marks) and with each run of
+// control characters and white space replaced by one space, without
+// leading or trailing space: a completion description must not contain a
+// tab or a newline (they separate the value from the description, and the
+// candidates), nor reorder or hide what the shell shows.
+func oneLine(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.Join(strings.FieldsFunc(s, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }), " ")
 }

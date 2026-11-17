@@ -103,7 +103,7 @@ func TestDoctorEnvironment(t *testing.T) {
 	old := func(context.Context) (gitx.GitVersion, error) { return gitx.GitVersion{Major: 2, Minor: 30}, nil }
 	cs := f.doctor(t, DoctorOptions{GitVersion: old, GH: func(context.Context) error { return hosting.ErrGHNotFound }})
 	wantCheck(t, cs, CheckFail, "git", "", "2.30.0")
-	wantCheck(t, cs, CheckWarn, "gh", "", "not found")
+	wantCheck(t, cs, CheckWarn, "gh", "", "gh not found: add, sync, wt pr and wt add --issue need it for GitHub repositories")
 	if !DoctorFailed(cs) {
 		t.Fatal("not failed")
 	}

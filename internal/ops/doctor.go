@@ -116,7 +116,7 @@ func Doctor(ctx context.Context, opts DoctorOptions) []Check {
 		case err == nil:
 			add(CheckOK, "gh", "", "gh is installed and authenticated", "")
 		case errors.Is(err, hosting.ErrGHNotFound):
-			add(CheckWarn, "gh", "", "gh not found: add, sync and wt pr need it for GitHub repositories",
+			add(CheckWarn, "gh", "", "gh not found: add, sync, wt pr and wt add --issue need it for GitHub repositories",
 				"install the GitHub CLI from https://cli.github.com/ and run `gh auth login`")
 		case errors.Is(err, ErrGHProbeTimeout):
 			add(CheckWarn, "gh", "", firstLineOf(err.Error()), "check gh and the network, then run doctor again")

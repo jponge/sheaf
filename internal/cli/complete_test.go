@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -8,10 +11,16 @@ import (
 	"testing"
 
 	"github.com/jponge/sheaf/internal/hosting"
+	"github.com/jponge/sheaf/internal/hosting/hostingtest"
 	"github.com/jponge/sheaf/internal/testutil"
 )
 
 const noFileComp = ":4" // cobra.ShellCompDirectiveNoFileComp
+
+// keepOrder is cobra.ShellCompDirectiveNoFileComp |
+// cobra.ShellCompDirectiveKeepOrder: the shell shows the candidates in the
+// order given (the issues of wt add --issue, most recently updated first).
+const keepOrder = ":36"
 
 // complete runs cobra's hidden __complete command and returns the candidates
 // (sorted) and the directive line.
@@ -202,4 +211,113 @@ func TestCompleteNeverUsesTheNetwork(t *testing.T) {
 	}
 	e.wantComplete(t, []string{"dev", "local-only", "topic/y"}, "wt", "add", "a", "")
 	e.wantComplete(t, []string{"a", "b"}, "remove", "")
+}
+
+// completeRaw runs __complete and returns the candidate lines as printed
+// (descriptions kept, not sorted) and the directive line.
+func completeRaw(t *testing.T, run func(args ...string) (string, string, int), args ...string) ([]string, string) {
+	t.Helper()
+	out, errs, code := run(append([]string{"__complete"}, args...)...)
+	if code != 0 {
+		t.Fatalf("__complete %q: exit %d\nstdout:\n%s\nstderr:\n%s", args, code, out, errs)
+	}
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	return lines[:len(lines)-1], lines[len(lines)-1]
+}
+
+// listedIssues answers Issues with issues and err, and records the
+// repositories ("owner/name") and limits it was asked for.
+type listedIssues struct {
+	*hostingtest.Fake
+	issues []hosting.Issue
+	err    error
+	calls  *[]string
+}
+
+func (h listedIssues) Issues(_ context.Context, owner, name string, limit int) ([]hosting.Issue, error) {
+	*h.calls = append(*h.calls, fmt.Sprintf("%s/%s %d", owner, name, limit))
+	return h.issues, h.err
+}
+
+// --issue completes the open issues of the repository from the hosting
+// service, in its order (kept by the shell), "<number>\t<title>" with the
+// title on one line; when the hosting service fails, nothing.
+func TestCompleteIssues(t *testing.T) {
+	t.Parallel()
+	e, root := complBundle(t)
+	e.fake.AddIssue("o", "a", hosting.Issue{Number: 12, Title: "Other", State: "OPEN"})
+	e.fake.AddIssue("o", "a", hosting.Issue{Number: 7, Title: "Fix\tthing\nnow", State: "OPEN"})
+	e.fake.AddIssue("o", "a", hosting.Issue{Number: 9, Title: "A pull request", State: "OPEN", PullRequest: true})
+	run := func(args ...string) (string, string, int) { return e.run(t, args...) }
+	want := func(wantLines []string, wantDir string, args ...string) {
+		t.Helper()
+		got, dir := completeRaw(t, run, args...)
+		if !slices.Equal(got, wantLines) || dir != wantDir {
+			t.Errorf("__complete %q = %q %s, want %q %s", args, got, dir, wantLines, wantDir)
+		}
+	}
+	both := []string{"12\tOther", "7\tFix thing now"}
+	want(both, keepOrder, "wt", "add", "a", "--issue", "")
+	want([]string{"12\tOther"}, keepOrder, "wt", "add", "a", "--issue", "1")
+	want([]string{}, keepOrder, "wt", "add", "b", "--issue", "")
+	e.cwd = filepath.Join(root, "a", "feat-x") // repository inferred
+	want(both, keepOrder, "wt", "add", "--issue", "")
+	e.cwd = root
+	// With --issue, the only positional argument is the repository.
+	e.wantComplete(t, []string{"a", "b"}, "wt", "add", "--issue", "7", "")
+	e.wantComplete(t, nil, "wt", "add", "--issue", "7", "a", "")
+	// A hosting error: no candidates.
+	e.fake.IssueErr["o/a"] = fmt.Errorf("the 'o/a' repository has disabled issues: %w", hosting.ErrIssuesDisabled)
+	want([]string{}, noFileComp, "wt", "add", "a", "--issue", "")
+}
+
+// Control characters of titles never reach the completion lines: each run
+// of them (and of white space) becomes one space. Invisible format
+// characters (bidi controls, zero-width spaces, byte order marks) are
+// dropped.
+func TestCompleteIssuesTitlesOnOneLine(t *testing.T) {
+	t.Parallel()
+	e, _ := complBundle(t)
+	e.fake.AddIssue("o", "a", hosting.Issue{Number: 1, Title: "\ta\r\n\x1b[31mb\x00 \x7f c\u0085d\u2028e  ", State: "OPEN"})
+	e.fake.AddIssue("o", "a", hosting.Issue{Number: 2, Title: "\ufeff\u202edrawkcab\u202c ze\u200bro \u200b width\u2066", State: "OPEN"})
+	got, dir := completeRaw(t, func(args ...string) (string, string, int) { return e.run(t, args...) }, "wt", "add", "a", "--issue", "")
+	if want := []string{"1\ta [31mb c d e", "2\tdrawkcab zero width"}; !slices.Equal(got, want) || dir != keepOrder {
+		t.Fatalf("got %q %s, want %q %s", got, dir, want, keepOrder)
+	}
+}
+
+// A truncated list is still offered; any other error offers nothing, even
+// with issues. The issues are those of the reference repository of a fork,
+// at most 200; a repository that is not on GitHub is not asked for.
+func TestCompleteIssuesErrorsHostsAndForks(t *testing.T) {
+	t.Parallel()
+	e, root := complBundle(t)
+	e.forked(t, "up", "x")
+	e.mustRun(t, "add", "up/x")
+	var calls []string
+	issues := []hosting.Issue{{Number: 3, Title: "Three"}, {Number: 1, Title: "One"}}
+	h := listedIssues{Fake: e.fake, issues: issues, calls: &calls}
+	with := func(h hosting.Hosting) func(args ...string) (string, string, int) {
+		return func(args ...string) (string, string, int) { return e.runWith(t, h, args...) }
+	}
+	check := func(h hosting.Hosting, wantLines []string, wantDir string, args ...string) {
+		t.Helper()
+		got, dir := completeRaw(t, with(h), args...)
+		if !slices.Equal(got, wantLines) || dir != wantDir {
+			t.Errorf("__complete %q = %q %s, want %q %s", args, got, dir, wantLines, wantDir)
+		}
+	}
+	check(h, []string{"3\tThree", "1\tOne"}, keepOrder, "wt", "add", "x", "--issue", "")
+	h.err = fmt.Errorf("%w: more than 200", hosting.ErrPossiblyTruncated)
+	check(h, []string{"3\tThree", "1\tOne"}, keepOrder, "wt", "add", "a", "--issue", "")
+	h.err = errors.New("gh: not logged in")
+	check(h, []string{}, noFileComp, "wt", "add", "a", "--issue", "")
+	h.err = nil
+	setHost(t, root, "b", "gitlab.com")
+	check(h, []string{}, noFileComp, "wt", "add", "b", "--issue", "")
+	setHost(t, root, "b", "github-work") // an SSH alias of github.com, as ops sees it
+	check(h, []string{"3\tThree", "1\tOne"}, keepOrder, "wt", "add", "b", "--issue", "")
+	if want := []string{"up/x 200", "o/a 200", "o/a 200", "o/b 200"}; !slices.Equal(calls, want) {
+		t.Errorf("Issues calls %q, want %q", calls, want)
+	}
 }

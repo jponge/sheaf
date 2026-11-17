@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/jponge/sheaf/internal/gitx"
+	"github.com/jponge/sheaf/internal/hosting"
+	"github.com/jponge/sheaf/internal/hosting/hostingtest"
 	"github.com/jponge/sheaf/internal/ops"
 	"github.com/jponge/sheaf/internal/testutil"
 )
@@ -324,5 +326,105 @@ func TestRemovalPlansListNotesAfterThePlan(t *testing.T) {
 	want = []string{"will delete /b/alpha", "/b/alpha/main: 2 ignored files (informational, not blocking)"}
 	if got := removePlanLines(rp); !slices.Equal(got, want) {
 		t.Errorf("removePlanLines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// issueBundle is worktreeBundle with the open issues 42 and 43 of o/a.
+func issueBundle(t *testing.T) (*env, string) {
+	t.Helper()
+	e, root := worktreeBundle(t)
+	e.fake.AddIssue("o", "a", hosting.Issue{Number: 42, Title: "Fix the parser", State: "OPEN", URL: "https://github.com/o/a/issues/42"})
+	e.fake.AddIssue("o", "a", hosting.Issue{Number: 43, Title: "Crash on start", State: "OPEN", URL: "https://github.com/o/a/issues/43"})
+	return e, root
+}
+
+// wt add --issue creates the worktree of the issue's branch and prints only
+// its path; "#<n>" is accepted, and the repository can be inferred.
+func TestWorktreeAddIssue(t *testing.T) {
+	t.Parallel()
+	e, root := issueBundle(t)
+	out, errs, code := e.run(t, "wt", "add", "a", "--issue", "42")
+	want := filepath.Join(root, "a", "issue-42-fix-the-parser")
+	if code != 0 || out != want+"\n" {
+		t.Fatalf("exit %d, stdout %q, want %q\nstderr:\n%s", code, out, want+"\n", errs)
+	}
+	if b := strings.TrimSpace(testutil.Git(t, want, "branch", "--show-current")); b != "issue/42-fix-the-parser" {
+		t.Fatalf("branch %q", b)
+	}
+	if got := e.fake.IssueCalls(); !slices.Equal(got, []hostingtest.IssueCall{{Slug: "o/a", Number: 42}}) {
+		t.Fatalf("Issue calls %v", got)
+	}
+	e.cwd = filepath.Join(root, "a", "main")
+	want = filepath.Join(root, "a", "issue-43-crash-on-start")
+	if out, errs, code := e.run(t, "wt", "add", "--issue=#43", "--no-fetch"); code != 0 || out != want+"\n" {
+		t.Fatalf("#43, inferred repository: exit %d, stdout %q, want %q\nstderr:\n%s", code, out, want+"\n", errs)
+	}
+}
+
+// --issue excludes --tag and a positional branch, and takes a positive
+// number; nothing is created and the hosting service is not asked.
+func TestWorktreeAddIssueArgs(t *testing.T) {
+	t.Parallel()
+	e, root := issueBundle(t)
+	testutil.Git(t, filepath.Join(root, "a", "main"), "tag", "v1")
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"wt", "add", "a", "--issue", "42", "--tag", "v1", "--no-fetch"}, "--issue and --tag are mutually exclusive"},
+		{[]string{"wt", "add", "a", "br", "--issue", "42", "--no-fetch"}, "with --issue, expected at most 1 argument (the repository), got 2"},
+		{[]string{"wt", "add", "a", "--issue", "0", "--no-fetch"}, `invalid issue number "0"`},
+		{[]string{"wt", "add", "a", "--issue", "x", "--no-fetch"}, `invalid issue number "x"`},
+		{[]string{"wt", "add", "a", "--issue", "", "--no-fetch"}, `invalid issue number ""`},
+	} {
+		if out, errs, code := e.run(t, tc.args...); code == 0 || out != "" || !strings.Contains(errs, tc.want) {
+			t.Errorf("sheaf %q: exit %d, stdout %q, stderr:\n%s\nwant %q", tc.args, code, out, errs, tc.want)
+		}
+	}
+	if des, _ := os.ReadDir(filepath.Join(root, "a")); len(des) != 1 {
+		t.Errorf("worktrees created: %v", des)
+	}
+	if got := e.fake.IssueCalls(); len(got) != 0 {
+		t.Errorf("Issue calls %v", got)
+	}
+}
+
+// A pull request number is refused with the complete wt pr command (with
+// --bundle when it was given), which checks the pull request out when run.
+func TestWorktreeAddIssuePullRequestHint(t *testing.T) {
+	t.Parallel()
+	e, root := prBundle(t)
+	e.fake.AddIssue("o", "a", hosting.Issue{Number: 7, Title: "Patch", State: "OPEN", URL: "https://github.com/o/a/pull/7", PullRequest: true})
+	_, errs, code := e.run(t, "wt", "add", "a", "--issue", "7")
+	if want := "#7 is a pull request of o/a, not an issue\nto check it out in a worktree, run: sheaf wt pr -- a 7\n"; code != 1 || !strings.HasSuffix(errs, want) {
+		t.Fatalf("exit %d, stderr:\n%s\nwant it to end with:\n%s", code, errs, want)
+	}
+	e.cwd = t.TempDir()
+	_, errs, code = e.run(t, "--bundle", root, "wt", "add", "--issue", "#7", "a")
+	if want := "run: sheaf --bundle " + root + " wt pr -- a 7\n"; code != 1 || !strings.HasSuffix(errs, want) {
+		t.Fatalf("--bundle: exit %d, stderr:\n%s\nwant it to end with %q", code, errs, want)
+	}
+	if des, _ := os.ReadDir(filepath.Join(root, "a")); len(des) != 1 {
+		t.Fatalf("worktrees created: %v", des)
+	}
+	if out := e.mustRun(t, hintArgs(t, errs)...); out != filepath.Join(root, "a", "pr-7")+"\n" {
+		t.Fatalf("the hint printed %q", out)
+	}
+}
+
+// The hint of a failed fetch, run as printed, creates the worktree without
+// fetching, from the same --base, in the bundle of --bundle.
+func TestWorktreeAddIssueFetchFailureHint(t *testing.T) {
+	t.Parallel()
+	e, root := issueBundle(t)
+	testutil.Git(t, filepath.Join(root, "a", "main"), "config", "remote.origin.url", "file://"+filepath.Join(t.TempDir(), "gone.git"))
+	e.cwd = t.TempDir()
+	_, errs, code := e.run(t, "--bundle", root, "wt", "add", "--base", "origin/main", "--issue", "42", "a")
+	if want := "to create the worktree without fetching, run: sheaf --bundle " + root + " wt add --no-fetch --base origin/main --issue=42 -- a\n"; code != 1 || !strings.HasSuffix(errs, want) {
+		t.Fatalf("exit %d, stderr:\n%s\nwant it to end with:\n%s", code, errs, want)
+	}
+	out, errs, code := e.run(t, hintArgs(t, errs)...)
+	if want := filepath.Join(root, "a", "issue-42-fix-the-parser"); code != 0 || out != want+"\n" || strings.Contains(errs, "fetching") {
+		t.Fatalf("the hint: exit %d, stdout %q, want %q\nstderr:\n%s", code, out, want+"\n", errs)
 	}
 }

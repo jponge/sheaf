@@ -39,11 +39,13 @@ Requirements:
   Tested with git 2.47 and 2.56.
 - [`gh`](https://cli.github.com/), authenticated with `gh auth login`, for
   everything that talks to GitHub: `add` (it resolves `owner/repo` through
-  gh, including for single repositories), `add --org`, fork detection, `sync`
-  and `wt pr`. Commands working on local state (`adopt`, `init`, `status`,
-  `fetch`, `update`, `run`, `wt add/list/rm`, `path`, `prune`, `remove`) do
-  not need gh; `add`, `sync`, `adopt` and `init` use it, when available, to
-  set the gh default repository of new checkouts (see
+  gh, including for single repositories), `add --org`, fork detection, `sync`,
+  `wt pr` and `wt add --issue` (unless a branch `issue/<n>` or `issue/<n>-…`
+  of the issue already exists). Commands working on local state (`adopt`,
+  `init`, `status`, `fetch`, `update`, `run`, `wt add` without `--issue`,
+  `wt list/rm`, `path`, `prune`, `remove`) do not need gh; `add`, `sync`,
+  `adopt` and `init` use it, when available, to set the gh default
+  repository of new checkouts (see
   [gh default repository](#gh-default-repository)).
 
 With Go installed:
@@ -543,6 +545,15 @@ cd "$(sheaf wt add feat/x)"
 **`sheaf wt add [<repo>] --tag <tag>`**: detached worktree at the tag's
 commit, pinned to the tag. Local tags are never deleted or overwritten.
 
+**`sheaf wt add [<repo>] --issue <n>`**: worktree for GitHub issue `n`
+(`#123` also accepted). An existing local or remote branch `issue/<n>` or
+`issue/<n>-…` is used, without gh; else gh reads the issue's title (from the
+repository, not your fork) and a new branch `issue/<n>-<slug>` is created
+from `--base`, at `<repo>/issue-<n>-<slug>/`. The slug is the title in
+lowercase ASCII words joined by `-`, at most 50 characters. A closed issue
+is accepted with a warning; a pull request number is refused with the
+`sheaf wt pr` command to run.
+
 **`sheaf wt list [<repo>]`** (alias `ls`): every checkout with its directory,
 branch, flags (primary, off-default, detached, tag, locked, prunable,
 outside) and path. `outside` marks a worktree that is not a direct child of
@@ -667,7 +678,11 @@ sheaf completion fish | source
 permanently. Besides commands and flags, completion offers repository
 names, worktree branches and directories, branches for `wt add`, and
 organizations, read from the bundle (`--bundle` on the command line is
-honoured). It never uses the network.
+honoured). It never uses the network, except for `wt add --issue`, which
+offers the 200 most recently updated open issues of the repository, read
+with gh (nothing when gh fails), with their titles as descriptions. zsh and
+fish show the descriptions; bash shows them as `<n>  (<title>)` when several
+candidates are listed.
 
 The fish completion needs fish 3.1 or later. With fish older than 4.0,
 `~` in a previous word is not expanded: `sheaf --bundle ~/b path <TAB>`

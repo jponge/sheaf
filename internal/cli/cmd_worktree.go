@@ -122,10 +122,10 @@ func selectorFlags(cmd *cobra.Command) func() (*ops.WorktreeTarget, error) {
 
 func newWorktreeAddCmd(d Deps) *cobra.Command {
 	var opts ops.WorktreeAddOptions
-	var tag string
+	var tag, issue string
 	cmd := &cobra.Command{
-		Use:   "add [<repo>] <branch> | add [<repo>] --tag <tag>",
-		Short: "Create a worktree for a branch or a tag and print its path",
+		Use:   "add [<repo>] (<branch> | --tag <tag> | --issue <n>)",
+		Short: "Create a worktree for a branch, tag or issue; print its path",
 		Long: "Create <bundle>/<repo>/<normalized branch>/ for branch: the local branch if it\n" +
 			"exists, else a local branch tracking origin/<branch>, else a new branch from --base\n" +
 			"(default origin/<default branch>, upstream/<default branch> for a clone of your\n" +
@@ -140,12 +140,27 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 			"nor overwritten: a local tag that differs from origin's is kept, with a warning\n" +
 			"(and used, if it is the requested one). The only positional argument is then\n" +
 			"the repository.\n\n" +
+			"With --issue (GitHub repositories only; #<n> is accepted), use the branch of\n" +
+			"issue n: an existing local or remote branch issue/<n> or issue/<n>-*, else a\n" +
+			"new branch issue/<n>-<slug> from --base, <slug> being the title read with gh\n" +
+			"(from the repository, not your fork) in lowercase ASCII words joined by -, at\n" +
+			"most 50 characters. A pull request number is refused: use wt pr. The only\n" +
+			"positional argument is then the repository.\n\n" +
 			"For a repository cloned from your fork, upstream (the repository) and origin (your\n" +
 			"fork) are both fetched, existing branches are looked up on origin then upstream,\n" +
 			"new branches start from upstream/<default branch> and tags come from upstream.\n\n" +
 			"The path is printed on stdout (cd \"$(sheaf wt add feat/x)\"); progress goes to stderr.\n\n" +
 			singleArgHelp,
 		Args: func(c *cobra.Command, args []string) error {
+			if c.Flags().Changed("issue") {
+				if c.Flags().Changed("tag") {
+					return errors.New("--issue and --tag are mutually exclusive")
+				}
+				if len(args) > 1 {
+					return fmt.Errorf("with --issue, expected at most 1 argument (the repository), got %d", len(args))
+				}
+				return nil
+			}
 			if c.Flags().Changed("tag") {
 				if len(args) > 1 {
 					return fmt.Errorf("with --tag, expected at most 1 argument (the repository), got %d", len(args))
@@ -155,9 +170,32 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 			return cobra.RangeArgs(1, 2)(c, args)
 		},
 		RunE: func(c *cobra.Command, args []string) error {
+			number := 0
+			if c.Flags().Changed("issue") {
+				n, err := parseNumber(issue, "issue")
+				if err != nil {
+					return err
+				}
+				number = n
+			}
 			w, err := openWorkspace(c, d)
 			if err != nil {
 				return err
+			}
+			if number != 0 {
+				repo, _, err := repoAndTarget(d, w, args, &ops.WorktreeTarget{Name: issue}, "--issue")
+				if err != nil {
+					return err
+				}
+				opts.Interactive = d.singleRepoInteractiveGit(c)
+				emit, stop := d.spinFetches(eventSink(c, repo, ops.PhaseWorktree), opts.Interactive)
+				res, err := ops.AddIssueWorktree(c.Context(), w, d.hosting(), repo, number, opts, emit)
+				stop()
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(c.OutOrStdout(), res.Path)
+				return nil
 			}
 			if c.Flags().Changed("tag") {
 				repo, target, err := repoAndTarget(d, w, args, &ops.WorktreeTarget{Name: tag}, "--tag")
@@ -193,6 +231,7 @@ func newWorktreeAddCmd(d Deps) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.NoFetch, "no-fetch", false, "do not fetch the repository's remotes first")
 	cmd.Flags().BoolVar(&opts.NoFetch, "offline", false, "same as --no-fetch")
 	cmd.Flags().StringVar(&tag, "tag", "", "create a detached worktree pinned at this tag instead of a branch worktree")
+	cmd.Flags().StringVar(&issue, "issue", "", "create a worktree on the branch of this GitHub issue")
 	return cmd
 }
 
@@ -623,15 +662,19 @@ func newWorktreePRCmd(d Deps) *cobra.Command {
 	}
 }
 
-// parsePRNumber accepts a positive decimal number without sign or leading
-// zero, optionally prefixed with '#'.
-func parsePRNumber(arg string) (int, error) {
+// parsePRNumber is parseNumber for a pull request number.
+func parsePRNumber(arg string) (int, error) { return parseNumber(arg, "pull request") }
+
+// parseNumber accepts a positive decimal number without sign or leading
+// zero, optionally prefixed with '#'; what names it in the error ("invalid
+// <what> number").
+func parseNumber(arg, what string) (int, error) {
 	digits := strings.TrimPrefix(arg, "#")
 	bad := digits == "" || digits[0] < '1' || digits[0] > '9' ||
 		strings.ContainsFunc(digits, func(r rune) bool { return r < '0' || r > '9' })
 	n, err := strconv.Atoi(digits)
 	if bad || err != nil {
-		return 0, fmt.Errorf("invalid pull request number %q", arg)
+		return 0, fmt.Errorf("invalid %s number %q", what, arg)
 	}
 	return n, nil
 }
